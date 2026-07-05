@@ -1,0 +1,711 @@
+package dev.yks
+
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+
+class UndoManagerTest {
+    @Test
+    fun undoAndRedoTextInsertion() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        text.insert(0, "abc")
+
+        assertTrue(undoManager.canUndo)
+        assertTrue(undoManager.canUndo())
+        assertEquals(3, assertNotNull(undoManager.undo()).insertedCount)
+        assertEquals("", text.toString())
+        assertTrue(undoManager.canRedo)
+        assertTrue(undoManager.canRedo())
+
+        undoManager.redo()
+
+        assertEquals("abc", text.toString())
+        assertEquals(YTextDelta().insert("abc"), text.toDelta())
+    }
+
+    @Test
+    fun undoAndRedoTextDeletion() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        text.insert(0, "abc")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        text.delete(1)
+
+        assertEquals("ac", text.toString())
+        assertEquals(1, assertNotNull(undoManager.undo()).deletedCount)
+        assertEquals("abc", text.toString())
+
+        undoManager.redo()
+
+        assertEquals("ac", text.toString())
+    }
+
+    @Test
+    fun undoAndRedoTextFormatting() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        text.insert(0, "abcd")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        text.format(1, 2, mapOf("bold" to true))
+
+        assertEquals(YTextDelta().insert("a").insert("bc", mapOf("bold" to true)).insert("d"), text.toDelta())
+        undoManager.undo()
+        assertEquals(YTextDelta().insert("abcd"), text.toDelta())
+        undoManager.redo()
+        assertEquals(YTextDelta().insert("a").insert("bc", mapOf("bold" to true)).insert("d"), text.toDelta())
+    }
+
+    @Test
+    fun undoDeletedTextFormattingSubrangeConvergesLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val peer = YDoc(clientId = 2)
+        val text = doc.getText("")
+        val peerText = peer.getText("")
+        val undoManager = UndoManager(text)
+
+        text.insert(0, "Attack ships on fire off the shoulder of Orion.")
+        peer.applyUpdate(doc.encodeStateAsUpdate())
+
+        text.format(13, 7, mapOf("bold" to true))
+        undoManager.stopCapturing()
+        peer.applyUpdate(doc.encodeStateAsUpdate(peer.encodeStateVector()))
+
+        text.format(16, 4, mapOf("bold" to null))
+        undoManager.stopCapturing()
+        peer.applyUpdate(doc.encodeStateAsUpdate(peer.encodeStateVector()))
+
+        undoManager.undo()
+        peer.applyUpdate(doc.encodeStateAsUpdate(peer.encodeStateVector()))
+
+        val expected = YTextDelta()
+            .insert("Attack ships ")
+            .insert("on fire", mapOf("bold" to true))
+            .insert(" off the shoulder of Orion.")
+        assertEquals(expected, text.toDelta())
+        assertEquals(expected, peerText.toDelta())
+    }
+
+    @Test
+    fun undoAndRedoTextEmbedInsertion() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val embed = mapOf("mention" to "Ada", "id" to 7L)
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        text.insertEmbed(0, embed, mapOf("kind" to "person"))
+
+        assertEquals(YTextDelta().insertEmbed(embed, mapOf("kind" to "person")), text.toDelta())
+        assertEquals(1, assertNotNull(undoManager.undo()).insertedCount)
+        assertEquals(YTextDelta(), text.toDelta())
+
+        undoManager.redo()
+
+        assertEquals(YTextDelta().insertEmbed(embed, mapOf("kind" to "person")), text.toDelta())
+    }
+
+    @Test
+    fun textScopedUndoCapturesEmbeddedSharedTypeChanges() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val button = doc.createMap()
+        button.setAttr("type", "button")
+        button.setAttr("test", true)
+        text.insert(0, listOf(button))
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 60_000))
+        undoManager.stopCapturing()
+
+        button.setAttr("type", "paragraph")
+        text.delete(0, 1)
+
+        undoManager.undo()
+
+        val restored = text.get(0) as YMap
+        assertEquals(mapOf("test" to true, "type" to "button"), restored.getAttrs())
+    }
+
+    @Test
+    fun undoAndRedoArrayOperations() {
+        val doc = YDoc(clientId = 1)
+        val array = doc.getArray("items")
+        array.push(listOf("a", "c"))
+        val undoManager = UndoManager(array, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        array.insert(1, listOf("b"))
+        array.delete(0)
+
+        assertEquals(listOf("b", "c"), array.toList())
+        undoManager.undo()
+        assertEquals(listOf("a", "b", "c"), array.toList())
+        undoManager.undo()
+        assertEquals(listOf("a", "c"), array.toList())
+        undoManager.redo()
+        assertEquals(listOf("a", "b", "c"), array.toList())
+    }
+
+    @Test
+    fun undoMapSetAndDelete() {
+        val doc = YDoc(clientId = 1)
+        val map = doc.getMap("meta")
+        map.set("title", "old")
+        map.set("count", 1)
+        val undoManager = UndoManager(map, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        map.set("title", "new")
+        assertEquals("new", map.get("title"))
+        undoManager.undo()
+        assertEquals("old", map.get("title"))
+        undoManager.redo()
+        assertEquals("new", map.get("title"))
+
+        map.delete("count")
+        assertEquals(mapOf("title" to "new"), map.toMap())
+        undoManager.undo()
+        assertEquals(mapOf("count" to 1L, "title" to "new"), map.toMap())
+    }
+
+    @Test
+    fun undoMapSetDoesNotOverwriteRemoteWinner() {
+        val left = YDoc(clientId = 1)
+        val right = YDoc(clientId = 2)
+        val leftMap = left.getMap("meta")
+        val rightMap = right.getMap("meta")
+
+        leftMap.set("title", "old")
+        syncDocs(left, right)
+
+        val undoManager = UndoManager(leftMap, UndoManagerOptions(captureTimeoutMillis = 0))
+        leftMap.set("title", "local")
+        syncDocs(left, right)
+
+        rightMap.set("title", "remote")
+        syncDocs(left, right)
+
+        undoManager.undo()
+        assertEquals("remote", leftMap.get("title"))
+
+        undoManager.redo()
+        assertEquals("remote", leftMap.get("title"))
+    }
+
+    @Test
+    fun undoMapSetCanIgnoreRemoteAttributeChangesWhenConfigured() {
+        val left = YDoc(clientId = 1)
+        val right = YDoc(clientId = 2)
+        val leftMap = left.getMap("meta")
+        val rightMap = right.getMap("meta")
+        val undoManager = UndoManager(
+            leftMap,
+            UndoManagerOptions(captureTimeoutMillis = 0, ignoreRemoteAttributeChanges = true),
+        )
+
+        leftMap.setAttr("x", 1)
+        syncDocs(left, right)
+        rightMap.setAttr("x", 2)
+        syncDocs(left, right)
+        leftMap.setAttr("x", 3)
+        syncDocs(left, right)
+        rightMap.setAttr("x", 4)
+        syncDocs(left, right)
+
+        undoManager.undo()
+        syncDocs(left, right)
+
+        assertEquals(2L, leftMap.getAttr("x"))
+        assertEquals(2L, rightMap.getAttr("x"))
+    }
+
+    @Test
+    fun undoMapSetAcceptsLegacyIgnoreRemoteMapChangesOptionName() {
+        val left = YDoc(clientId = 1)
+        val right = YDoc(clientId = 2)
+        val leftMap = left.getMap("meta")
+        val rightMap = right.getMap("meta")
+        val undoManager = UndoManager(
+            leftMap,
+            UndoManagerOptions(captureTimeoutMillis = 0, ignoreRemoteMapChanges = true),
+        )
+
+        leftMap.setAttr("x", 1)
+        syncDocs(left, right)
+        rightMap.setAttr("x", 2)
+        syncDocs(left, right)
+        leftMap.setAttr("x", 3)
+        syncDocs(left, right)
+        rightMap.setAttr("x", 4)
+        syncDocs(left, right)
+
+        undoManager.undo()
+        syncDocs(left, right)
+
+        assertEquals(2L, leftMap.getAttr("x"))
+        assertEquals(2L, rightMap.getAttr("x"))
+    }
+
+    @Test
+    fun undoRestoresRepeatedDeletedMapEntriesLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val map = doc.getMap("")
+        val undoManager = UndoManager(map, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        map.setAttr("a", "a")
+        map.deleteAttr("a")
+        map.setAttr("a", "b")
+        map.deleteAttr("a")
+        map.setAttr("a", "c")
+        map.deleteAttr("a")
+        map.setAttr("a", "d")
+
+        assertEquals(mapOf("a" to "d"), map.toMap())
+        undoManager.undo()
+        assertEquals(emptyMap(), map.toMap())
+        undoManager.undo()
+        assertEquals(mapOf("a" to "c"), map.toMap())
+        undoManager.undo()
+        assertEquals(emptyMap(), map.toMap())
+        undoManager.undo()
+        assertEquals(mapOf("a" to "b"), map.toMap())
+        undoManager.undo()
+        assertEquals(emptyMap(), map.toMap())
+        undoManager.undo()
+        assertEquals(mapOf("a" to "a"), map.toMap())
+    }
+
+    @Test
+    fun managerRespectsTypeScopeAndIgnoresRemoteUpdates() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val map = doc.getMap("meta")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        map.set("title", "outside")
+        assertFalse(undoManager.canUndo)
+
+        val remote = YDoc(clientId = 2)
+        remote.getText("body").insert(0, "remote")
+        doc.applyUpdate(remote.encodeStateAsUpdate())
+        assertFalse(undoManager.canUndo)
+        assertEquals("remote", text.toString())
+
+        text.insert(6, " local")
+        assertTrue(undoManager.canUndo)
+        undoManager.undo()
+        assertEquals("remote", text.toString())
+    }
+
+    @Test
+    fun stackItemEventsExposeMetadataIdsAndCurrentStackItemDuringUndo() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+        val addedEvents = mutableListOf<UndoManagerEvent>()
+        val poppedEvents = mutableListOf<UndoManagerEvent>()
+        var observedUndoMeta: Any? = null
+
+        undoManager.on("stack-item-added") { event ->
+            addedEvents.add(event)
+            if (event.type == UndoStackItemType.Undo) {
+                event.stackItem?.meta?.set("selection", "cursor:1")
+            }
+        }
+        undoManager.on("stack-item-popped") { event -> poppedEvents.add(event) }
+        text.observe { event ->
+            if (event.origin === undoManager) {
+                observedUndoMeta = undoManager.currStackItem?.meta?.get("selection")
+            }
+        }
+
+        text.insert(0, "a")
+        val undoStackItem = assertNotNull(addedEvents.single().stackItem)
+
+        assertEquals(UndoStackItemType.Undo, addedEvents.single().type)
+        assertTrue(addedEvents.single().changedParentTypes.contains(text))
+        assertTrue(undoStackItem.inserts.has(1, 0))
+        assertTrue(undoStackItem.deletes.isEmpty())
+
+        val popped = assertNotNull(undoManager.undo())
+
+        assertEquals("cursor:1", popped.meta["selection"])
+        assertEquals("cursor:1", observedUndoMeta)
+        assertEquals("", text.toString())
+        assertEquals(null, undoManager.currStackItem)
+        assertEquals(UndoStackItemType.Undo, poppedEvents.single().type)
+        assertTrue(poppedEvents.single().origin === undoManager)
+        assertTrue(poppedEvents.single().changedParentTypes.contains(text))
+        assertEquals(2, addedEvents.size)
+        assertEquals(UndoStackItemType.Redo, addedEvents.last().type)
+        assertTrue(addedEvents.last().changedParentTypes.contains(text))
+        assertTrue(undoManager.canRedo)
+    }
+
+    @Test
+    fun currentStackItemAndModeFlagsAreVisibleWhileUndoingAndRedoing() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("text")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+        var metaUndo: Any? = null
+        var metaRedo: Any? = null
+
+        undoManager.on("stack-item-added") { event ->
+            event.stackItem?.meta?.set("str", "42")
+        }
+        text.observe { event ->
+            val origin = event.origin as? UndoManager
+            when {
+                origin === undoManager && origin.undoing -> metaUndo = origin.currStackItem?.meta?.get("str")
+                origin === undoManager && origin.redoing -> metaRedo = origin.currStackItem?.meta?.get("str")
+            }
+        }
+
+        text.insert(0, "abc")
+        undoManager.undo()
+        undoManager.redo()
+
+        assertEquals("42", metaUndo)
+        assertEquals("42", metaRedo)
+        assertEquals(null, undoManager.currStackItem)
+        assertFalse(undoManager.undoing)
+        assertFalse(undoManager.redoing)
+    }
+
+    @Test
+    fun publicUndoRedoStacksAcceptIdSetStackItems() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        text.insert(0, "abc")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        undoManager.undoStack.add(StackItem(idSet(1, 1, 1), createIdSet()))
+
+        assertEquals(1, undoManager.undoStack.size)
+        assertTrue(undoManager.canUndo)
+        assertTrue(undoManager.canUndo())
+
+        val deleted = assertNotNull(undoManager.undo())
+
+        assertEquals("ac", text.toString())
+        assertTrue(deleted.inserts.has(1, 1))
+        assertEquals(0, undoManager.undoStack.size)
+        assertEquals(1, undoManager.redoStack.size)
+        assertTrue(undoManager.canRedo)
+        assertTrue(undoManager.canRedo())
+
+        assertNotNull(undoManager.redo())
+
+        assertEquals("abc", text.toString())
+
+        text.delete(1)
+        undoManager.clear()
+        undoManager.undoStack.add(StackItem(createIdSet(), idSet(1, 1, 1)))
+
+        val restored = assertNotNull(undoManager.undo())
+
+        assertEquals("abc", text.toString())
+        assertTrue(restored.deletes.has(1, 1))
+    }
+
+    @Test
+    fun destroyStopsCapturingTransactions() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        text.insert(0, "a")
+        undoManager.destroy()
+        text.insert(1, "b")
+
+        assertEquals(1, undoManager.undoStackSize)
+        assertEquals("ab", text.toString())
+    }
+
+    @Test
+    fun stackItemUpdatedEventPreservesMetadataWhenCapturesMerge() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 60_000))
+        val eventNames = mutableListOf<String>()
+
+        undoManager.on("stack-item-added") { event ->
+            eventNames.add("added")
+            event.stackItem?.meta?.set("batch", "typing")
+        }
+        undoManager.on("stack-item-updated") { event ->
+            eventNames.add("updated")
+            assertEquals("typing", event.stackItem?.meta?.get("batch"))
+            assertEquals(UndoStackItemType.Undo, event.type)
+        }
+
+        text.insert(0, "a")
+        text.insert(1, "b")
+
+        assertEquals(listOf("added", "updated"), eventNames)
+        assertEquals(1, undoManager.undoStackSize)
+        assertEquals("typing", assertNotNull(undoManager.undo()).meta["batch"])
+        assertEquals("", text.toString())
+    }
+
+    @Test
+    fun publicStackItemConstructorStoresInsertionAndDeletionIdSets() {
+        val insertions = idSet(1, 0, 2)
+        val deletions = idSet(2, 3, 1)
+        val stackItem = StackItem(insertions, deletions)
+        stackItem.meta["selection"] = "cursor"
+
+        insertions.add(1, 10, 1)
+        stackItem.inserts.add(1, 20, 1)
+
+        assertEquals(2, stackItem.insertedCount)
+        assertEquals(1, stackItem.deletedCount)
+        assertTrue(stackItem.inserts.has(1, 0))
+        assertTrue(stackItem.inserts.has(1, 1))
+        assertFalse(stackItem.inserts.has(1, 10))
+        assertFalse(stackItem.inserts.has(1, 20))
+        assertTrue(stackItem.deletes.has(2, 3))
+        assertFalse(stackItem.isEmpty)
+        assertEquals("cursor", stackItem.meta["selection"])
+        assertTrue(StackItem(createIdSet(), createIdSet()).isEmpty)
+    }
+
+    @Test
+    fun stackClearedEventReportsWhichStacksWereClearedAndCanUnsubscribe() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+        val clearEvents = mutableListOf<UndoManagerEvent>()
+        val subscription = undoManager.on("stack-cleared") { event -> clearEvents.add(event) }
+
+        text.insert(0, "a")
+        undoManager.undo()
+        undoManager.clear(clearUndoStack = false, clearRedoStack = true)
+
+        assertEquals(false, clearEvents.single().undoStackCleared)
+        assertEquals(true, clearEvents.single().redoStackCleared)
+
+        subscription.close()
+        text.insert(0, "b")
+        undoManager.clear()
+
+        assertEquals(1, clearEvents.size)
+    }
+
+    @Test
+    fun onceListenerOnlyHandlesFirstMatchingStackEvent() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+        val seen = mutableListOf<UndoStackItemType?>()
+
+        undoManager.once("stack-item-added") { event -> seen.add(event.type) }
+
+        text.insert(0, "a")
+        text.insert(1, "b")
+
+        assertEquals(listOf<UndoStackItemType?>(UndoStackItemType.Undo), seen)
+        assertEquals(2, undoManager.undoStackSize)
+    }
+
+    @Test
+    fun trackedOriginsCanBeChangedAfterConstruction() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val undoManager = UndoManager(
+            text,
+            UndoManagerOptions(captureTimeoutMillis = 0, trackedOrigins = emptySet()),
+        )
+
+        text.insert(0, "ignored")
+        doc.transact(origin = "tracked") {
+            text.insert(text.length, " still-ignored")
+        }
+
+        assertFalse(undoManager.canUndo)
+
+        undoManager.addTrackedOrigin("tracked")
+        doc.transact(origin = "tracked") {
+            text.insert(text.length, " captured")
+        }
+
+        assertTrue(undoManager.canUndo)
+        undoManager.clear()
+        undoManager.removeTrackedOrigin("tracked")
+
+        doc.transact(origin = "tracked") {
+            text.insert(text.length, " ignored-again")
+        }
+
+        assertFalse(undoManager.canUndo)
+    }
+
+    @Test
+    fun deleteFilterCanKeepSelectedInsertedContentDuringUndo() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val undoManager = UndoManager(
+            text,
+            UndoManagerOptions(
+                captureTimeoutMillis = 0,
+                deleteFilter = { id -> id.clock != 0L },
+            ),
+        )
+
+        text.insert(0, "ab")
+
+        val undoStackItem = assertNotNull(undoManager.undo())
+
+        assertEquals("a", text.toString())
+        assertEquals(2, undoStackItem.insertedCount)
+        assertTrue(undoManager.canRedo)
+
+        val redoStackItem = assertNotNull(undoManager.redo())
+
+        assertEquals("ab", text.toString())
+        assertEquals(1, redoStackItem.deletedCount)
+        assertTrue(redoStackItem.deletes.has(1, 1))
+        assertFalse(redoStackItem.deletes.has(1, 0))
+    }
+
+    @Test
+    fun scopeCanBeExpandedAfterConstruction() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val map = doc.getMap("meta")
+        val array = doc.getArray("items")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        map.setAttr("outside", "ignored")
+        assertFalse(undoManager.canUndo)
+
+        undoManager.addToScope(map)
+        map.setAttr("title", "captured")
+
+        assertTrue(undoManager.canUndo)
+        undoManager.undo()
+        assertEquals(mapOf("outside" to "ignored"), map.toMap())
+
+        undoManager.addToScope(doc)
+        array.push("doc-wide")
+
+        assertTrue(undoManager.canUndo)
+        undoManager.undo()
+        assertEquals(emptyList(), array.toList())
+    }
+
+    @Test
+    fun rootScopeIncludesNestedTypesInsideMapAndListValues() {
+        val doc = YDoc(clientId = 1)
+        val root = doc.getMap("root")
+        val nested = doc.createMap()
+        root.setAttr("payload", mapOf("children" to listOf(nested)))
+        val undoManager = UndoManager(root, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        nested.setAttr("title", "captured")
+
+        assertTrue(undoManager.canUndo)
+        undoManager.undo()
+        assertEquals(emptyMap(), nested.toMap())
+    }
+
+    @Test
+    fun undoContentIdsDeletesSelectedInsertedContent() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        text.insert(0, "abc")
+
+        val stackItem = undoContentIds(
+            doc,
+            createContentIds(inserts = idSet(1, 1, 1)),
+        )
+
+        assertEquals("ac", text.toString())
+        assertEquals(1, assertNotNull(stackItem).insertedCount)
+        assertTrue(stackItem.inserts.has(1, 1))
+    }
+
+    @Test
+    fun undoContentIdsRestoresSelectedDeletedContent() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        text.insert(0, "abc")
+        text.delete(1)
+
+        val stackItem = undoContentIds(
+            doc,
+            createContentIds(deletes = idSet(1, 1, 1)),
+        )
+
+        assertEquals("abc", text.toString())
+        assertEquals(1, assertNotNull(stackItem).deletedCount)
+        assertTrue(stackItem.deletes.has(1, 1))
+    }
+
+    @Test
+    fun redoItemRestoresDeletedItemAndMarksItKept() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val text = doc.getText("body")
+        val origins = mutableListOf<Any?>()
+        doc.observeAfterTransactions { event ->
+            if (event.addedItemCount > 0 || event.deletedItemCount > 0) {
+                origins.add(event.origin)
+            }
+        }
+        text.insert(0, "abc", mapOf("bold" to true))
+        text.delete(1)
+        val deleted = getItemCleanStart(doc, Id(1, 1))
+        origins.clear()
+
+        var restored: Item? = null
+        doc.transact({ transaction ->
+            restored = redoItem(transaction, deleted)
+        }, origin = "redo-item")
+
+        val restoredItem = assertNotNull(restored)
+        assertEquals("abc", text.toString())
+        assertEquals(YTextDelta().insert("abc", mapOf("bold" to true)), text.toDelta())
+        assertEquals(listOf<Any?>("redo-item"), origins)
+        assertEquals(restoredItem.id, doc.followRedone(deleted.id))
+        assertEquals(restoredItem.id, assertNotNull(redoItem(doc, deleted)).id)
+
+        text.delete(1)
+
+        assertFalse(gcIdSet(doc, idSet(restoredItem.id.client, restoredItem.id.clock, restoredItem.length)).hasId(restoredItem.id))
+    }
+
+    @Test
+    fun undoContentIdsIgnoresContentIdsThatAreBothInsertedAndDeleted() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        text.insert(0, "x")
+        text.delete(0)
+
+        val stackItem = undoContentIds(
+            doc,
+            createContentIds(
+                inserts = idSet(1, 0, 1),
+                deletes = idSet(1, 0, 1),
+            ),
+        )
+
+        assertEquals("", text.toString())
+        assertEquals(null, stackItem)
+    }
+
+    private fun idSet(vararg triples: Long): IdSet {
+        require(triples.size % 3 == 0)
+        val idSet = createIdSet()
+        triples.asList().chunked(3).forEach { (client, clock, len) -> idSet.add(client, clock, len) }
+        return idSet
+    }
+
+    private fun syncDocs(vararg docs: YDoc) {
+        val updates = docs.map { doc -> doc.encodeStateAsUpdate() }
+        docs.forEach { target ->
+            updates.forEach { update -> target.applyUpdate(update) }
+        }
+    }
+}

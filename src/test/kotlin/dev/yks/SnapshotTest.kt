@@ -1,0 +1,310 @@
+package dev.yks
+
+import kotlin.test.Test
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+class SnapshotTest {
+    @Test
+    fun snapshotEncodingRoundTripsAndComparesStructurally() {
+        val doc = YDoc(clientId = 1)
+        doc.getArray("items").push(listOf("a", "b"))
+        doc.getArray("items").delete(0)
+
+        val snap = snapshot(doc)
+        val decoded = decodeSnapshot(encodeSnapshot(snap))
+
+        assertTrue(equalSnapshots(snap, decoded))
+        assertFalse(equalSnapshots(emptySnapshot, snap))
+    }
+
+    @Test
+    fun snapshotV1AndV2UseMatchingIdSetCodecs() {
+        val deleteSet = createIdSet().also { ids ->
+            ids.add(1, 2, 2)
+            ids.add(1, 8, 1)
+            ids.add(3, 1, 1)
+        }.toDeleteSet()
+        val snap = createSnapshot(deleteSet, mapOf(1L to 9L, 3L to 2L))
+
+        val encodedV1 = encodeSnapshot(snap)
+        val encodedV2 = encodeSnapshotV2(snap)
+
+        assertContentEquals(encodedV1, encodeSnapshotV2(snap, IdSetEncoderV1()))
+        assertFalse(encodedV1.contentEquals(encodedV2))
+        assertTrue(equalSnapshots(snap, decodeSnapshot(encodedV1)))
+        assertTrue(equalSnapshots(snap, decodeSnapshotV2(encodedV2)))
+        assertTrue(equalSnapshots(snap, decodeSnapshot(IdSetDecoderV1(encodedV1))))
+        assertTrue(equalSnapshots(snap, decodeSnapshotV2(IdSetDecoderV2(encodedV2))))
+    }
+
+    @Test
+    fun snapshotAcceptsPublicIdSetDeleteMetadata() {
+        val deleteIds = createIdSet().also { ids -> ids.add(1, 2, 2) }
+        val snap = createSnapshot(deleteIds, mapOf(1L to 4L))
+
+        deleteIds.add(1, 10, 1)
+
+        val direct = Snapshot(snap.ds, snap.sv)
+
+        assertTrue(snap.ds.hasId(Id(1, 2)))
+        assertTrue(snap.ds.hasId(Id(1, 3)))
+        assertFalse(snap.ds.hasId(Id(1, 10)))
+        assertTrue(snap.deleteSet.contains(Id(1, 2)))
+        assertTrue(equalSnapshots(snap, direct))
+    }
+
+    @Test
+    fun snapshotContainsUpdateTracksStructAndDeleteCoverage() {
+        val doc = YDoc(clientId = 1)
+        val updates = mutableListOf<ByteArray>()
+        doc.observeUpdates { update, _ -> updates.add(update) }
+        val array = doc.getArray("items")
+
+        val before = snapshot(doc)
+        array.push(listOf("a"))
+        val afterInsert = snapshot(doc)
+        array.delete(0)
+        val afterDelete = snapshot(doc)
+
+        assertFalse(snapshotContainsUpdate(before, updates[0]))
+        assertTrue(snapshotContainsUpdate(afterInsert, updates[0]))
+        assertFalse(snapshotContainsUpdate(afterInsert, updates[1]))
+        assertTrue(snapshotContainsUpdate(afterDelete, updates[0]))
+        assertTrue(snapshotContainsUpdate(afterDelete, updates[1]))
+    }
+
+    @Test
+    fun splitSnapshotAffectedStructsCachesSnapshotOnTransactionMeta() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        text.insert(0, "abc")
+        text.delete(1)
+        val snap = snapshot(doc)
+        text.insert(text.length, "d")
+
+        doc.transact({ transaction ->
+            splitSnapshotAffectedStructs(transaction, snap)
+            splitSnapshotAffectedStructs(transaction, snap)
+
+            val seen = transaction.meta[::splitSnapshotAffectedStructs] as Set<*>
+            assertEquals(1, seen.size)
+            assertTrue(snap in seen)
+
+            text.insert(text.length, "!")
+        })
+
+        assertEquals("acd!", text.toString())
+    }
+
+    @Test
+    fun createDocFromSnapshotRestoresEarlierArrayState() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val array = doc.getArray("items")
+        array.push(listOf("world"))
+        val snap = snapshot(doc)
+        array.insert(0, listOf("hello"))
+        array.delete(1)
+
+        val restored = createDocFromSnapshot(doc, snap)
+
+        assertEquals(listOf("world"), restored.getArray("items").toList())
+        assertEquals(listOf("hello"), doc.getArray("items").toList())
+    }
+
+    @Test
+    fun createDocFromEmptySnapshotIgnoresZeroClockStateVectorEntries() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val snap = snapshot(doc).copy(sv = mapOf(9999L to 0L))
+        doc.getArray("").insert(0, listOf("world"))
+
+        val restored = createDocFromSnapshot(doc, snap)
+        val latestRestored = createDocFromSnapshot(doc, snapshot(doc))
+
+        assertEquals(emptyList(), restored.getArray("").toArray())
+        assertEquals(listOf("world"), doc.getArray("").toArray())
+        assertEquals(listOf("world"), latestRestored.getArray("").toArray())
+    }
+
+    @Test
+    fun createDocFromSnapshotRestoresNestedSubtypeState() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val array = doc.getArray("array")
+        val nested = doc.createMap()
+        array.insert(0, listOf(nested))
+        nested.setAttr("key1", "value1")
+        val snap = snapshot(doc)
+
+        nested.setAttr("key2", "value2")
+
+        val restored = createDocFromSnapshot(doc, snap)
+        val restoredNested = restored.getArray("array").get(0) as YMap
+
+        assertEquals(mapOf("key1" to "value1"), restoredNested.getAttrs())
+        assertEquals(mapOf("key1" to "value1", "key2" to "value2"), nested.getAttrs())
+    }
+
+    @Test
+    fun createDocFromSnapshotRejectsGcEnabledOriginDocs() {
+        val doc = YDoc(clientId = 1)
+        doc.getArray("items").push(listOf("world"))
+        val snap = snapshot(doc)
+
+        val error = assertFailsWith<IllegalStateException> {
+            createDocFromSnapshot(doc, snap)
+        }
+
+        assertEquals("Garbage-collection must be disabled in `originDoc`!", error.message)
+    }
+
+    @Test
+    fun createDocFromSnapshotUsesMutableGcFlag() {
+        val doc = YDoc(clientId = 1)
+        val array = doc.getArray("items")
+        array.push(listOf("world"))
+        val snap = snapshot(doc)
+        array.push(listOf("later"))
+
+        doc.gc = false
+
+        val restored = createDocFromSnapshot(doc, snap)
+
+        assertEquals(listOf("world"), restored.getArray("items").toList())
+    }
+
+    @Test
+    fun snapshotContainsUpdateRejectsUpdatesWithNewerDeletesOnly() {
+        val local = YDoc(clientId = 1)
+        val remote = YDoc(clientId = 2)
+        local.getText("t").insert(0, "abcdefghij")
+        local.getText("t").delete(0, 3)
+        remote.applyUpdate(local.encodeStateAsUpdate())
+        val snap = snapshot(remote)
+
+        local.getText("t").delete(0, 3)
+        val update = local.encodeStateAsUpdate()
+
+        assertFalse(snapshotContainsUpdate(snap, update))
+    }
+
+    @Test
+    fun typeMapSnapshotHelpersReadHistoricalKeyValues() {
+        val doc = YDoc(clientId = 1)
+        val map = doc.getMap("meta")
+        map.setAttr("title", "old")
+        map.setAttr("nullable", null)
+        val initial = snapshot(doc)
+
+        map.setAttr("title", "new")
+        map.setAttr("count", 2)
+        val updated = snapshot(doc)
+
+        map.deleteAttr("title")
+        map.setAttr("nullable", "filled")
+        val deleted = snapshot(doc)
+
+        assertEquals("old", typeMapGetSnapshot(map, "title", initial))
+        assertEquals(null, typeMapGetSnapshot(map, "nullable", initial))
+        assertTrue(typeMapGetAllSnapshot(map, initial).containsKey("nullable"))
+        assertEquals(mapOf("nullable" to null, "title" to "old"), typeMapGetAllSnapshot(map, initial))
+        assertEquals("old", map.get("title", initial))
+        assertEquals("old", map.getAttr("title", initial))
+        assertTrue(map.has("title", initial))
+        assertEquals(mapOf("nullable" to null, "title" to "old"), map.getAttrs(initial))
+
+        assertEquals("new", typeMapGetSnapshot(map, "title", updated))
+        assertEquals(mapOf("count" to 2L, "nullable" to null, "title" to "new"), typeMapGetAllSnapshot(map, updated))
+        assertEquals(mapOf("count" to 2L, "nullable" to null, "title" to "new"), map.toMap(updated))
+
+        assertEquals(null, typeMapGetSnapshot(map, "title", deleted))
+        assertFalse(typeMapGetAllSnapshot(map, deleted).containsKey("title"))
+        assertEquals(mapOf("count" to 2L, "nullable" to "filled"), typeMapGetAllSnapshot(map, deleted))
+        assertFalse(map.hasAttr("title", deleted))
+    }
+
+    @Test
+    fun sequenceSnapshotHelpersReadHistoricalArrayTextAndXml() {
+        val doc = YDoc(clientId = 1)
+        val array = doc.getArray("items")
+        val text = doc.getText("body")
+        val xml = doc.getXmlFragment("xml")
+
+        array.push("a", "b")
+        array.setAttr("role", "old-list")
+        text.insert(0, "hi", mapOf("bold" to true))
+        text.insertEmbed(2, mapOf("image" to "one"))
+        text.setAttr("lang", "en")
+        xml.push(listOf(YXmlElement("p").also { it.push(listOf(YXmlText("old"))) }))
+        xml.setAttr("kind", "old-xml")
+        val initial = snapshot(doc)
+
+        array.delete(0)
+        array.push("c")
+        array.setAttr("role", "new-list")
+        text.format(0, 2, mapOf("bold" to null))
+        text.delete(1, 1)
+        text.deleteAttr("lang")
+        xml.delete(0)
+        xml.push(listOf(YXmlText("new")))
+        xml.setAttr("kind", "new-xml")
+        val updated = snapshot(doc)
+
+        assertEquals(listOf("a", "b"), typeArrayToArraySnapshot(array, initial))
+        assertEquals("old-list", array.getAttr("role", initial))
+        assertEquals(mapOf("role" to "old-list"), array.getAttrs(initial))
+        assertEquals(
+            YTextDelta()
+                .insert("hi", mapOf("bold" to true))
+                .insertEmbed(mapOf("image" to "one")),
+            typeTextToDeltaSnapshot(text, initial),
+        )
+        assertEquals("hi\uFFFC", typeTextToStringSnapshot(text, initial))
+        assertEquals(listOf("h", "i", mapOf("image" to "one")), typeTextToArraySnapshot(text, initial))
+        assertEquals("en", text.getAttribute("lang", initial))
+        assertTrue(text.hasAttribute("lang", initial))
+        assertEquals(
+            listOf(mapOf(
+                "nodeName" to "p",
+                "attributes" to emptyMap<String, Any?>(),
+                "children" to listOf("old"),
+            )),
+            typeXmlFragmentToJsonSnapshot(xml, initial),
+        )
+        assertEquals("<xml kind=\"old-xml\"><p>old</p></xml>", typeXmlFragmentToStringSnapshot(xml, initial))
+        assertEquals("<p>old</p>", typeXmlFragmentToArraySnapshot(xml, initial).joinToString(separator = ""))
+        assertEquals("<p>old</p>", typeXmlFragmentToDeltaSnapshot(xml, initial).single().insert!!.joinToString(separator = ""))
+        assertEquals(mapOf("kind" to "old-xml"), xml.getAttrs(initial))
+
+        assertEquals(listOf("b", "c"), typeArrayToArraySnapshot(array, updated))
+        assertEquals("new-list", array.getAttr("role", updated))
+        assertEquals(YTextDelta().insert("h").insertEmbed(mapOf("image" to "one")), typeTextToDeltaSnapshot(text, updated))
+        assertEquals("h\uFFFC", typeTextToStringSnapshot(text, updated))
+        assertEquals(listOf("h", mapOf("image" to "one")), typeTextToArraySnapshot(text, updated))
+        assertFalse(text.hasAttr("lang", updated))
+        assertEquals(listOf("new"), typeXmlFragmentToJsonSnapshot(xml, updated))
+        assertEquals("<xml kind=\"new-xml\">new</xml>", typeXmlFragmentToStringSnapshot(xml, updated))
+        assertEquals("new", typeXmlFragmentToArraySnapshot(xml, updated).joinToString(separator = ""))
+        assertEquals("new", typeXmlFragmentToDeltaSnapshot(xml, updated).single().insert!!.joinToString(separator = ""))
+        assertEquals("new-xml", xml.getAttr("kind", updated))
+    }
+
+    @Test
+    fun xmlSnapshotArraysAndDeltasReturnDefensiveNodes() {
+        val doc = YDoc(clientId = 1)
+        val xml = doc.getXmlFragment("xml")
+        xml.push(listOf(YXmlElement("p").also { it.push(listOf(YXmlText("old"))) }))
+        val snap = snapshot(doc)
+
+        val arrayNode = typeXmlFragmentToArraySnapshot(xml, snap).single() as YXmlElement
+        val deltaNode = typeXmlFragmentToDeltaSnapshot(xml, snap).single().insert!!.single() as YXmlElement
+        arrayNode.setAttr("changed", true)
+        deltaNode.setAttr("changed", true)
+
+        assertEquals("<p>old</p>", typeXmlFragmentToStringSnapshot(xml, snap))
+        assertEquals("<xml><p>old</p></xml>", typeXmlFragmentToStringSnapshot(xml, snap, forceTag = true))
+        assertEquals("<p>old</p>", xml.toString())
+    }
+}

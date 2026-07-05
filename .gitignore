@@ -1,0 +1,7 @@
+.gradle/
+.kotlin/
+.mise-cache/
+.mise-data/
+build/
+out/
+
