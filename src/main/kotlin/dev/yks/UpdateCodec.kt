@@ -60,7 +60,12 @@ internal object UpdateCodec {
                 writeYValue(encoder, content.value)
             }
             is ItemContent.Text -> {
-                encoder.writeByte(1)
+                if (content.kind == RootKind.Text) {
+                    encoder.writeByte(1)
+                } else {
+                    encoder.writeByte(9)
+                    writeRootKind(encoder, content.kind)
+                }
                 encoder.writeVarUInt(content.value.single().code.toLong())
                 writeAttributes(encoder, content.attributes)
                 writeAttributes(encoder, content.baseAttributes)
@@ -70,11 +75,22 @@ internal object UpdateCodec {
                 writeYValue(encoder, content.value)
             }
             is ItemContent.XmlNode -> {
-                encoder.writeByte(3)
-                writeXmlNodeValue(encoder, content.value)
+                if (content.kind == RootKind.XmlFragment) {
+                    encoder.writeByte(3)
+                    writeXmlNodeValue(encoder, content.value)
+                } else {
+                    encoder.writeByte(8)
+                    writeRootKind(encoder, content.kind)
+                    writeXmlNodeValue(encoder, content.value)
+                }
             }
             is ItemContent.TextEmbed -> {
-                encoder.writeByte(4)
+                if (content.kind == RootKind.Text) {
+                    encoder.writeByte(4)
+                } else {
+                    encoder.writeByte(10)
+                    writeRootKind(encoder, content.kind)
+                }
                 writeYValue(encoder, content.value)
                 writeAttributes(encoder, content.attributes)
                 writeAttributes(encoder, content.baseAttributes)
@@ -84,13 +100,24 @@ internal object UpdateCodec {
                 writeRootKind(encoder, content.kind)
             }
             is ItemContent.TextFormat -> {
-                encoder.writeByte(6)
+                if (content.kind == RootKind.Text) {
+                    encoder.writeByte(6)
+                } else {
+                    encoder.writeByte(11)
+                    writeRootKind(encoder, content.kind)
+                }
                 writeNullableId(encoder, content.target)
                 encoder.writeVarUInt(content.length)
                 writeAttributes(encoder, content.attributes)
                 writeAttributes(encoder, content.afterAttributes)
                 encoder.writeVarUInt(content.beforeAttributes.size.toLong())
                 content.beforeAttributes.forEach { attributes -> writeAttributes(encoder, attributes) }
+            }
+            is ItemContent.XmlType -> {
+                encoder.writeByte(7)
+                writeRootKind(encoder, content.kind)
+                writeYValue(encoder, content.ref)
+                encoder.writeString(content.nodeName)
             }
         }
     }
@@ -124,6 +151,38 @@ internal object UpdateCodec {
                 afterAttributes = readAttributes(decoder),
                 beforeAttributes = List(decoder.readVarUInt().toInt()) { readAttributes(decoder) },
             )
+            7 -> {
+                val kind = readRootKind(decoder)
+                val ref = readYValue(decoder) as? YValue.TypeRef ?: error("XML type child ref is missing")
+                ItemContent.XmlType(ref, decoder.readString(), kind)
+            }
+            8 -> {
+                val kind = readRootKind(decoder)
+                ItemContent.XmlNode(readXmlNodeValue(decoder), kind)
+            }
+            9 -> {
+                val kind = readRootKind(decoder)
+                val value = decoder.readVarUInt().toInt().toChar().toString()
+                val attributes = readAttributes(decoder)
+                ItemContent.Text(value, attributes, readAttributes(decoder), kind)
+            }
+            10 -> {
+                val kind = readRootKind(decoder)
+                val value = readYValue(decoder)
+                val attributes = readAttributes(decoder)
+                ItemContent.TextEmbed(value, attributes, readAttributes(decoder), kind)
+            }
+            11 -> {
+                val kind = readRootKind(decoder)
+                ItemContent.TextFormat(
+                    target = readNullableId(decoder) ?: error("text format target is missing"),
+                    length = decoder.readVarUInt(),
+                    attributes = readAttributes(decoder),
+                    afterAttributes = readAttributes(decoder),
+                    beforeAttributes = List(decoder.readVarUInt().toInt()) { readAttributes(decoder) },
+                    kind = kind,
+                )
+            }
             else -> error("unknown item content tag: $tag")
         }
         return StoreItem(id, origin, rightOrigin, parent, parentSub, content, deleted)

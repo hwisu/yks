@@ -304,9 +304,11 @@ class UndoManager private constructor(
                 currentId == source.id || currentId in insertedIdsToDelete
             }
             var restoredItems = emptyList<StoreItem>()
+            var deletedItems = emptyList<StoreItem>()
             var changedParentTypes = emptySet<AbstractYType>()
             val changedTypesSubscription = doc.observeAfterTransactions { event ->
                 if (event.origin === this) {
+                    deletedItems = event.deletedItems
                     changedParentTypes = event.changedParentTypes
                 }
             }
@@ -322,7 +324,7 @@ class UndoManager private constructor(
                 reverseStackItem = normalizeStackItem(
                     StackItem(
                         insertedItems = restoredItems.map { it.copy(deleted = false) },
-                        deletedItems = insertedItemsToDelete.map(doc::restoreItemAtCurrentPosition),
+                        deletedItems = deletedItems.map(doc::restoreItemAtCurrentPosition),
                     ),
                 ),
                 changedParentTypes = changedParentTypes,

@@ -134,4 +134,33 @@ class YTypeCloneTest {
             target.toJson(),
         )
     }
+
+    @Test
+    fun xmlFragmentClonePreservesLiveNestedXmlAndTextChildren() {
+        val source = YDoc(clientId = 1)
+        val xml = source.getXmlFragment("xml")
+        val paragraph = source.createXmlElement("p")
+        val text = source.createText()
+        text.insert(0, "hello")
+        text.format(0, 5, mapOf("bold" to true))
+        paragraph.push(text)
+        xml.push(paragraph)
+
+        val target = YDoc(clientId = 2)
+        val clone = xml.clone(target)
+        val clonedParagraph = clone.getType(0) as YXmlElementType
+        val clonedText = clonedParagraph.getType(0) as YText
+        clonedText.insert(clonedText.length, "!")
+
+        assertEquals("<p>hello</p>", xml.toString())
+        assertEquals("<p>hello!</p>", clone.toString())
+        assertEquals(
+            YTextDelta().insert("hello", mapOf("bold" to true)).insert("!"),
+            clonedText.toDelta(),
+        )
+        assertEquals(
+            YTextDelta().insert("hello", mapOf("bold" to true)),
+            text.toDelta(),
+        )
+    }
 }

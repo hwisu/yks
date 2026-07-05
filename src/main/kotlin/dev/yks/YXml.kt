@@ -24,39 +24,325 @@ class YXmlText(private val text: String) : YXmlNode() {
     override fun toString(): String = escapeText(text)
 }
 
-internal class YXmlElementType internal constructor(
+class YXmlElementType internal constructor(
     doc: YDoc,
-    val nodeName: String,
+    name: String,
+    val nodeName: String = name,
     kind: RootKind = RootKind.XmlElement,
-) : AbstractYType(doc, nodeName, kind) {
+) : AbstractYType(doc, name, kind), Iterable<Any?> {
+    internal constructor(
+        doc: YDoc,
+        nodeName: String,
+        kind: RootKind,
+    ) : this(doc, nodeName, nodeName, kind)
+
     init {
         require(kind == RootKind.XmlElement || kind == RootKind.XmlHook) { "kind must be an XML element type ref" }
         require(nodeName.isNotBlank()) { "XML element name must not be blank" }
     }
 
-    fun clone(targetDoc: YDoc = doc): YXmlElementType = YXmlElementType(targetDoc, nodeName, kind)
+    val length: Int get() = xmlItems().size
+
+    val attrSize: Int get() = getAttrs().size
+
+    fun setAttr(key: String, value: Any?): Any? = doc.setTypeAttribute(name, key, value)
+
+    fun setAttribute(key: String, value: Any?): Any? = setAttr(key, value)
+
+    fun setAttrs(values: Map<String, Any?>): YXmlElementType {
+        doc.transact {
+            values.toSortedMap().forEach { (key, value) -> setAttr(key, value) }
+        }
+        return this
+    }
+
+    fun getAttr(key: String): Any? = doc.typeAttribute(name, key)
+
+    fun getAttr(key: String, snapshot: Snapshot): Any? =
+        doc.mapValueAtSnapshot(this, key, snapshot)?.let(doc::valueToAny)
+
+    fun getAttribute(key: String): Any? = getAttr(key)
+
+    fun getAttribute(key: String, snapshot: Snapshot): Any? = getAttr(key, snapshot)
+
+    fun getAttrs(): Map<String, Any?> = doc.typeAttributes(name)
+
+    fun getAttrs(snapshot: Snapshot): Map<String, Any?> =
+        doc.mapAtSnapshot(this, snapshot).mapValues { (_, value) -> doc.valueToAny(value) }
+
+    fun attrKeys(): Set<String> = getAttrs().keys
+
+    fun attrValues(): Collection<Any?> = getAttrs().values
+
+    fun attrEntries(): Set<Map.Entry<String, Any?>> = getAttrs().entries
+
+    fun <T> mapAttrs(transform: (value: Any?, key: String) -> T): List<T> {
+        return getAttrs().map { (key, value) -> transform(value, key) }
+    }
+
+    fun <T> mapAttrs(transform: (value: Any?, key: String, type: YXmlElementType) -> T): List<T> {
+        return getAttrs().map { (key, value) -> transform(value, key, this) }
+    }
+
+    fun forEachAttr(action: (value: Any?, key: String) -> Unit) {
+        getAttrs().forEach { (key, value) -> action(value, key) }
+    }
+
+    fun forEachAttr(action: (value: Any?, key: String, type: YXmlElementType) -> Unit) {
+        getAttrs().forEach { (key, value) -> action(value, key, this) }
+    }
+
+    fun hasAttr(key: String): Boolean = doc.hasTypeAttribute(name, key)
+
+    fun hasAttr(key: String, snapshot: Snapshot): Boolean =
+        doc.mapValueAtSnapshot(this, key, snapshot) != null
+
+    fun hasAttribute(key: String): Boolean = hasAttr(key)
+
+    fun hasAttribute(key: String, snapshot: Snapshot): Boolean = hasAttr(key, snapshot)
+
+    fun deleteAttr(key: String) {
+        doc.deleteTypeAttribute(name, key)
+    }
+
+    fun deleteAttribute(key: String) {
+        deleteAttr(key)
+    }
+
+    fun removeAttribute(key: String) {
+        deleteAttr(key)
+    }
+
+    fun clearAttrs() {
+        doc.transact {
+            getAttrs().keys.forEach(::deleteAttr)
+        }
+    }
+
+    fun insert(index: Int, nodes: List<YXmlNode>) {
+        if (nodes.isEmpty()) return
+        val start = index.coerceAtLeast(0)
+        require(start <= length) { "insert index is out of bounds" }
+        doc.transact {
+            val anchors = doc.insertionAnchors(name, kind, start)
+            var origin = anchors.first
+            val rightOrigin = anchors.second
+            nodes.forEach { node ->
+                val item = StoreItem(
+                    id = doc.nextId(),
+                    origin = origin,
+                    rightOrigin = rightOrigin,
+                    parent = name,
+                    parentSub = null,
+                    content = ItemContent.XmlNode(node.toValue(), kind),
+                )
+                doc.integrateLocal(item)
+                origin = item.id
+            }
+        }
+    }
+
+    fun insertType(index: Int, type: AbstractYType) {
+        insertTypes(index, listOf(type))
+    }
+
+    fun insertTypes(index: Int, types: List<AbstractYType>) {
+        if (types.isEmpty()) return
+        val start = index.coerceAtLeast(0)
+        require(start <= length) { "insert index is out of bounds" }
+        doc.transact {
+            val anchors = doc.insertionAnchors(name, kind, start)
+            var origin = anchors.first
+            val rightOrigin = anchors.second
+            types.forEach { type ->
+                val ref = doc.storeValue(type) as YValue.TypeRef
+                val local = doc.valueToAny(ref) as AbstractYType
+                val item = StoreItem(
+                    id = doc.nextId(),
+                    origin = origin,
+                    rightOrigin = rightOrigin,
+                    parent = name,
+                    parentSub = null,
+                    content = ItemContent.XmlType(ref, local.xmlNodeNameOrEmpty(), kind),
+                )
+                doc.integrateLocal(item)
+                origin = item.id
+            }
+        }
+    }
+
+    fun push(nodes: List<YXmlNode>) {
+        insert(length, nodes)
+    }
+
+    fun push(vararg nodes: YXmlNode) {
+        push(nodes.toList())
+    }
+
+    fun push(vararg types: AbstractYType) {
+        insertTypes(length, types.toList())
+    }
+
+    fun pushTypes(types: List<AbstractYType>) {
+        insertTypes(length, types)
+    }
+
+    fun unshift(nodes: List<YXmlNode>) {
+        insert(0, nodes)
+    }
+
+    fun unshift(vararg nodes: YXmlNode) {
+        unshift(nodes.toList())
+    }
+
+    fun unshift(vararg types: AbstractYType) {
+        insertTypes(0, types.toList())
+    }
+
+    fun unshiftTypes(types: List<AbstractYType>) {
+        insertTypes(0, types)
+    }
+
+    fun delete(index: Int, length: Int = 1) {
+        doc.deleteVisible(name, index, length)
+    }
+
+    fun clear() {
+        delete(0, length)
+    }
+
+    fun get(index: Int): Any? {
+        if (index < 0) return null
+        return toArray().getOrNull(index)
+    }
+
+    fun getType(index: Int): AbstractYType? {
+        return get(index) as? AbstractYType
+    }
+
+    fun slice(start: Int = 0, end: Int = length): List<Any?> {
+        val values = toArray()
+        val normalizedStart = normalizeXmlSliceIndex(start, values.size)
+        val normalizedEnd = normalizeXmlSliceIndex(end, values.size)
+        if (normalizedEnd <= normalizedStart) return emptyList()
+        return values.subList(normalizedStart, normalizedEnd)
+    }
+
+    fun toList(): List<Any?> = toArray()
+
+    fun toArray(): List<Any?> = xmlItems().map { it.content.toXmlChild(doc) }
+
+    fun toDelta(): List<YArrayDeltaOp> {
+        val values = toArray()
+        return if (values.isEmpty()) emptyList() else listOf(YArrayDeltaOp(insert = values))
+    }
+
+    fun toDeltaDeep(renderer: AbstractRenderer = activeRenderer): YXmlElementDeepDelta =
+        renderXmlElementDeepDelta(this, DeepDeltaRenderOptions(renderer = renderer))
+
+    fun applyDeltaDeep(delta: YXmlElementDeepDelta, origin: Any? = null) {
+        require(delta.nodeName == nodeName) { "XML deep-delta nodeName '${delta.nodeName}' does not match '$nodeName'" }
+        doc.transact(origin = origin) {
+            clear()
+            clearAttrs()
+            setAttrs(delta.attrs.fromDeepDeltaValues(doc))
+            val children = delta.children.map { child ->
+                child.toXmlChildFromDeepDeltaValue(doc)
+            }
+            if (children.isNotEmpty()) {
+                applyDelta(listOf(YArrayDeltaOp(insert = children)))
+            }
+        }
+    }
+
+    fun applyDelta(delta: List<YArrayDeltaOp>, origin: Any? = null) {
+        doc.transact(origin = origin) {
+            var index = 0
+            delta.forEach { op ->
+                when {
+                    op.retain != null -> index += op.retain
+                    op.delete != null -> delete(index, op.delete)
+                    op.insert != null -> index += insertDeltaValues(index, op.insert)
+                }
+            }
+        }
+    }
+
+    fun clone(targetDoc: YDoc = doc): YXmlElementType =
+        targetDoc.createXmlElementType(nodeName, kind).also { cloned ->
+            cloneXmlChildrenInto(cloned, targetDoc)
+            cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
+        }
+
+    internal fun toNode(): YXmlElement =
+        YXmlElement(nodeName).also { element ->
+            element.setAttrs(getAttrs())
+            element.push(toNodeList())
+        }
 
     override fun toJson(): Map<String, Any?> = linkedMapOf(
         "nodeName" to nodeName,
-        "attributes" to emptyMap<String, Any?>(),
-        "children" to emptyList<Any?>(),
+        "attributes" to getAttrs(),
+        "children" to toNodeList().map { it.toJson() },
     )
 
-    override fun toJSON(): Map<String, Any?> = yTypeJsonObject(name = nodeName)
+    override fun toJSON(): Map<String, Any?> = yTypeJsonObject(
+        name = nodeName,
+        children = toArray().map(::toYTypeJsonValue),
+        attrs = getAttrs().mapValues { (_, value) -> toYTypeJsonValue(value) },
+    )
 
-    override fun toString(): String = "<$nodeName />"
+    fun toString(forceTag: Boolean): String {
+        val attrs = xmlAttrsToString(getAttrs())
+        val body = toNodeList().joinToString(separator = "") { it.toString() }
+        if (body.isEmpty()) return "<$nodeName$attrs />"
+        return "<$nodeName$attrs>$body</$nodeName>"
+    }
+
+    override fun toString(): String = toString(forceTag = false)
+
+    override fun iterator(): Iterator<Any?> = toArray().iterator()
+
+    private fun xmlItems(): List<StoreItem> =
+        doc.visibleSequence(name).filter { it.content.isXmlSequenceChild() && it.content.kind == kind }
+
+    private fun toNodeList(): List<YXmlNode> = xmlItems().map { it.content.toXmlNode(doc) }
+
+    private fun cloneXmlChildrenInto(target: YXmlElementType, targetDoc: YDoc) {
+        xmlItems().forEach { item ->
+            when (val content = item.content) {
+                is ItemContent.XmlNode -> target.push(content.value.toNode())
+                is ItemContent.XmlType -> {
+                    val cloned = doc.typeFromXmlType(content).cloneValueInto(targetDoc) as AbstractYType
+                    target.push(cloned)
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    private fun insertDeltaValues(index: Int, values: List<Any?>): Int {
+        var insertionIndex = index
+        values.forEach { value ->
+            when (value) {
+                is AbstractYType -> insertType(insertionIndex, value)
+                else -> insert(insertionIndex, listOf(xmlNodeFromDeltaValue(value)))
+            }
+            insertionIndex++
+        }
+        return values.size
+    }
 }
 
-internal class YXmlTextType internal constructor(
+class YXmlTextType internal constructor(
     doc: YDoc,
-) : AbstractYType(doc, "", RootKind.XmlText) {
-    fun clone(targetDoc: YDoc = doc): YXmlTextType = YXmlTextType(targetDoc)
-
-    override fun toJson(): String = ""
-
-    override fun toJSON(): String = ""
-
-    override fun toString(): String = ""
+    name: String = "",
+) : YText(doc, name, RootKind.XmlText) {
+    override fun clone(targetDoc: YDoc): YXmlTextType = targetDoc.createXmlTextType()
+        .also { cloned ->
+            cloned.applyDelta(toDelta().cloneInto(targetDoc))
+            cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
+        }
 }
 
 class YXmlElement(val nodeName: String) : YXmlNode(), Iterable<YXmlNode> {
@@ -287,7 +573,7 @@ class YXmlElement(val nodeName: String) : YXmlNode(), Iterable<YXmlNode> {
 
 class YXmlFragment internal constructor(doc: YDoc, name: String) :
     AbstractYType(doc, name, RootKind.XmlFragment),
-    Iterable<YXmlNode> {
+    Iterable<Any?> {
     constructor() : this(YDoc(), "")
 
     constructor(nodes: Collection<YXmlNode>) : this() {
@@ -323,6 +609,35 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
         }
     }
 
+    fun insertType(index: Int, type: AbstractYType) {
+        insertTypes(index, listOf(type))
+    }
+
+    fun insertTypes(index: Int, types: List<AbstractYType>) {
+        if (types.isEmpty()) return
+        val start = index.coerceAtLeast(0)
+        require(start <= length) { "insert index is out of bounds" }
+        doc.transact {
+            val anchors = doc.insertionAnchors(name, RootKind.XmlFragment, start)
+            var origin = anchors.first
+            val rightOrigin = anchors.second
+            types.forEach { type ->
+                val ref = doc.storeValue(type) as YValue.TypeRef
+                val local = doc.valueToAny(ref) as AbstractYType
+                val item = StoreItem(
+                    id = doc.nextId(),
+                    origin = origin,
+                    rightOrigin = rightOrigin,
+                    parent = name,
+                    parentSub = null,
+                    content = ItemContent.XmlType(ref, local.xmlNodeNameOrEmpty(), RootKind.XmlFragment),
+                )
+                doc.integrateLocal(item)
+                origin = item.id
+            }
+        }
+    }
+
     fun push(nodes: List<YXmlNode>) {
         insert(length, nodes)
     }
@@ -331,12 +646,28 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
         push(nodes.toList())
     }
 
+    fun push(vararg types: AbstractYType) {
+        insertTypes(length, types.toList())
+    }
+
+    fun pushTypes(types: List<AbstractYType>) {
+        insertTypes(length, types)
+    }
+
     fun unshift(nodes: List<YXmlNode>) {
         insert(0, nodes)
     }
 
     fun unshift(vararg nodes: YXmlNode) {
         unshift(nodes.toList())
+    }
+
+    fun unshift(vararg types: AbstractYType) {
+        insertTypes(0, types.toList())
+    }
+
+    fun unshiftTypes(types: List<AbstractYType>) {
+        insertTypes(0, types)
     }
 
     fun delete(index: Int, length: Int = 1) {
@@ -417,26 +748,30 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
         }
     }
 
-    fun get(index: Int): YXmlNode? {
+    fun get(index: Int): Any? {
         if (index < 0) return null
-        return toList().getOrNull(index)
+        return toArray().getOrNull(index)
     }
 
-    fun slice(start: Int = 0, end: Int = length): List<YXmlNode> {
-        val nodes = toList()
-        val normalizedStart = normalizeXmlSliceIndex(start, nodes.size)
-        val normalizedEnd = normalizeXmlSliceIndex(end, nodes.size)
+    fun getType(index: Int): AbstractYType? {
+        return get(index) as? AbstractYType
+    }
+
+    fun slice(start: Int = 0, end: Int = length): List<Any?> {
+        val values = toArray()
+        val normalizedStart = normalizeXmlSliceIndex(start, values.size)
+        val normalizedEnd = normalizeXmlSliceIndex(end, values.size)
         if (normalizedEnd <= normalizedStart) return emptyList()
-        return nodes.subList(normalizedStart, normalizedEnd)
+        return values.subList(normalizedStart, normalizedEnd)
     }
 
-    fun toList(): List<YXmlNode> = xmlItems().map { (it.content as ItemContent.XmlNode).value.toNode() }
+    fun toList(): List<Any?> = toArray()
 
-    fun toArray(): List<YXmlNode> = toList()
+    fun toArray(): List<Any?> = xmlItems().map { it.content.toXmlChild(doc) }
 
     fun toDelta(): List<YArrayDeltaOp> {
-        val nodes = toList()
-        return if (nodes.isEmpty()) emptyList() else listOf(YArrayDeltaOp(insert = nodes))
+        val values = toArray()
+        return if (values.isEmpty()) emptyList() else listOf(YArrayDeltaOp(insert = values))
     }
 
     fun toDeltaDeep(renderer: AbstractRenderer = activeRenderer): YXmlFragmentDeepDelta =
@@ -466,11 +801,8 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
                         delete(index, rawEnd - index)
                     }
                     op.insert != null -> {
-                        val nodes = op.insert.map(::xmlNodeFromDeltaValue)
-                        if (nodes.isEmpty()) return@forEach
                         val index = renderedSequenceIndexToVisibleIndex(this, renderedIndex, renderer)
-                        insert(index, nodes)
-                        renderedIndex += nodes.size
+                        renderedIndex += insertDeltaValues(index, op.insert)
                     }
                 }
             }
@@ -490,41 +822,50 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
         delete(0, length)
     }
 
-    fun <T> map(transform: (YXmlNode) -> T): List<T> = toList().map(transform)
+    fun <T> map(transform: (Any?) -> T): List<T> = toArray().map(transform)
 
-    fun <T> map(transform: (node: YXmlNode, index: Int) -> T): List<T> =
-        toList().mapIndexed { index, node -> transform(node, index) }
+    fun <T> map(transform: (node: Any?, index: Int) -> T): List<T> =
+        toArray().mapIndexed { index, node -> transform(node, index) }
 
-    fun forEach(action: (YXmlNode) -> Unit) {
-        toList().forEach(action)
+    fun forEach(action: (Any?) -> Unit) {
+        toArray().forEach(action)
     }
 
-    fun forEach(action: (node: YXmlNode, index: Int) -> Unit) {
-        toList().forEachIndexed { index, node -> action(node, index) }
+    fun forEach(action: (node: Any?, index: Int) -> Unit) {
+        toArray().forEachIndexed { index, node -> action(node, index) }
     }
 
-    fun forEachIndexed(action: (Int, YXmlNode) -> Unit) {
-        toList().forEachIndexed(action)
+    fun forEachIndexed(action: (Int, Any?) -> Unit) {
+        toArray().forEachIndexed(action)
     }
 
-    override fun iterator(): Iterator<YXmlNode> = toList().iterator()
+    override fun iterator(): Iterator<Any?> = toArray().iterator()
 
     fun clone(targetDoc: YDoc = doc): YXmlFragment {
         return targetDoc.createXmlFragment().also { cloned ->
-            cloned.push(toList().map { it.clone() })
+            xmlItems().forEach { item ->
+                when (val content = item.content) {
+                    is ItemContent.XmlNode -> cloned.push(content.value.toNode())
+                    is ItemContent.XmlType -> {
+                        val clonedChild = doc.typeFromXmlType(content).cloneValueInto(targetDoc) as AbstractYType
+                        cloned.push(clonedChild)
+                    }
+                    else -> Unit
+                }
+            }
             cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
         }
     }
 
-    override fun toJson(): List<Any?> = toList().map { it.toJson() }
+    override fun toJson(): List<Any?> = toNodeList().map { it.toJson() }
 
     override fun toJSON(): Map<String, Any?> = yTypeJsonObject(
-        children = toList().map(::toYTypeJsonValue),
+        children = toArray().map(::toYTypeJsonValue),
         attrs = getAttrs().mapValues { (_, value) -> toYTypeJsonValue(value) },
     )
 
     fun toString(forceTag: Boolean): String =
-        renderXmlFragmentString(name, getAttrs(), toList(), forceTag = forceTag)
+        renderXmlFragmentString(name, getAttrs(), toNodeList(), forceTag = forceTag)
 
     override fun toString(): String = toString(forceTag = false)
 
@@ -534,7 +875,22 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
         }
     }
 
-    private fun xmlItems(): List<StoreItem> = doc.visibleSequence(name).filter { it.content is ItemContent.XmlNode }
+    private fun xmlItems(): List<StoreItem> =
+        doc.visibleSequence(name).filter { it.content.isXmlSequenceChild() && it.content.kind == RootKind.XmlFragment }
+
+    private fun toNodeList(): List<YXmlNode> = xmlItems().map { it.content.toXmlNode(doc) }
+
+    private fun insertDeltaValues(index: Int, values: List<Any?>): Int {
+        var insertionIndex = index
+        values.forEach { value ->
+            when (value) {
+                is AbstractYType -> insertType(insertionIndex, value)
+                else -> insert(insertionIndex, listOf(xmlNodeFromDeltaValue(value)))
+            }
+            insertionIndex++
+        }
+        return values.size
+    }
 }
 
 internal sealed class YXmlNodeValue {
@@ -589,6 +945,33 @@ internal fun YXmlNodeValue.toNode(): YXmlNode = when (this) {
         attributes.forEach { (name, value) -> element.setAttr(name, value) }
         element.push(children.map { it.toNode() })
     }
+}
+
+internal fun AbstractYType.xmlNodeNameOrEmpty(): String = when (this) {
+    is YXmlElementType -> nodeName
+    else -> ""
+}
+
+internal fun ItemContent.isXmlSequenceChild(): Boolean =
+    this is ItemContent.XmlNode || this is ItemContent.XmlType
+
+internal fun ItemContent.toXmlEventJson(doc: YDoc): Any? = toXmlNode(doc).toJson()
+
+internal fun ItemContent.toXmlChild(doc: YDoc): Any? = when (this) {
+    is ItemContent.XmlNode -> value.toNode()
+    is ItemContent.XmlType -> doc.typeFromXmlType(this)
+    else -> error("item content is not an XML child: ${this::class.simpleName}")
+}
+
+internal fun ItemContent.toXmlNode(doc: YDoc): YXmlNode = when (this) {
+    is ItemContent.XmlNode -> value.toNode()
+    is ItemContent.XmlType -> when (val type = doc.typeFromXmlType(this)) {
+        is YText -> YXmlText(type.toString())
+        is YXmlElementType -> type.toNode()
+        is YXmlTextType -> YXmlText(type.toString())
+        else -> error("unsupported XML fragment type child: ${type::class.simpleName}")
+    }
+    else -> error("item content is not an XML fragment child: ${this::class.simpleName}")
 }
 
 private fun YXmlNode.copyNode(): YXmlNode = toValue().toNode()

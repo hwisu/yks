@@ -357,4 +357,82 @@ class YXmlTest {
         assertEquals(mapOf("xml" to listOf(mapOf("nodeName" to "root", "attributes" to emptyMap<String, Any?>(), "children" to listOf("x")))), clone.toJson())
         assertEquals(source.toJson(), fromUpdate.toJson())
     }
+
+    @Test
+    fun liveXmlElementChildrenRenderAndSyncWithStableNodeNames() {
+        val left = YDoc(clientId = 1)
+        val right = YDoc(clientId = 2)
+        val fragment = left.getXmlFragment("xml")
+        val first = left.createXmlElement("p").setAttrs(mapOf("id" to "one"))
+        val second = left.createXmlElement("p").setAttrs(mapOf("id" to "two"))
+
+        fragment.push(first, second)
+        right.applyUpdate(left.encodeStateAsUpdate())
+
+        val remoteFragment = right.getXmlFragment("xml")
+        val remoteFirst = remoteFragment.getType(0) as YXmlElementType
+        val remoteSecond = remoteFragment.getType(1) as YXmlElementType
+
+        assertTrue(fragment.getType(0) === first)
+        assertEquals("<p id=\"one\" /><p id=\"two\" />", remoteFragment.toString())
+        assertEquals("p", remoteFirst.nodeName)
+        assertEquals("p", remoteSecond.nodeName)
+        assertFalse(remoteFirst.name == remoteSecond.name)
+
+        remoteSecond.setAttr("id", "remote-two")
+        left.applyUpdate(right.encodeStateAsUpdate(left.encodeStateVector()))
+
+        assertEquals("<p id=\"one\" /><p id=\"remote-two\" />", fragment.toString())
+    }
+
+    @Test
+    fun liveXmlElementChildListsRenderAndSyncNestedTextAndElements() {
+        val left = YDoc(clientId = 1)
+        val right = YDoc(clientId = 2)
+        val fragment = left.getXmlFragment("xml")
+        val paragraph = left.createXmlElement("p")
+        val text = left.createText()
+        val span = left.createXmlElement("span").setAttrs(mapOf("class" to "mark"))
+        text.insert(0, "hello")
+
+        paragraph.push(text, span)
+        fragment.push(paragraph)
+
+        assertTrue(paragraph.getType(0) === text)
+        assertEquals("<p>hello<span class=\"mark\" /></p>", fragment.toString())
+
+        right.applyUpdate(left.encodeStateAsUpdate())
+        val remoteParagraph = right.getXmlFragment("xml").getType(0) as YXmlElementType
+        val remoteText = remoteParagraph.getType(0) as YText
+
+        assertEquals("<p>hello<span class=\"mark\" /></p>", right.getXmlFragment("xml").toString())
+        remoteText.insert(remoteText.length, "!")
+        left.applyUpdate(right.encodeStateAsUpdate(left.encodeStateVector()))
+
+        assertEquals("<p>hello!<span class=\"mark\" /></p>", fragment.toString())
+    }
+
+    @Test
+    fun liveXmlTextChildrenRenderSyncAndPreserveFormatting() {
+        val left = YDoc(clientId = 1)
+        val right = YDoc(clientId = 2)
+        val fragment = left.getXmlFragment("xml")
+        val text = left.createXmlText()
+        text.insert(0, "hello", mapOf("bold" to true))
+
+        fragment.push(text)
+        right.applyUpdate(left.encodeStateAsUpdate())
+        val remoteText = right.getXmlFragment("xml").getType(0) as YXmlTextType
+
+        assertTrue(fragment.getType(0) === text)
+        assertEquals("hello", fragment.toString())
+        assertEquals("hello", right.getXmlFragment("xml").toString())
+        assertEquals(YTextDelta().insert("hello", mapOf("bold" to true)), remoteText.toDelta())
+
+        remoteText.insert(remoteText.length, "!")
+        left.applyUpdate(right.encodeStateAsUpdate(left.encodeStateVector()))
+
+        assertEquals("hello!", fragment.toString())
+        assertEquals(YTextDelta().insert("hello", mapOf("bold" to true)).insert("!"), text.toDelta())
+    }
 }

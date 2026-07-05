@@ -171,6 +171,94 @@ class UndoManagerTest {
     }
 
     @Test
+    fun consecutiveRedoRestoresNestedMapAttributeStatesLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val root = doc.getMap("")
+        val undoManager = UndoManager(root)
+        var point = doc.createMap()
+
+        point.setAttr("x", 0)
+        point.setAttr("y", 0)
+        root.setAttr("a", point)
+        undoManager.stopCapturing()
+
+        point.setAttr("x", 100)
+        point.setAttr("y", 100)
+        undoManager.stopCapturing()
+
+        point.setAttr("x", 200)
+        point.setAttr("y", 200)
+        undoManager.stopCapturing()
+
+        point.setAttr("x", 300)
+        point.setAttr("y", 300)
+        undoManager.stopCapturing()
+
+        assertEquals(mapOf("x" to 300L, "y" to 300L), point.toMap())
+
+        undoManager.undo()
+        assertEquals(mapOf("x" to 200L, "y" to 200L), point.toMap())
+        undoManager.undo()
+        assertEquals(mapOf("x" to 100L, "y" to 100L), point.toMap())
+        undoManager.undo()
+        assertEquals(mapOf("x" to 0L, "y" to 0L), point.toMap())
+        undoManager.undo()
+        assertEquals(null, root.getAttr("a"))
+
+        undoManager.redo()
+        point = assertNotNull(root.getAttr("a") as? YMap)
+        assertEquals(mapOf("x" to 0L, "y" to 0L), point.toMap())
+        undoManager.redo()
+        assertEquals(mapOf("x" to 100L, "y" to 100L), point.toMap())
+        undoManager.redo()
+        assertEquals(mapOf("x" to 200L, "y" to 200L), point.toMap())
+        undoManager.redo()
+        assertEquals(mapOf("x" to 300L, "y" to 300L), point.toMap())
+    }
+
+    @Test
+    fun nestedMapReferenceUndoRedoReplaysHistoricalStatesLikeUpstream() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val design = doc.getMap("")
+        val undoManager = UndoManager(design, UndoManagerOptions(captureTimeoutMillis = 0))
+        val text = doc.createMap()
+
+        val blocks1Block = doc.createMap()
+        doc.transact {
+            blocks1Block.setAttr("text", "Type Something")
+            text.setAttr("blocks", blocks1Block)
+            design.setAttr("text", text)
+        }
+
+        val blocks2Block = doc.createMap()
+        doc.transact {
+            blocks2Block.setAttr("text", "Something")
+            text.setAttr("blocks", blocks2Block)
+        }
+
+        val blocks3Block = doc.createMap()
+        doc.transact {
+            blocks3Block.setAttr("text", "Something Else")
+            text.setAttr("blocks", blocks3Block)
+        }
+
+        assertEquals("Something Else", designNestedBlockText(design))
+        undoManager.undo()
+        assertEquals("Something", designNestedBlockText(design))
+        undoManager.undo()
+        assertEquals("Type Something", designNestedBlockText(design))
+        undoManager.undo()
+        assertEquals(null, design.getAttr("text"))
+
+        undoManager.redo()
+        assertEquals("Type Something", designNestedBlockText(design))
+        undoManager.redo()
+        assertEquals("Something", designNestedBlockText(design))
+        undoManager.redo()
+        assertEquals("Something Else", designNestedBlockText(design))
+    }
+
+    @Test
     fun undoMapSetDoesNotOverwriteRemoteWinner() {
         val left = YDoc(clientId = 1)
         val right = YDoc(clientId = 2)
@@ -612,6 +700,107 @@ class UndoManagerTest {
     }
 
     @Test
+    fun xmlFragmentScopeIncludesLiveXmlElementAttributeChanges() {
+        val doc = YDoc(clientId = 1)
+        val fragment = doc.getXmlFragment("xml")
+        val element = doc.createXmlElement("p")
+        fragment.push(element)
+        val undoManager = UndoManager(fragment, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        element.setAttr("class", "lead")
+
+        assertTrue(undoManager.canUndo)
+        undoManager.undo()
+        assertEquals("<p />", fragment.toString())
+        assertFalse(element.hasAttr("class"))
+    }
+
+    @Test
+    fun undoDeletedLiveXmlElementRestoresAttributeStateLikeUpstreamSpecialCase() {
+        val origin = "undoable"
+        val doc = YDoc(clientId = 1)
+        val fragment = doc.getXmlFragment("xml")
+        val element = doc.createXmlElement("test")
+        element.setAttrs(mapOf("a" to "1", "b" to "2"))
+        fragment.push(element)
+        val undoManager = UndoManager(
+            fragment,
+            UndoManagerOptions(captureTimeoutMillis = 0, trackedOrigins = setOf(origin)),
+        )
+
+        doc.transact(origin = origin) {
+            val liveElement = fragment.getType(0) as YXmlElementType
+            liveElement.setAttr("b", "3")
+            fragment.delete(0)
+        }
+
+        assertEquals("", fragment.toString())
+
+        undoManager.undo()
+
+        val restoredElement = fragment.getType(0) as YXmlElementType
+        assertEquals("<test a=\"1\" b=\"2\" />", fragment.toString())
+        assertEquals("2", restoredElement.getAttr("b"))
+
+        undoManager.redo()
+
+        assertEquals("", fragment.toString())
+    }
+
+    @Test
+    fun undoXmlRestoresFormattedLiveTextChildInsideLiveElementLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val fragment = doc.getXmlFragment("xml")
+        val undoManager = UndoManager(fragment, UndoManagerOptions(captureTimeoutMillis = 0))
+        val paragraph = doc.createXmlElement("p")
+        val textChild = doc.createText()
+
+        fragment.insertType(0, paragraph)
+        textChild.insert(0, "content")
+        paragraph.insertType(0, textChild)
+        undoManager.stopCapturing()
+
+        textChild.format(3, 4, mapOf("bold" to true))
+
+        val formatted = YXmlFragmentDeepDelta(
+            delta = listOf(YArrayDeltaOp(insert = listOf(
+                YXmlElementDeepDelta(
+                    nodeName = "p",
+                    children = listOf(
+                        YTextDeepDelta(
+                            delta = YTextDelta()
+                                .insert("con")
+                                .insert("tent", mapOf("bold" to true)),
+                        ),
+                    ),
+                ),
+            ))),
+        )
+        val plain = YXmlFragmentDeepDelta(
+            delta = listOf(YArrayDeltaOp(insert = listOf(
+                YXmlElementDeepDelta(
+                    nodeName = "p",
+                    children = listOf(YTextDeepDelta(delta = YTextDelta().insert("content"))),
+                ),
+            ))),
+        )
+
+        assertEquals(formatted, fragment.toDeltaDeep())
+
+        undoManager.undo()
+        assertEquals(plain, fragment.toDeltaDeep())
+
+        undoManager.redo()
+        assertEquals(formatted, fragment.toDeltaDeep())
+
+        fragment.delete(0)
+        assertEquals(YXmlFragmentDeepDelta(), fragment.toDeltaDeep())
+
+        undoManager.undo()
+        assertEquals(formatted, fragment.toDeltaDeep())
+    }
+
+    @Test
     fun undoContentIdsDeletesSelectedInsertedContent() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("body")
@@ -700,6 +889,12 @@ class UndoManagerTest {
         val idSet = createIdSet()
         triples.asList().chunked(3).forEach { (client, clock, len) -> idSet.add(client, clock, len) }
         return idSet
+    }
+
+    private fun designNestedBlockText(design: YMap): Any? {
+        val text = design.getAttr("text") as? YMap ?: return null
+        val block = text.getAttr("blocks") as? YMap ?: return null
+        return block.getAttr("text")
     }
 
     private fun syncDocs(vararg docs: YDoc) {

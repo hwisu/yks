@@ -3,6 +3,7 @@ package dev.yks
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class YMapDeltaTest {
     @Test
@@ -71,6 +72,45 @@ class YMapDeltaTest {
     }
 
     @Test
+    fun mapObserverDeltaUsesTransactionStartAsPreviousValueLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val map = doc.getMap("meta")
+        val events = mutableListOf<YEvent>()
+        map.observe { events.add(it) }
+
+        map.setAttr("a", 1)
+        assertEquals(YMapDelta().setAttr("a", 1L), events.last().mapDelta)
+
+        map.setAttr("a", 2)
+        assertEquals(YMapDelta().setAttr("a", 2L, previousValue = 1L), events.last().mapDelta)
+
+        doc.transact {
+            map.setAttr("a", 3)
+            map.setAttr("a", 4)
+        }
+        assertEquals(YMapDelta().setAttr("a", 4L, previousValue = 2L), events.last().mapDelta)
+
+        doc.transact {
+            map.setAttr("b", 1)
+            map.setAttr("b", 2)
+        }
+        assertEquals(YMapDelta().setAttr("b", 2L), events.last().mapDelta)
+
+        doc.transact {
+            map.setAttr("c", 1)
+            map.deleteAttr("c")
+        }
+        assertTrue(events.last().mapDelta.isEmpty())
+        assertTrue(events.last().keysChanged.isEmpty())
+
+        doc.transact {
+            map.setAttr("d", 1)
+            map.setAttr("d", 2)
+        }
+        assertEquals(YMapDelta().setAttr("d", 2L), events.last().mapDelta)
+    }
+
+    @Test
     fun mapDeltaConvergesThroughUpdatesAndUndo() {
         val left = YDoc(clientId = 1)
         val right = YDoc(clientId = 2)
@@ -102,6 +142,22 @@ class YMapDeltaTest {
         syncAll(users)
 
         assertEquals(listOf("c3", "c3", "c3"), maps.map { map -> map.getAttr("stuff") })
+    }
+
+    @Test
+    fun concurrentMapSetThenDeleteHidesLowerPriorityLiveValueLikeUpstream() {
+        val users = (0L..2L).map { clientId -> YDoc(clientId = clientId) }
+        val maps = users.map { doc -> doc.getMap("map") }
+
+        maps[0].setAttr("stuff", "c0")
+        maps[1].setAttr("stuff", "c1")
+        maps[1].deleteAttr("stuff")
+        syncAll(users)
+
+        maps.forEach { map ->
+            assertFalse(map.hasAttr("stuff"))
+            assertEquals(null, map.getAttr("stuff"))
+        }
     }
 
     @Test

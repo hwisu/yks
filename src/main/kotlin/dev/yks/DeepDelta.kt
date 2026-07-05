@@ -29,15 +29,16 @@ data class YXmlFragmentDeepDelta(
 
 data class YXmlElementDeepDelta(
     val nodeName: String,
-    val attrs: Map<String, Any?> = emptyMap(),
+    override val attrs: Map<String, Any?> = emptyMap(),
     val children: List<Any?> = emptyList(),
-)
+) : YDeepDelta
 
 internal fun YDeepDelta.isEmptyDeepDelta(): Boolean = when (this) {
     is YArrayDeepDelta -> attrs.isEmpty() && delta.isEmpty()
     is YTextDeepDelta -> attrs.isEmpty() && delta.ops.isEmpty()
     is YMapDeepDelta -> attrs.isEmpty()
     is YXmlFragmentDeepDelta -> attrs.isEmpty() && delta.isEmpty()
+    is YXmlElementDeepDelta -> attrs.isEmpty() && children.isEmpty()
 }
 
 internal data class DeepDeltaRenderOptions(
@@ -65,6 +66,7 @@ fun YDoc.applyDeltaDeep(delta: YDocDeepDelta, origin: Any? = null) {
                 is YTextDeepDelta -> getText(name).applyDeltaDeep(rootDelta)
                 is YMapDeepDelta -> getMap(name).applyDeltaDeep(rootDelta)
                 is YXmlFragmentDeepDelta -> getXmlFragment(name).applyDeltaDeep(rootDelta)
+                is YXmlElementDeepDelta -> error("XML element deep deltas cannot be document roots")
             }
         }
     }
@@ -109,8 +111,7 @@ internal fun AbstractYType.renderDeepDelta(options: DeepDeltaRenderOptions): YDe
     is YText -> renderTextDeepDelta(this, options)
     is YMap -> renderMapDeepDelta(this, options)
     is YXmlFragment -> renderXmlFragmentDeepDelta(this, options)
-    is YXmlElementType,
-    is YXmlTextType -> error("detached XML node type refs do not support deep delta rendering")
+    is YXmlElementType -> renderXmlElementDeepDelta(this, options)
 }
 
 internal fun renderArrayDeepDelta(type: YArray, options: DeepDeltaRenderOptions): YArrayDeepDelta =
@@ -124,7 +125,7 @@ internal fun renderArrayDeepDelta(type: YArray, options: DeepDeltaRenderOptions)
 
 internal fun renderTextDeepDelta(type: YText, options: DeepDeltaRenderOptions): YTextDeepDelta {
     val delta = YTextDelta()
-    renderSequenceItems(type, RootKind.Text, options).forEach { rendered ->
+    renderSequenceItems(type, type.kind, options).forEach { rendered ->
         val length = rendered.content.content.getLength().toInt()
         val attribution = createAttributionFromAttributionItems(rendered.content.attrs, rendered.content.deleted).orEmpty()
         when (rendered.action) {
@@ -144,7 +145,13 @@ internal fun renderTextDeepDelta(type: YText, options: DeepDeltaRenderOptions): 
                 }
             }
             RenderedDeltaAction.Retain -> {
-                val attributes = if (rendered.content.deleted || rendered.content.attrs != null) attribution else emptyMap()
+                val attributes = rendered.item.content.textRetainAttributesForDeepDelta(
+                    doc = type.doc,
+                    hasTextFormatChange = options.hasTextFormatChange(type),
+                    options = options,
+                    attribution = attribution,
+                    renderHasAttribution = rendered.content.deleted || rendered.content.attrs != null,
+                )
                 delta.retain(length, attributes)
             }
             RenderedDeltaAction.Delete -> delta.delete(length)
@@ -167,11 +174,41 @@ internal fun renderXmlFragmentDeepDelta(
     YXmlFragmentDeepDelta(
         attrs = renderTypeAttrs(type, options),
         delta = renderSequenceDelta(type, RootKind.XmlFragment, options) { rendered ->
-            (rendered.item.content as ItemContent.XmlNode).value.toNode().toDeepDeltaValue(
-                options.nestedValueOptions(rendered.action),
-            )
+            rendered.item.content.toXmlDeepDeltaValue(type.doc, options.nestedValueOptions(rendered.action))
         },
     )
+
+internal fun renderXmlElementDeepDelta(
+    type: YXmlElementType,
+    options: DeepDeltaRenderOptions,
+): YXmlElementDeepDelta =
+    YXmlElementDeepDelta(
+        nodeName = type.nodeName,
+        attrs = renderTypeAttrs(type, options),
+        children = renderXmlElementChildrenDeepDelta(type, options),
+    )
+
+private fun renderXmlElementChildrenDeepDelta(
+    type: YXmlElementType,
+    options: DeepDeltaRenderOptions,
+): List<Any?> =
+    buildList {
+        renderSequenceItems(type, type.kind, options).forEach { rendered ->
+            when (rendered.action) {
+                RenderedDeltaAction.Insert -> add(
+                    rendered.item.content.toXmlDeepDeltaValue(
+                        type.doc,
+                        options.nestedValueOptions(rendered.action),
+                    ),
+                )
+                RenderedDeltaAction.Retain -> rendered.item.content
+                    .modifiedXmlChildDeepDeltaValue(type.doc, options)
+                    ?.let(::add)
+                RenderedDeltaAction.Delete,
+                RenderedDeltaAction.Skip -> Unit
+            }
+        }
+    }
 
 internal fun Any?.toDeepDeltaValue(): Any? = toDeepDeltaValue(DeepDeltaRenderOptions())
 
@@ -180,6 +217,7 @@ internal fun Any?.toDeepDeltaValue(options: DeepDeltaRenderOptions): Any? = when
     is YText -> renderTextDeepDelta(this, options)
     is YMap -> renderMapDeepDelta(this, options)
     is YXmlFragment -> renderXmlFragmentDeepDelta(this, options)
+    is YXmlElementType -> renderXmlElementDeepDelta(this, options)
     is YXmlElement -> toDeltaDeep()
     is YXmlText -> toJson()
     is List<*> -> map { it.toDeepDeltaValue(options) }
@@ -190,6 +228,24 @@ internal fun Any?.toDeepDeltaValue(options: DeepDeltaRenderOptions): Any? = when
     }.toSortedMap()
     is ByteArray -> copyOf()
     else -> this
+}
+
+private fun ItemContent.toXmlDeepDeltaValue(doc: YDoc, options: DeepDeltaRenderOptions): Any? = when (this) {
+    is ItemContent.XmlNode -> value.toNode().toDeepDeltaValue(options)
+    is ItemContent.XmlType -> when (val type = doc.typeFromXmlType(this)) {
+        is YText -> renderTextDeepDelta(type, options)
+        is YXmlElementType -> renderXmlElementDeepDelta(type, options)
+        else -> type.toDeepDeltaValue(options)
+    }
+    else -> error("item content is not an XML sequence child: ${this::class.simpleName}")
+}
+
+private fun ItemContent.modifiedXmlChildDeepDeltaValue(doc: YDoc, options: DeepDeltaRenderOptions): Any? {
+    val modified = options.modified ?: return null
+    if (this !is ItemContent.XmlType) return null
+    val type = doc.typeFromXmlType(this)
+    if (modified[type] == null) return null
+    return toXmlDeepDeltaValue(doc, options)
 }
 
 private enum class RenderedDeltaAction {
@@ -205,8 +261,7 @@ private fun renderTypeAttrs(type: AbstractYType, options: DeepDeltaRenderOptions
         is YText -> type.getAttrs()
         is YMap -> type.toMap()
         is YXmlFragment -> type.getAttrs()
-        is YXmlElementType,
-        is YXmlTextType -> emptyMap()
+        is YXmlElementType -> type.getAttrs()
     }
     val modifiedKeys = options.modified?.get(type)?.filterNotNull()
         ?: return attrs.mapValues { (_, value) -> value.toDeepDeltaValue(options) }.toSortedMap()
@@ -368,6 +423,59 @@ private fun ItemContent.textAttributesForDeepDelta(
     else -> emptyMap()
 }.mapValues { (_, value) -> doc.valueToAny(value).toDeepDeltaValue(options) }.toSortedMap()
 
+private fun ItemContent.TextFormat.formatAttributesForDeepDelta(doc: YDoc): Map<String, Any?> =
+    attributes.mapValues { (_, value) -> doc.valueToAny(value) }.toSortedMap()
+
+private fun ItemContent.textRetainAttributesForDeepDelta(
+    doc: YDoc,
+    hasTextFormatChange: Boolean,
+    options: DeepDeltaRenderOptions,
+    attribution: Map<String, Any?>,
+    renderHasAttribution: Boolean,
+): Map<String, Any?> = when (this) {
+    is ItemContent.Text -> {
+        val formatAttributes = if (hasTextFormatChange) {
+            textAttributeDiffForDeepDelta(doc, baseAttributes, attributes, options)
+        } else {
+            emptyMap()
+        }
+        formatAttributes + attribution
+    }
+    is ItemContent.TextEmbed -> {
+        val formatAttributes = if (hasTextFormatChange) {
+            textAttributeDiffForDeepDelta(doc, baseAttributes, attributes, options)
+        } else {
+            emptyMap()
+        }
+        formatAttributes + attribution
+    }
+    is ItemContent.TextFormat -> formatAttributesForDeepDelta(doc) + attribution
+    else -> if (renderHasAttribution) attribution else emptyMap()
+}.toSortedMap()
+
+private fun DeepDeltaRenderOptions.hasTextFormatChange(type: YText): Boolean {
+    val items = itemsToRender ?: return false
+    return type.doc.sequence(type.name).any { item ->
+        item.content is ItemContent.TextFormat && items.intersects(item.id, item.length)
+    }
+}
+
+private fun textAttributeDiffForDeepDelta(
+    doc: YDoc,
+    before: Map<String, YValue>,
+    after: Map<String, YValue>,
+    options: DeepDeltaRenderOptions,
+): Map<String, Any?> =
+    (before.keys + after.keys).sorted().mapNotNull { key ->
+        val beforeValue = before[key]
+        val afterValue = after[key]
+        if (beforeValue == afterValue) {
+            null
+        } else {
+            key to afterValue?.let { value -> doc.valueToAny(value).toDeepDeltaValue(options) }
+        }
+    }.toMap()
+
 private fun MutableList<YArrayDeltaOp>.appendInsert(value: Any?) {
     val last = lastOrNull()
     if (last?.insert != null) {
@@ -484,9 +592,24 @@ internal fun YXmlElementDeepDelta.toXmlElement(doc: YDoc): YXmlElement =
         element.push(children.map { child -> child.toXmlNodeFromDeepDeltaValue(doc) })
     }
 
+internal fun YXmlElementDeepDelta.toXmlElementType(doc: YDoc): YXmlElementType =
+    doc.createXmlElement(nodeName).also { element ->
+        element.applyDeltaDeep(this)
+    }
+
 internal fun Any?.toXmlNodeFromDeepDeltaValue(doc: YDoc): YXmlNode = when (this) {
     is YXmlNode -> clone()
     is YXmlElementDeepDelta -> toXmlElement(doc)
+    is String -> YXmlText(this)
+    is Char -> YXmlText(toString())
+    else -> error("unsupported XML deep-delta value: ${this?.let { it::class.qualifiedName } ?: "null"}")
+}
+
+internal fun Any?.toXmlChildFromDeepDeltaValue(doc: YDoc): Any? = when (this) {
+    is AbstractYType -> cloneValueInto(doc)
+    is YXmlNode -> clone()
+    is YTextDeepDelta -> doc.createXmlText().also { it.applyDeltaDeep(this) }
+    is YXmlElementDeepDelta -> toXmlElementType(doc)
     is String -> YXmlText(this)
     is Char -> YXmlText(toString())
     else -> error("unsupported XML deep-delta value: ${this?.let { it::class.qualifiedName } ?: "null"}")
@@ -497,6 +620,6 @@ internal fun List<YArrayDeltaOp>.fromXmlDeepDeltaValues(doc: YDoc): List<YArrayD
         if (op.insert == null) {
             op
         } else {
-            op.copy(insert = op.insert.map { value -> value.toXmlNodeFromDeepDeltaValue(doc) })
+            op.copy(insert = op.insert.map { value -> value.toXmlChildFromDeepDeltaValue(doc) })
         }
     }

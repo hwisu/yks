@@ -307,4 +307,36 @@ class SnapshotTest {
         assertEquals("<xml><p>old</p></xml>", typeXmlFragmentToStringSnapshot(xml, snap, forceTag = true))
         assertEquals("<p>old</p>", xml.toString())
     }
+
+    @Test
+    fun xmlSnapshotsReadHistoricalLiveXmlElementAndTextChildren() {
+        val doc = YDoc(clientId = 1)
+        val xml = doc.getXmlFragment("xml")
+        val paragraph = doc.createXmlElement("p")
+        val text = doc.createText()
+        text.insert(0, "old")
+        text.format(0, 3, mapOf("bold" to true))
+        paragraph.setAttr("class", "initial")
+        paragraph.push(text)
+        xml.push(paragraph)
+        val initial = snapshot(doc)
+
+        paragraph.setAttr("class", "updated")
+        text.delete(0, text.length)
+        text.insert(0, "new")
+        paragraph.push(doc.createXmlElement("br"))
+        val updated = snapshot(doc)
+
+        assertEquals("<p class=\"initial\">old</p>", typeXmlFragmentToStringSnapshot(xml, initial))
+        assertEquals("<p class=\"updated\">new<br /></p>", typeXmlFragmentToStringSnapshot(xml, updated))
+        assertEquals(
+            listOf(mapOf(
+                "nodeName" to "p",
+                "attributes" to mapOf("class" to "initial"),
+                "children" to listOf("old"),
+            )),
+            typeXmlFragmentToJsonSnapshot(xml, initial),
+        )
+        assertEquals("<p class=\"updated\">new<br /></p>", xml.toString())
+    }
 }

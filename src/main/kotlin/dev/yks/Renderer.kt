@@ -527,6 +527,7 @@ private fun ItemContent.nestedTypeRefs(): List<YValue.TypeRef> = when (this) {
     is ItemContent.Value -> value.nestedTypeRefs()
     is ItemContent.MapEntry -> value.nestedTypeRefs()
     is ItemContent.TextEmbed -> value.nestedTypeRefs()
+    is ItemContent.XmlType -> listOf(ref)
     is ItemContent.Text,
     is ItemContent.TextFormat,
     is ItemContent.XmlNode,

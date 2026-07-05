@@ -707,13 +707,13 @@ private fun AbstractContent.toItemContents(kind: RootKind, original: ItemContent
     when (this) {
         is ContentDeleted -> toDeletedItemContents(kind)
         else -> when (kind) {
-            RootKind.Text -> toTextItemContents(original.textAttributesOrEmpty())
+            RootKind.Text,
+            RootKind.XmlText -> toTextItemContents(kind, original.textAttributesOrEmpty())
             RootKind.Array -> toArrayItemContents()
             RootKind.Map -> listOf(ItemContent.MapEntry(toSingleYValue()))
-            RootKind.XmlFragment -> toXmlNodeValues().map { node -> ItemContent.XmlNode(node) }
+            RootKind.XmlFragment -> toXmlFragmentItemContents()
             RootKind.XmlElement,
-            RootKind.XmlHook,
-            RootKind.XmlText -> error("XML node type refs cannot be local update parents")
+            RootKind.XmlHook -> toXmlSequenceItemContents(kind)
         }
     }
 
@@ -722,9 +722,12 @@ private fun ContentDeleted.toDeletedItemContents(kind: RootKind): List<ItemConte
     return List(len.toInt()) { ItemContent.Deleted(kind) }
 }
 
-private fun AbstractContent.toTextItemContents(attributes: Map<String, YValue>): List<ItemContent> = when (this) {
-    is ContentString -> str.map { char -> ItemContent.Text(char.toString(), attributes) }
-    is ContentEmbed -> listOf(ItemContent.TextEmbed(YValue.from(embed), attributes))
+private fun AbstractContent.toTextItemContents(
+    kind: RootKind,
+    attributes: Map<String, YValue>,
+): List<ItemContent> = when (this) {
+    is ContentString -> str.map { char -> ItemContent.Text(char.toString(), attributes, kind = kind) }
+    is ContentEmbed -> listOf(ItemContent.TextEmbed(YValue.from(embed), attributes, kind = kind))
     is ContentTextFormatRange -> listOf(
         ItemContent.TextFormat(
             target = target,
@@ -732,6 +735,7 @@ private fun AbstractContent.toTextItemContents(attributes: Map<String, YValue>):
             attributes = this.attributes.toSortedMap(),
             afterAttributes = afterAttributes.toSortedMap(),
             beforeAttributes = beforeAttributes.map { attributes -> attributes.toSortedMap() },
+            kind = kind,
         ),
     )
     else -> error("unsupported text update content: ${this::class.simpleName}")
@@ -772,6 +776,19 @@ private fun AbstractContent.toXmlNodeValues(): List<YXmlNodeValue> {
     return values.map { value -> xmlNodeFromDeltaValue(value).toValue() }
 }
 
+private fun AbstractContent.toXmlFragmentItemContents(): List<ItemContent> =
+    toXmlSequenceItemContents(RootKind.XmlFragment)
+
+private fun AbstractContent.toXmlSequenceItemContents(kind: RootKind): List<ItemContent> = when (this) {
+    is ContentType -> when (type) {
+        is YText -> listOf(ItemContent.XmlType(YValue.TypeRef(type.kind, type.name), "", kind))
+        is YXmlElementType -> listOf(ItemContent.XmlType(YValue.TypeRef(type.kind, type.name), type.nodeName, kind))
+        is YXmlTextType -> listOf(ItemContent.XmlType(YValue.TypeRef(type.kind, type.name), "", kind))
+        else -> error("unsupported XML fragment type content: ${type::class.simpleName}")
+    }
+    else -> toXmlNodeValues().map { node -> ItemContent.XmlNode(node, kind) }
+}
+
 private fun ItemContent?.textAttributesOrEmpty(): Map<String, YValue> = when (this) {
     is ItemContent.Text -> attributes
     is ItemContent.TextEmbed -> attributes
@@ -800,9 +817,11 @@ private class UpdateObfuscator(
             obfuscate(content.value),
             if (options.formatting) obfuscateFormatting(content.attributes) else content.attributes,
             if (options.formatting) obfuscateFormatting(content.baseAttributes) else content.baseAttributes,
+            content.kind,
         )
         is ItemContent.MapEntry -> ItemContent.MapEntry(obfuscate(content.value))
-        is ItemContent.XmlNode -> ItemContent.XmlNode(obfuscate(content.value))
+        is ItemContent.XmlNode -> content.copy(value = obfuscate(content.value))
+        is ItemContent.XmlType -> content.copy(nodeName = content.nodeName.obfuscatedString())
         is ItemContent.TextFormat -> content.copy(
             attributes = if (options.formatting) obfuscateFormatting(content.attributes) else content.attributes,
             afterAttributes = if (options.formatting) obfuscateFormatting(content.afterAttributes) else content.afterAttributes,

@@ -131,7 +131,7 @@ class ContentTest {
             },
         ) as ContentType
         assertEquals(YXmlElementRefID, xmlElementContent.type.typeRef)
-        assertEquals("paragraph", xmlElementContent.type.name)
+        assertEquals("paragraph", assertIs<YXmlElementType>(xmlElementContent.type).nodeName)
         val xmlHookContent = contentRefs[contentTypeRefNumber](
             decoder {
                 writeTypeRef(YXmlHookRefID)
@@ -139,7 +139,7 @@ class ContentTest {
             },
         ) as ContentType
         assertEquals(YXmlHookRefID, xmlHookContent.type.typeRef)
-        assertEquals("hook", xmlHookContent.type.name)
+        assertEquals("hook", assertIs<YXmlElementType>(xmlHookContent.type).nodeName)
         val xmlTextContent = contentRefs[contentTypeRefNumber](decoder { writeTypeRef(YXmlTextRefID) }) as ContentType
         assertEquals(YXmlTextRefID, xmlTextContent.type.typeRef)
 
@@ -192,10 +192,10 @@ class ContentTest {
 
         val xmlElementContent = roundTrip(ContentType(YXmlElementType(YDoc(clientId = 1), "p"))) as ContentType
         assertEquals(YXmlElementRefID, xmlElementContent.type.typeRef)
-        assertEquals("p", xmlElementContent.type.name)
+        assertEquals("p", assertIs<YXmlElementType>(xmlElementContent.type).nodeName)
         val xmlHookContent = roundTrip(ContentType(YXmlElementType(YDoc(clientId = 1), "hook", RootKind.XmlHook))) as ContentType
         assertEquals(YXmlHookRefID, xmlHookContent.type.typeRef)
-        assertEquals("hook", xmlHookContent.type.name)
+        assertEquals("hook", assertIs<YXmlElementType>(xmlHookContent.type).nodeName)
         val xmlTextContent = roundTrip(ContentType(YXmlTextType(YDoc(clientId = 1)))) as ContentType
         assertEquals(YXmlTextRefID, xmlTextContent.type.typeRef)
     }

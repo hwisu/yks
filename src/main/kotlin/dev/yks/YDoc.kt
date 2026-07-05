@@ -148,6 +148,18 @@ class YDoc(
     fun createXmlFragment(): YXmlFragment =
         createNestedType(RootKind.XmlFragment) { nestedName -> YXmlFragment(this, nestedName) }
 
+    fun createXmlElement(nodeName: String): YXmlElementType =
+        createXmlElementType(nodeName, RootKind.XmlElement)
+
+    fun createXmlText(): YXmlTextType =
+        createXmlTextType()
+
+    internal fun createXmlElementType(nodeName: String, kind: RootKind): YXmlElementType =
+        createNestedType(kind) { nestedName -> YXmlElementType(this, nestedName, nodeName, kind) }
+
+    internal fun createXmlTextType(): YXmlTextType =
+        createNestedType(RootKind.XmlText) { nestedName -> YXmlTextType(this, nestedName) }
+
     fun toJson(): Map<String, Any?> {
         return rootNames()
             .mapNotNull { name ->
@@ -871,11 +883,13 @@ class YDoc(
     private fun textItemsAtSnapshot(type: YText, snapshot: Snapshot): List<StoreItem> {
         require(type.doc === this) { "type must belong to this document" }
         val textItems = sequence(type.name)
-            .filter { item -> item.content.isTextCountable() && item.isVisibleIn(snapshot) }
+            .filter { item -> item.content.kind == type.kind && item.content.isTextCountable() && item.isVisibleIn(snapshot) }
             .map { item -> item.withBaseTextAttributes() }
             .toMutableList()
         sequence(type.name)
-            .filter { item -> item.content is ItemContent.TextFormat && item.isVisibleIn(snapshot) }
+            .filter { item ->
+                item.content.kind == type.kind && item.content is ItemContent.TextFormat && item.isVisibleIn(snapshot)
+            }
             .sortedWith(textFormatApplicationOrder)
             .forEach { formatItem -> applySingleTextFormat(textItems, formatItem) }
         return textItems
@@ -933,10 +947,10 @@ class YDoc(
         }
 
     internal fun xmlFragmentAtSnapshot(type: YXmlFragment, snapshot: Snapshot): List<Any?> =
-        sequenceAtSnapshot(type, snapshot).map { item -> (item.content as ItemContent.XmlNode).value.toEventJson() }
+        sequenceAtSnapshot(type, snapshot).map { item -> xmlNodeAtSnapshot(item.content, snapshot).toJson() }
 
     internal fun xmlFragmentArrayAtSnapshot(type: YXmlFragment, snapshot: Snapshot): List<YXmlNode> =
-        sequenceAtSnapshot(type, snapshot).map { item -> (item.content as ItemContent.XmlNode).value.toNode() }
+        sequenceAtSnapshot(type, snapshot).map { item -> xmlNodeAtSnapshot(item.content, snapshot) }
 
     internal fun xmlFragmentStringAtSnapshot(
         type: YXmlFragment,
@@ -952,6 +966,20 @@ class YDoc(
     internal fun xmlFragmentDeltaAtSnapshot(type: YXmlFragment, snapshot: Snapshot): List<YArrayDeltaOp> {
         val nodes = xmlFragmentArrayAtSnapshot(type, snapshot)
         return if (nodes.isEmpty()) emptyList() else listOf(YArrayDeltaOp(insert = nodes))
+    }
+
+    private fun xmlNodeAtSnapshot(content: ItemContent, snapshot: Snapshot): YXmlNode = when (content) {
+        is ItemContent.XmlNode -> content.value.toNode()
+        is ItemContent.XmlType -> when (val type = typeFromXmlType(content)) {
+            is YText -> YXmlText(textStringAtSnapshot(type, snapshot))
+            is YXmlElementType -> YXmlElement(type.nodeName).also { element ->
+                element.setAttrs(type.getAttrs(snapshot))
+                element.push(sequenceAtSnapshot(type, snapshot).map { item -> xmlNodeAtSnapshot(item.content, snapshot) })
+            }
+            is YXmlTextType -> YXmlText(type.toString())
+            else -> error("unsupported XML snapshot child type: ${type::class.simpleName}")
+        }
+        else -> error("item content is not an XML snapshot child: ${content::class.simpleName}")
     }
 
     internal fun setTypeAttribute(parent: String, key: String, value: Any?): Any? {
@@ -1072,7 +1100,7 @@ class YDoc(
                     },
                     parent = source.parent,
                     parentSub = source.parentSub,
-                    content = source.content,
+                    content = source.content.retargetTextFormat(restoredByOriginal),
                     deleted = false,
                 )
                 check(store.add(item)) { "duplicate restored item id: ${item.id}" }
@@ -1084,12 +1112,23 @@ class YDoc(
                 currentTransaction?.changedParents?.add(item.parent)
             }
             rememberRedoneRangeEnds(restoredPairs, originalPositions)
+            restored.forEachIndexed { index, item ->
+                val retargeted = item.content.retargetTextFormat(restoredByOriginal)
+                if (retargeted != item.content) {
+                    val updated = store.replaceContent(item.id, retargeted) ?: item.copy(content = retargeted)
+                    restored[index] = updated
+                    val addedIndex = currentTransaction?.addedItems?.indexOfFirst { added -> added.id == item.id } ?: -1
+                    if (addedIndex >= 0) {
+                        currentTransaction?.addedItems?.set(addedIndex, updated)
+                    }
+                }
+            }
             restored
                 .filter { item -> item.content is ItemContent.TextFormat }
-                .map { item -> item.parent }
+                .map { item -> item.parent to item.content.kind }
                 .toSet()
-                .forEach { parent ->
-                    captureParentBefore(parent, RootKind.Text)
+                .forEach { (parent, kind) ->
+                    captureParentBefore(parent, kind)
                     reapplyTextFormats(parent)
                     currentTransaction?.changedParents?.add(parent)
                 }
@@ -1230,7 +1269,9 @@ class YDoc(
     private fun applySingleTextFormat(item: StoreItem): List<StoreItem> {
         val format = item.content as? ItemContent.TextFormat ?: return emptyList()
         val textItems = sequence(item.parent)
-            .filter { textItem -> !textItem.deleted && textItem.content.isTextCountable() }
+            .filter { textItem ->
+                !textItem.deleted && textItem.content.kind == format.kind && textItem.content.isTextCountable()
+            }
         val start = textItems.indexOfFirst { textItem -> textItem.id == format.target }
         if (start < 0) return emptyList()
 
@@ -1247,7 +1288,7 @@ class YDoc(
 
     private fun applySingleTextFormat(items: MutableList<StoreItem>, item: StoreItem) {
         val format = item.content as? ItemContent.TextFormat ?: return
-        val start = items.indexOfFirst { textItem -> textItem.id == format.target }
+        val start = items.indexOfFirst { textItem -> textItem.content.kind == format.kind && textItem.id == format.target }
         if (start < 0) return
 
         val end = (start + format.length.toInt()).coerceAtMost(items.size)
@@ -1590,10 +1631,10 @@ class YDoc(
             RootKind.Map -> ParentSnapshot.MapSnapshot(visibleMap(parent))
             RootKind.Array,
             RootKind.Text,
-            RootKind.XmlFragment -> ParentSnapshot.SequenceSnapshot(kindHint, visibleSequence(parent))
+            RootKind.XmlFragment,
             RootKind.XmlElement,
             RootKind.XmlHook,
-            RootKind.XmlText -> error("XML node type refs cannot be captured as parent snapshots")
+            RootKind.XmlText -> ParentSnapshot.SequenceSnapshot(kindHint, visibleSequence(parent))
         }
         val existing = transaction.beforeParents[parent]
         transaction.beforeParents[parent] = existing?.merge(captured) ?: captured
@@ -1622,9 +1663,19 @@ class YDoc(
             sequenceBefore.kind == RootKind.XmlFragment && type.kind == RootKind.XmlFragment -> {
                 diffXmlDelta(sequenceBefore.items, visibleSequence(type.name))
             }
+            sequenceBefore.kind == RootKind.XmlElement && type.kind == RootKind.XmlElement -> {
+                diffXmlDelta(sequenceBefore.items, visibleSequence(type.name))
+            }
+            sequenceBefore.kind == RootKind.XmlHook && type.kind == RootKind.XmlHook -> {
+                diffXmlDelta(sequenceBefore.items, visibleSequence(type.name))
+            }
             else -> emptyList()
         }
-        val textDelta = if (sequenceBefore?.kind == RootKind.Text && type.kind == RootKind.Text) {
+        val textDelta = if (
+            sequenceBefore != null &&
+            sequenceBefore.kind == type.kind &&
+            (type.kind == RootKind.Text || type.kind == RootKind.XmlText)
+        ) {
             diffTextDelta(sequenceBefore.items, visibleSequence(type.name))
         } else {
             YTextDelta()
@@ -1685,7 +1736,7 @@ class YDoc(
 
     private fun diffXmlDelta(before: List<StoreItem>, after: List<StoreItem>): List<YArrayDeltaOp> {
         return diffSequence(before, after) { items ->
-            listOf(YArrayDeltaOp(insert = items.map { (it.content as ItemContent.XmlNode).value.toEventJson() }))
+            listOf(YArrayDeltaOp(insert = items.map { it.content.toXmlEventJson(this) }))
         }
     }
 
@@ -1844,12 +1895,12 @@ class YDoc(
         sequence(parent).forEach { item ->
             val itemLength = rendererContentLength(renderer, item.toItemStruct(this)).toInt()
             if (!item.deleted || itemLength > 0) {
-                val value = when (val content = item.content) {
-                    is ItemContent.Value -> content.value
-                    is ItemContent.TextEmbed -> content.value
-                    else -> null
-                }
-                value?.nestedTypeRefPaths().orEmpty().forEach { (segments, nestedName) ->
+                when (val content = item.content) {
+                    is ItemContent.Value -> content.value.nestedTypeRefPaths()
+                    is ItemContent.TextEmbed -> content.value.nestedTypeRefPaths()
+                    is ItemContent.XmlType -> listOf(emptyList<Any>() to content.ref.name)
+                    else -> emptyList()
+                }.forEach { (segments, nestedName) ->
                     children.add(listOf(renderedIndex) + segments to nestedName)
                 }
             }
@@ -1873,7 +1924,7 @@ class YDoc(
         else -> emptyList()
     }
 
-    private fun typeFromRef(ref: YValue.TypeRef): AbstractYType {
+    private fun typeFromRef(ref: YValue.TypeRef, xmlNodeName: String? = null): AbstractYType {
         nestedNames.add(ref.name)
         nestedTypes[ref.name]?.let { existing ->
             require(existing.kind == ref.kind) { "nested type '${ref.name}' exists as ${existing.kind}, not ${ref.kind}" }
@@ -1888,17 +1939,21 @@ class YDoc(
             RootKind.Map -> YMap(this, ref.name)
             RootKind.Text -> YText(this, ref.name)
             RootKind.XmlFragment -> YXmlFragment(this, ref.name)
-            RootKind.XmlElement -> YXmlElementType(this, ref.name)
-            RootKind.XmlHook -> YXmlElementType(this, ref.name, RootKind.XmlHook)
-            RootKind.XmlText -> YXmlTextType(this)
+            RootKind.XmlElement -> YXmlElementType(this, ref.name, xmlNodeName ?: ref.name)
+            RootKind.XmlHook -> YXmlElementType(this, ref.name, xmlNodeName ?: ref.name, RootKind.XmlHook)
+            RootKind.XmlText -> YXmlTextType(this, ref.name)
         }.also { nestedTypes[ref.name] = it }
     }
+
+    internal fun typeFromXmlType(content: ItemContent.XmlType): AbstractYType =
+        typeFromRef(content.ref, content.nodeName)
 
     private fun rememberNestedRefs(content: ItemContent) {
         when (content) {
             is ItemContent.Value -> rememberNestedRefs(content.value)
             is ItemContent.MapEntry -> rememberNestedRefs(content.value)
             is ItemContent.TextEmbed -> rememberNestedRefs(content.value)
+            is ItemContent.XmlType -> typeFromXmlType(content)
             is ItemContent.Text,
             is ItemContent.TextFormat,
             is ItemContent.XmlNode,
@@ -2007,6 +2062,7 @@ class YDoc(
         is ItemContent.TextEmbed -> subdocRefs(content.value)
         is ItemContent.Text,
         is ItemContent.TextFormat,
+        is ItemContent.XmlType,
         is ItemContent.XmlNode,
         is ItemContent.Deleted -> emptyList()
     }
@@ -2224,12 +2280,12 @@ data class YEvent(
     val delta: Any
         get() = when (target.kind) {
             RootKind.Array,
-            RootKind.XmlFragment -> arrayDelta
-            RootKind.Map -> mapDelta
-            RootKind.Text -> textDelta
+            RootKind.XmlFragment,
             RootKind.XmlElement,
-            RootKind.XmlHook,
-            RootKind.XmlText -> emptyList<Any?>()
+            RootKind.XmlHook -> arrayDelta
+            RootKind.Map -> mapDelta
+            RootKind.Text,
+            RootKind.XmlText -> textDelta
         }
 
     val deltaDeep: Any
@@ -2239,31 +2295,33 @@ data class YEvent(
         if (!deep) return delta
         val itemsToRender = eventItemsToRender(renderer)
         if (!itemsToRender.isEmpty()) {
+            val modified = computeModifiedFromItems(target.doc, itemsToRender)
             val options = DeepDeltaRenderOptions(
                 renderer = renderer,
                 itemsToRender = itemsToRender,
                 retainDeletes = true,
                 insertedItems = insertSet,
+                modified = modified,
             )
             when (target.kind) {
                 RootKind.Array -> return (target.renderDeepDelta(options) as YArrayDeepDelta).delta
-                RootKind.Text -> return (target.renderDeepDelta(options) as YTextDeepDelta).delta
+                RootKind.Text,
+                RootKind.XmlText -> return (target.renderDeepDelta(options) as YTextDeepDelta).delta
                 RootKind.XmlFragment -> return (target.renderDeepDelta(options) as YXmlFragmentDeepDelta).delta
-                RootKind.Map,
                 RootKind.XmlElement,
-                RootKind.XmlHook,
-                RootKind.XmlText -> Unit
+                RootKind.XmlHook -> return (target.renderDeepDelta(options) as YXmlElementDeepDelta).children
+                RootKind.Map -> Unit
             }
         }
         val options = DeepDeltaRenderOptions(renderer = renderer)
         return when (target.kind) {
             RootKind.Array,
-            RootKind.XmlFragment -> arrayDelta.toDeepDeltaValues(options)
-            RootKind.Map -> mapDelta.toDeepDeltaValues(options)
-            RootKind.Text -> textDelta.toDeepDeltaValues(options)
+            RootKind.XmlFragment,
             RootKind.XmlElement,
-            RootKind.XmlHook,
-            RootKind.XmlText -> emptyList<Any?>()
+            RootKind.XmlHook -> arrayDelta.toDeepDeltaValues(options)
+            RootKind.Map -> mapDelta.toDeepDeltaValues(options)
+            RootKind.Text,
+            RootKind.XmlText -> textDelta.toDeepDeltaValues(options)
         }
     }
 
@@ -2324,6 +2382,7 @@ private fun Map<String, YMapChange>.toMapDelta(): YMapDelta {
 internal fun ItemContent.directTypeRef(): YValue.TypeRef? = when (this) {
     is ItemContent.Value -> value as? YValue.TypeRef
     is ItemContent.MapEntry -> value as? YValue.TypeRef
+    is ItemContent.XmlType -> ref
     is ItemContent.Text,
     is ItemContent.TextEmbed,
     is ItemContent.TextFormat,
@@ -2336,6 +2395,11 @@ private val textFormatApplicationOrder: Comparator<StoreItem> =
 
 private fun StoreItem.withBaseTextAttributes(): StoreItem =
     copy(content = content.withTextAttributesOrNull(content.baseTextAttributesOrEmpty()) ?: content)
+
+private fun ItemContent.retargetTextFormat(restoredByOriginal: Map<Id, Id>): ItemContent = when (this) {
+    is ItemContent.TextFormat -> copy(target = restoredByOriginal[target] ?: target)
+    else -> this
+}
 
 private fun ItemContent.textAttributesOrEmpty(): Map<String, YValue> = when (this) {
     is ItemContent.Text -> attributes

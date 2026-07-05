@@ -9,6 +9,48 @@ import kotlin.test.assertTrue
 
 class RelativePositionTest {
     @Test
+    fun relativePositionRoundTripsAcrossUpstreamFragmentedInsertCases() {
+        val cases = listOf<(YText) -> Unit>(
+            { text ->
+                text.insert(0, "1")
+                text.insert(0, "abc")
+                text.insert(0, "z")
+                text.insert(0, "y")
+                text.insert(0, "x")
+            },
+            { text -> text.insert(0, "abc") },
+            { text ->
+                text.insert(0, "abc")
+                text.insert(0, "1")
+                text.insert(0, "xyz")
+            },
+            { text -> text.insert(0, "1") },
+            { text ->
+                text.insert(0, "2")
+                text.insert(0, "1")
+            },
+            { _ -> },
+        )
+
+        cases.forEachIndexed { caseIndex, buildText ->
+            val doc = YDoc(clientId = caseIndex + 1L)
+            val text = doc.getText("")
+            buildText(text)
+
+            for (index in 0 until text.length) {
+                for (assoc in -1..1) {
+                    val position = createRelativePositionFromTypeIndex(text, index, assoc)
+                    val decoded = decodeRelativePosition(encodeRelativePosition(position))
+                    val absolute = assertNotNull(createAbsolutePositionFromRelativePosition(decoded, doc))
+
+                    assertEquals(index, absolute.index, "case=$caseIndex index=$index assoc=$assoc")
+                    assertEquals(assoc, absolute.assoc, "case=$caseIndex index=$index assoc=$assoc")
+                }
+            }
+        }
+    }
+
+    @Test
     fun relativePositionTracksInsertionBeforeAnchor() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("text")
@@ -21,6 +63,23 @@ class RelativePositionTest {
 
         assertEquals(2, createAbsolutePositionFromRelativePosition(rightAssociated, doc)?.index)
         assertEquals(1, createAbsolutePositionFromRelativePosition(leftAssociated, doc)?.index)
+    }
+
+    @Test
+    fun relativePositionCreatedAfterDeletionAnchorsToVisibleContent() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("text")
+        text.insert(0, "abc")
+        text.delete(0)
+
+        val rightAssociated = createRelativePositionFromTypeIndex(text, 0, assoc = 0)
+        val leftAssociated = createRelativePositionFromTypeIndex(text, 0, assoc = -1)
+
+        text.insert(0, "x")
+
+        assertEquals("xbc", text.toString())
+        assertEquals(1, createAbsolutePositionFromRelativePosition(rightAssociated, doc)?.index)
+        assertEquals(0, createAbsolutePositionFromRelativePosition(leftAssociated, doc)?.index)
     }
 
     @Test

@@ -161,6 +161,24 @@ class YEventTest {
     }
 
     @Test
+    fun textEventDeltaDeepDoesNotReplayExistingFormatsOnPlainInsert() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val events = mutableListOf<YEvent>()
+        text.insert(0, "hi", mapOf("bold" to true))
+        text.observe { events.add(it) }
+
+        text.insert(2, "!")
+
+        assertEquals(
+            YTextDelta()
+                .retain(2)
+                .insert("!"),
+            events.single().deltaDeep,
+        )
+    }
+
+    @Test
     fun textFormatObserverUsesRetainDeltaWithNullRemovedAttributes() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("body")
@@ -430,6 +448,72 @@ class YEventTest {
             events[0].arrayDelta,
         )
         assertEquals(listOf(YArrayDeltaOp(delete = 1)), events[1].arrayDelta)
+    }
+
+    @Test
+    fun xmlElementObserverDeltaDeepPreservesLiveTextChildFormatting() {
+        val doc = YDoc(clientId = 1)
+        val element = doc.createXmlElement("p")
+        val text = doc.createText()
+        val events = mutableListOf<YEvent>()
+        text.insert(0, "hi", mapOf("bold" to true))
+        element.observe { events.add(it) }
+
+        element.push(text)
+
+        val event = events.single()
+        assertEquals(listOf(YArrayDeltaOp(insert = listOf("hi"))), event.delta)
+        assertEquals(
+            listOf(YTextDeepDelta(delta = YTextDelta().insert("hi", mapOf("bold" to true)))),
+            event.deltaDeep,
+        )
+        assertTrue(event.childListChanged)
+    }
+
+    @Test
+    fun xmlElementDeepObserverDeltaDeepPreservesNestedLiveTextFormattingChanges() {
+        val doc = YDoc(clientId = 1)
+        val element = doc.createXmlElement("p")
+        val text = doc.createText()
+        val events = mutableListOf<YEvent>()
+        text.insert(0, "hi")
+        element.push(text)
+        element.observeDeep { events.add(it) }
+
+        text.format(0, 2, mapOf("bold" to true))
+
+        val event = events.single()
+        val nestedEvent = event.deepEvents.single()
+        val expectedTextDelta = YTextDelta().retain(2, mapOf("bold" to true))
+        assertSame(element, event.target)
+        assertSame(text, event.changedTarget)
+        assertEquals(listOf(0), event.path)
+        assertSame(text, nestedEvent.target)
+        assertEquals(expectedTextDelta, nestedEvent.textDelta)
+        assertEquals(
+            listOf(YTextDeepDelta(delta = expectedTextDelta)),
+            event.deltaDeep,
+        )
+    }
+
+    @Test
+    fun xmlTextObserverUsesTextDeltasAndDeepDeltas() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.createXmlText()
+        val deltas = mutableListOf<Any>()
+        val deepDeltas = mutableListOf<Any>()
+        text.observe { event ->
+            deltas.add(event.delta)
+            deepDeltas.add(event.deltaDeep)
+        }
+
+        text.insert(0, "hi")
+        text.format(0, 2, mapOf("bold" to true))
+
+        assertEquals(YTextDelta().insert("hi"), deltas[0])
+        assertEquals(YTextDelta().retain(2, mapOf("bold" to true)), deltas[1])
+        assertEquals(YTextDelta().insert("hi"), deepDeltas[0])
+        assertEquals(YTextDelta().retain(2, mapOf("bold" to true)), deepDeltas[1])
     }
 
     @Test

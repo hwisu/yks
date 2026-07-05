@@ -2,7 +2,9 @@ package dev.yks
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 class DeepDeltaTest {
     @Test
@@ -328,8 +330,65 @@ class DeepDeltaTest {
                 it.setAttr("class", "intro")
                 it.push(YXmlText("hello"))
             }.toDeltaDeep(),
-            (targetXml.get(0) as YXmlElement).toDeltaDeep(),
+            (targetXml.get(0) as YXmlElementType).toDeltaDeep(),
         )
+    }
+
+    @Test
+    fun liveXmlDeepDeltaAppliesAsLiveNestedXmlAndTextTypes() {
+        val source = YDoc(clientId = 1)
+        val target = YDoc(clientId = 2)
+        val sourceXml = source.getXmlFragment("xml")
+        val sourceParagraph = source.createXmlElement("p").setAttrs(mapOf("class" to "intro"))
+        val sourceText = source.createText()
+        sourceText.insert(0, "hello")
+        sourceText.format(0, 5, mapOf("bold" to true))
+        sourceParagraph.push(sourceText)
+        sourceXml.push(sourceParagraph)
+
+        val targetXml = target.getXmlFragment("xml")
+        targetXml.applyDeltaDeep(sourceXml.toDeltaDeep())
+        val targetParagraph = targetXml.getType(0) as YXmlElementType
+        val targetText = targetParagraph.getType(0) as YText
+        targetText.insert(targetText.length, "!")
+
+        assertTrue(targetText is YXmlTextType)
+        assertEquals("<p class=\"intro\">hello</p>", sourceXml.toString())
+        assertEquals("<p class=\"intro\">hello!</p>", targetXml.toString())
+        assertEquals(
+            YTextDelta().insert("hello", mapOf("bold" to true)).insert("!"),
+            targetText.toDelta(),
+        )
+        assertEquals(
+            YTextDelta().insert("hello", mapOf("bold" to true)),
+            sourceText.toDelta(),
+        )
+    }
+
+    @Test
+    fun liveXmlElementApplyDeltaDeepRebuildsAttributesAndLiveChildren() {
+        val doc = YDoc(clientId = 1)
+        val element = doc.createXmlElement("p")
+        element.setAttr("stale", true)
+        element.push(YXmlText("old"))
+
+        element.applyDeltaDeep(
+            YXmlElementDeepDelta(
+                nodeName = "p",
+                attrs = mapOf("class" to "intro"),
+                children = listOf(
+                    YTextDeepDelta(delta = YTextDelta().insert("hello", mapOf("bold" to true))),
+                    YXmlElementDeepDelta(nodeName = "br"),
+                ),
+            ),
+        )
+
+        val text = element.getType(0) as YText
+
+        assertEquals("<p class=\"intro\">hello<br /></p>", element.toString())
+        assertEquals(YTextDelta().insert("hello", mapOf("bold" to true)), text.toDelta())
+        assertTrue(element.getType(1) is YXmlElementType)
+        assertFalse(element.hasAttr("stale"))
     }
 
     @Test

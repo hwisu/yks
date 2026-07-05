@@ -562,14 +562,22 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
     }
 }
 
-class YText internal constructor(doc: YDoc, name: String) : AbstractYType(doc, name, RootKind.Text), Iterable<Any?> {
+open class YText internal constructor(
+    doc: YDoc,
+    name: String,
+    kind: RootKind = RootKind.Text,
+) : AbstractYType(doc, name, kind), Iterable<Any?> {
     constructor() : this(YDoc(), "")
 
     constructor(text: String, attributes: Map<String, Any?> = emptyMap()) : this() {
         insert(0, text, attributes)
     }
 
-    val length: Int get() = doc.visibleSequence(name).count { it.content.kind == RootKind.Text }
+    init {
+        require(kind == RootKind.Text || kind == RootKind.XmlText) { "YText kind must be a text sequence" }
+    }
+
+    val length: Int get() = doc.visibleSequence(name).count { it.content.kind == kind }
 
     val attrSize: Int get() = getAttrs().size
 
@@ -579,7 +587,7 @@ class YText internal constructor(doc: YDoc, name: String) : AbstractYType(doc, n
         require(start <= length) { "insert index is out of bounds" }
         doc.transact {
             val normalized = normalizeTextAttributes(attributes)
-            insertTextEntries(start, text.map { ItemContent.Text(it.toString(), normalized) })
+            insertTextEntries(start, text.map { ItemContent.Text(it.toString(), normalized, kind = kind) })
         }
     }
 
@@ -589,7 +597,7 @@ class YText internal constructor(doc: YDoc, name: String) : AbstractYType(doc, n
         require(start <= length) { "insert index is out of bounds" }
         doc.transact(origin = origin) {
             val normalized = normalizeTextAttributes(attributes)
-            insertTextEntries(start, text.map { ItemContent.Text(it.toString(), normalized) })
+            insertTextEntries(start, text.map { ItemContent.Text(it.toString(), normalized, kind = kind) })
         }
     }
 
@@ -601,10 +609,10 @@ class YText internal constructor(doc: YDoc, name: String) : AbstractYType(doc, n
             val normalized = normalizeTextAttributes(attributes)
             val entries = values.flatMap { value ->
                 when (value) {
-                    is String -> value.map { ItemContent.Text(it.toString(), normalized) }
-                    is Char -> listOf(ItemContent.Text(value.toString(), normalized))
+                    is String -> value.map { ItemContent.Text(it.toString(), normalized, kind = kind) }
+                    is Char -> listOf(ItemContent.Text(value.toString(), normalized, kind = kind))
                     null -> error("text embeds must not be null")
-                    else -> listOf(ItemContent.TextEmbed(doc.storeValue(value), normalized))
+                    else -> listOf(ItemContent.TextEmbed(doc.storeValue(value), normalized, kind = kind))
                 }
             }
             insertTextEntries(start, entries)
@@ -616,7 +624,10 @@ class YText internal constructor(doc: YDoc, name: String) : AbstractYType(doc, n
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
         doc.transact {
-            insertTextEntries(start, listOf(ItemContent.TextEmbed(doc.storeValue(embed), normalizeTextAttributes(attributes))))
+            insertTextEntries(
+                start,
+                listOf(ItemContent.TextEmbed(doc.storeValue(embed), normalizeTextAttributes(attributes), kind = kind)),
+            )
         }
     }
 
@@ -625,7 +636,10 @@ class YText internal constructor(doc: YDoc, name: String) : AbstractYType(doc, n
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
         doc.transact(origin = origin) {
-            insertTextEntries(start, listOf(ItemContent.TextEmbed(doc.storeValue(embed), normalizeTextAttributes(attributes))))
+            insertTextEntries(
+                start,
+                listOf(ItemContent.TextEmbed(doc.storeValue(embed), normalizeTextAttributes(attributes), kind = kind)),
+            )
         }
     }
 
@@ -762,6 +776,7 @@ class YText internal constructor(doc: YDoc, name: String) : AbstractYType(doc, n
                         visible.subList(start, start + length),
                         formatAttributes.keys,
                     ),
+                    kind = kind,
                 ),
             )
             doc.integrateLocal(formatItem)
@@ -791,6 +806,7 @@ class YText internal constructor(doc: YDoc, name: String) : AbstractYType(doc, n
                         visible.subList(start, start + length),
                         formatAttributes.keys,
                     ),
+                    kind = kind,
                 ),
             )
             doc.integrateLocal(formatItem)
@@ -942,7 +958,7 @@ class YText internal constructor(doc: YDoc, name: String) : AbstractYType(doc, n
     override fun iterator(): Iterator<Any?> = toList().iterator()
 
     override fun toString(): String = doc.visibleSequence(name)
-        .filter { it.content.kind == RootKind.Text }
+        .filter { it.content.kind == kind }
         .joinToString(separator = "") { item ->
             when (val content = item.content) {
                 is ItemContent.Text -> content.value
@@ -953,7 +969,7 @@ class YText internal constructor(doc: YDoc, name: String) : AbstractYType(doc, n
 
     override fun toJson(): String = toString()
 
-    fun clone(targetDoc: YDoc = doc): YText {
+    open fun clone(targetDoc: YDoc = doc): YText {
         return targetDoc.createText().also { cloned ->
             cloned.applyDelta(toDelta().cloneInto(targetDoc))
             cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
@@ -966,7 +982,7 @@ class YText internal constructor(doc: YDoc, name: String) : AbstractYType(doc, n
         }
     }
 
-    private fun textItems(): List<StoreItem> = doc.visibleSequence(name).filter { it.content.kind == RootKind.Text }
+    private fun textItems(): List<StoreItem> = doc.visibleSequence(name).filter { it.content.kind == kind }
 
     private fun insertTextEntries(
         index: Int,
@@ -977,11 +993,11 @@ class YText internal constructor(doc: YDoc, name: String) : AbstractYType(doc, n
         val visible = textItems()
         require(index <= visible.size) { "insert index is out of bounds" }
         if (entries.isEmpty()) return
-        val anchors = doc.insertionAnchors(name, RootKind.Text, index)
+        val anchors = doc.insertionAnchors(name, kind, index)
         var origin = originOverride ?: anchors.first
         val rightOrigin = rightOriginOverride ?: anchors.second
         entries.forEach { content ->
-            require(content.kind == RootKind.Text) { "YText entries must use text content" }
+            require(content.kind == kind) { "YText entries must use matching text content" }
             val item = StoreItem(
                 id = doc.nextId(),
                 origin = origin,
@@ -1042,7 +1058,7 @@ private fun textFormatBeforeAttributes(
         keys.associateWith { key -> attributes[key] ?: YValue.Null }.toSortedMap()
     }
 
-private fun YTextDelta.cloneInto(targetDoc: YDoc): YTextDelta {
+internal fun YTextDelta.cloneInto(targetDoc: YDoc): YTextDelta {
     val cloned = YTextDelta()
     ops.forEach { op ->
         val attrs = op.attributes.mapValues { (_, value) -> value.cloneValueInto(targetDoc) }

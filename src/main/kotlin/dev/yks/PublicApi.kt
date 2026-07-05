@@ -191,6 +191,7 @@ private fun ItemContent.logContent(doc: YDoc): String = when (this) {
     is ItemContent.TextFormat -> "TextFormat(target=${target.logId()}, length=$length, attrs=${attributes.logValues(doc)})"
     is ItemContent.MapEntry -> "MapEntry(${doc.valueToJson(value).logAny()})"
     is ItemContent.XmlNode -> "XmlNode(${value.toEventJson().logAny()})"
+    is ItemContent.XmlType -> "XmlType(ref=${ref.kind}:${ref.name}, nodeName=${nodeName.logAny()})"
     is ItemContent.Deleted -> "Deleted(kind=$kind)"
 }
 

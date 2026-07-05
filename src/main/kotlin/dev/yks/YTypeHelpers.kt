@@ -167,9 +167,8 @@ fun typeListLength(type: AbstractYType): Int = when (type) {
     is YArray -> type.length
     is YText -> type.length
     is YXmlFragment -> type.length
+    is YXmlElementType -> type.length
     is YMap -> error("YMap is not a list type")
-    is YXmlElementType,
-    is YXmlTextType -> error("detached XML node type refs are not list types")
 }
 
 fun typeListSlice(type: AbstractYType, start: Int = 0, end: Int = typeListLength(type)): List<Any?> {
@@ -203,9 +202,18 @@ fun typeListInsertGenerics(type: AbstractYType, index: Int, content: List<Any?>)
             }
             type.applyDelta(ops)
         }
+        is YXmlElementType -> {
+            val ops = if (index == 0) {
+                listOf(YArrayDeltaOp(insert = content))
+            } else {
+                listOf(
+                    YArrayDeltaOp(retain = index),
+                    YArrayDeltaOp(insert = content),
+                )
+            }
+            type.applyDelta(ops)
+        }
         is YMap -> error("YMap is not a list type")
-        is YXmlElementType,
-        is YXmlTextType -> error("detached XML node type refs are not list types")
     }
 }
 
@@ -234,9 +242,8 @@ fun typeListDelete(type: AbstractYType, index: Int, length: Int) {
         is YArray -> type.delete(index, length)
         is YText -> type.delete(index, length)
         is YXmlFragment -> type.delete(index, length)
+        is YXmlElementType -> type.delete(index, length)
         is YMap -> error("YMap is not a list type")
-        is YXmlElementType,
-        is YXmlTextType -> error("detached XML node type refs are not list types")
     }
 }
 
@@ -415,9 +422,8 @@ private fun typeListValues(type: AbstractYType): List<Any?> = when (type) {
     is YArray -> type.toList()
     is YText -> type.toList()
     is YXmlFragment -> type.toList()
+    is YXmlElementType -> type.toList()
     is YMap -> error("YMap is not a list type")
-    is YXmlElementType,
-    is YXmlTextType -> error("detached XML node type refs are not list types")
 }
 
 private fun normalizeTypeListSliceIndex(index: Int, size: Int): Int {

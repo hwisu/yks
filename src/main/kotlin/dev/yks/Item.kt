@@ -23,11 +23,11 @@ internal sealed class ItemContent {
         val value: String,
         val attributes: Map<String, YValue> = emptyMap(),
         val baseAttributes: Map<String, YValue> = attributes,
+        override val kind: RootKind = RootKind.Text,
     ) : ItemContent() {
-        override val kind: RootKind = RootKind.Text
-
         init {
             require(value.length == 1) { "text items store exactly one UTF-16 code unit" }
+            require(kind == RootKind.Text || kind == RootKind.XmlText) { "text content must belong to a text sequence" }
         }
     }
 
@@ -35,8 +35,11 @@ internal sealed class ItemContent {
         val value: YValue,
         val attributes: Map<String, YValue> = emptyMap(),
         val baseAttributes: Map<String, YValue> = attributes,
+        override val kind: RootKind = RootKind.Text,
     ) : ItemContent() {
-        override val kind: RootKind = RootKind.Text
+        init {
+            require(kind == RootKind.Text || kind == RootKind.XmlText) { "text embed content must belong to a text sequence" }
+        }
     }
 
     data class TextFormat(
@@ -45,11 +48,13 @@ internal sealed class ItemContent {
         val attributes: Map<String, YValue>,
         val afterAttributes: Map<String, YValue>,
         val beforeAttributes: List<Map<String, YValue>> = emptyList(),
+        override val kind: RootKind = RootKind.Text,
     ) : ItemContent() {
-        override val kind: RootKind = RootKind.Text
-
         init {
             require(length > 0) { "text format length must be positive" }
+            require(kind == RootKind.Text || kind == RootKind.XmlText) {
+                "text format content must belong to a text sequence"
+            }
         }
     }
 
@@ -57,8 +62,30 @@ internal sealed class ItemContent {
         override val kind: RootKind = RootKind.Map
     }
 
-    data class XmlNode(val value: YXmlNodeValue) : ItemContent() {
-        override val kind: RootKind = RootKind.XmlFragment
+    data class XmlNode(
+        val value: YXmlNodeValue,
+        override val kind: RootKind = RootKind.XmlFragment,
+    ) : ItemContent() {
+        init {
+            require(kind == RootKind.XmlFragment || kind == RootKind.XmlElement || kind == RootKind.XmlHook) {
+                "XML node content must belong to an XML sequence"
+            }
+        }
+    }
+
+    data class XmlType(
+        val ref: YValue.TypeRef,
+        val nodeName: String,
+        override val kind: RootKind = RootKind.XmlFragment,
+    ) : ItemContent() {
+        init {
+            require(kind == RootKind.XmlFragment || kind == RootKind.XmlElement || kind == RootKind.XmlHook) {
+                "XML type content must belong to an XML sequence"
+            }
+            require(ref.kind == RootKind.Text || ref.kind == RootKind.XmlElement || ref.kind == RootKind.XmlHook || ref.kind == RootKind.XmlText) {
+                "XML sequence type children must be XML node or text refs"
+            }
+        }
     }
 
     data class Deleted(override val kind: RootKind) : ItemContent()

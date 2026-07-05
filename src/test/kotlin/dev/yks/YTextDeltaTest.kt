@@ -163,6 +163,140 @@ class YTextDeltaTest {
     }
 
     @Test
+    fun basicInsertDeleteEventDeltaMirrorsUpstreamNetChanges() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("text")
+        var eventDelta = YTextDelta()
+        text.observe { event -> eventDelta = event.textDelta }
+
+        text.delete(0, 0)
+        text.insert(0, "abc")
+
+        assertEquals("abc", text.toString())
+        assertEquals(YTextDelta().insert("abc"), eventDelta)
+
+        text.delete(0, 1)
+
+        assertEquals("bc", text.toString())
+        assertEquals(YTextDelta().delete(1), eventDelta)
+
+        text.delete(1, 1)
+
+        assertEquals("b", text.toString())
+        assertEquals(YTextDelta().retain(1).delete(1), eventDelta)
+
+        doc.transact {
+            text.insert(0, "1")
+            text.delete(0, 1)
+        }
+
+        assertEquals("b", text.toString())
+        assertEquals(YTextDelta(), eventDelta)
+    }
+
+    @Test
+    fun falsyFormatsAndEventsMirrorUpstream() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("text")
+        var eventDelta = text.toDelta()
+        text.observe { event -> eventDelta = event.textDelta }
+
+        text.insert(0, "abcde", mapOf("falsy" to false))
+
+        assertEquals(YTextDelta().insert("abcde", mapOf("falsy" to false)), text.toDelta())
+        assertEquals(YTextDelta().insert("abcde", mapOf("falsy" to false)), eventDelta)
+
+        text.format(1, 3, mapOf("falsy" to true))
+
+        assertEquals(
+            YTextDelta()
+                .insert("a", mapOf("falsy" to false))
+                .insert("bcd", mapOf("falsy" to true))
+                .insert("e", mapOf("falsy" to false)),
+            text.toDelta(),
+        )
+        assertEquals(YTextDelta().retain(1).retain(3, mapOf("falsy" to true)), eventDelta)
+
+        text.format(2, 1, mapOf("falsy" to false))
+
+        assertEquals(
+            YTextDelta()
+                .insert("a", mapOf("falsy" to false))
+                .insert("b", mapOf("falsy" to true))
+                .insert("c", mapOf("falsy" to false))
+                .insert("d", mapOf("falsy" to true))
+                .insert("e", mapOf("falsy" to false)),
+            text.toDelta(),
+        )
+        assertEquals(YTextDelta().retain(2).retain(1, mapOf("falsy" to false)), eventDelta)
+    }
+
+    @Test
+    fun multilineFormattingAndDeletePreserveLineAttributesLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("test")
+        text.insert(0, "Test\nMulti-line\nFormatting")
+
+        text.applyDelta(
+            YTextDelta()
+                .retain(4, mapOf("bold" to true))
+                .retain(1)
+                .retain(10, mapOf("bold" to true))
+                .retain(1)
+                .retain(10, mapOf("bold" to true)),
+        )
+
+        assertEquals(
+            YTextDelta()
+                .insert("Test", mapOf("bold" to true))
+                .insert("\n")
+                .insert("Multi-line", mapOf("bold" to true))
+                .insert("\n")
+                .insert("Formatting", mapOf("bold" to true)),
+            text.toDelta(),
+        )
+
+        val lines = doc.getText("lines")
+        lines.applyDelta(
+            YTextDelta()
+                .insert("Text")
+                .insert("\n", mapOf("title" to true))
+                .insert("\n"),
+        )
+        lines.applyDelta(
+            YTextDelta()
+                .retain(4)
+                .delete(1)
+                .retain(1, mapOf("title" to true)),
+        )
+
+        assertEquals(
+            YTextDelta()
+                .insert("Text")
+                .insert("\n", mapOf("title" to true)),
+            lines.toDelta(),
+        )
+
+        val emptyLines = doc.getText("empty-lines")
+        emptyLines.applyDelta(
+            YTextDelta()
+                .insert("Text")
+                .insert("\n", mapOf("title" to true))
+                .insert("\nText")
+                .insert("\n", mapOf("title" to true)),
+        )
+
+        assertEquals(
+            YTextDelta()
+                .insert("Text")
+                .insert("\n", mapOf("title" to true))
+                .insert("\nText")
+                .insert("\n", mapOf("title" to true)),
+            emptyLines.toDelta(),
+        )
+    }
+
+    @Test
     fun applyDeltaUsesActiveRendererForTextIndexes() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("body")

@@ -283,7 +283,7 @@ class YTypeAccessorParityTest {
 
         assertEquals("a", array.get(0))
         assertEquals("a", text.get(0))
-        assertEquals("a", xml.get(0)?.toJson())
+        assertEquals("a", (xml.get(0) as YXmlText).toJson())
         assertEquals("a", element.get(0)?.toJson())
 
         assertNull(array.get(-1))

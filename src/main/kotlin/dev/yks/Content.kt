@@ -484,13 +484,12 @@ fun readYType(decoder: UpdateContentDecoder, doc: YDoc = YDoc()): AbstractYType 
         YXmlElementRefID,
         YXmlHookRefID -> {
             val nodeName = decoder.readKey()
-            YXmlElementType(
-                doc = doc,
+            doc.createXmlElementType(
                 nodeName = nodeName,
                 kind = if (typeRef == YXmlHookRefID) RootKind.XmlHook else RootKind.XmlElement,
             )
         }
-        YXmlTextRefID -> YXmlTextType(doc)
+        YXmlTextRefID -> doc.createXmlTextType()
         else -> error("unknown type ref: $typeRef")
     }
 }
@@ -517,6 +516,7 @@ internal fun ItemContent.toContent(doc: YDoc): AbstractContent = when (this) {
     is ItemContent.TextFormat -> ContentTextFormatRange(target, length, attributes, afterAttributes, beforeAttributes)
     is ItemContent.MapEntry -> value.toContent(doc)
     is ItemContent.XmlNode -> ContentAny(listOf(value.toEventJson()))
+    is ItemContent.XmlType -> ContentType(doc.typeFromXmlType(this))
     is ItemContent.Deleted -> ContentDeleted(1)
 }
 
