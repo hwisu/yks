@@ -25,6 +25,11 @@ class YMapDelta(ops: Map<String, YMapDeltaOp> = emptyMap()) {
         return this
     }
 
+    fun setAttrs(values: Map<String, Any?>, previousValues: Map<String, Any?> = emptyMap()): YMapDelta {
+        values.forEach { (key, value) -> setAttr(key, value, previousValues[key]) }
+        return this
+    }
+
     fun deleteAttr(key: String, previousValue: Any? = null): YMapDelta {
         mutableOps[key] = YMapDeltaOp(YMapDeltaAction.Delete, previousValue = previousValue)
         return this

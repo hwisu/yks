@@ -278,6 +278,47 @@ class YEventTest {
     }
 
     @Test
+    fun throwingTypeObserversCompleteTransactionAndRethrowLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val map = doc.getMap("map")
+        var updateCalled = false
+        var throwingObserverCalled = false
+        var throwingDeepObserverCalled = false
+
+        doc.observeUpdates { _, _ -> updateCalled = true }
+        map.observe {
+            throwingObserverCalled = true
+            error("Failure")
+        }
+        map.observeDeep {
+            throwingDeepObserverCalled = true
+            error("Failure")
+        }
+
+        assertFailsWith<IllegalStateException> {
+            map.setAttr("y", "2")
+        }
+
+        assertTrue(updateCalled)
+        assertTrue(throwingObserverCalled)
+        assertTrue(throwingDeepObserverCalled)
+        assertEquals("2", map.getAttr("y"))
+
+        updateCalled = false
+        throwingObserverCalled = false
+        throwingDeepObserverCalled = false
+
+        assertFailsWith<IllegalStateException> {
+            map.setAttr("z", "3")
+        }
+
+        assertTrue(updateCalled)
+        assertTrue(throwingObserverCalled)
+        assertTrue(throwingDeepObserverCalled)
+        assertEquals("3", map.getAttr("z"))
+    }
+
+    @Test
     fun observerReceivesRemoteOriginAndDelta() {
         val local = YDoc(clientId = 1)
         val remote = YDoc(clientId = 2)
@@ -361,7 +402,13 @@ class YEventTest {
 
         val event = events.single()
         assertEquals(listOf(YArrayDeltaOp(insert = listOf("b"))), event.delta)
-        assertEquals(listOf(YArrayDeltaOp(insert = listOf("a", "b"))), event.deltaDeep)
+        assertEquals(
+            listOf(
+                YArrayDeltaOp(insert = listOf("a"), attributes = mapOf("delete" to emptyList<String>())),
+                YArrayDeltaOp(insert = listOf("b")),
+            ),
+            event.deltaDeep,
+        )
         assertEquals(listOf(YArrayDeltaOp(insert = listOf("b"))), event.getDelta(deep = true, renderer = baseRenderer))
     }
 

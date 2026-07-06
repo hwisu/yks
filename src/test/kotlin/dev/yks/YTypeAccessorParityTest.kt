@@ -458,6 +458,8 @@ class YTypeAccessorParityTest {
         val text = doc.getText("text")
         val seenArray = mutableListOf<String>()
         val seenText = mutableListOf<String>()
+        val seenArrayWithType = mutableListOf<String>()
+        val seenTextWithType = mutableListOf<String>()
 
         array.push("a", "b")
         text.insert(0, listOf("h", "i", mapOf("emoji" to "wave")))
@@ -465,10 +467,20 @@ class YTypeAccessorParityTest {
         assertEquals(listOf("a@0", "b@1"), array.map { value, index -> "$value@$index" })
         array.forEach { value, index -> seenArray.add("$value@$index") }
         assertEquals(listOf("a@0", "b@1"), seenArray)
+        assertEquals(listOf("a@0:true", "b@1:true"), array.map { value, index, type ->
+            "$value@$index:${type === array}"
+        })
+        array.forEach { value, index, type -> seenArrayWithType.add("$value@$index:${type === array}") }
+        assertEquals(listOf("a@0:true", "b@1:true"), seenArrayWithType)
 
         assertEquals(listOf("h@0", "i@1", "{emoji=wave}@2"), text.map { value, index -> "$value@$index" })
         text.forEach { value, index -> seenText.add("$value@$index") }
         assertEquals(listOf("h@0", "i@1", "{emoji=wave}@2"), seenText)
+        assertEquals(listOf("h@0:true", "i@1:true", "{emoji=wave}@2:true"), text.map { value, index, type ->
+            "$value@$index:${type === text}"
+        })
+        text.forEach { value, index, type -> seenTextWithType.add("$value@$index:${type === text}") }
+        assertEquals(listOf("h@0:true", "i@1:true", "{emoji=wave}@2:true"), seenTextWithType)
     }
 
     @Test

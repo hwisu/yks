@@ -198,12 +198,92 @@ class SubdocTest {
 
         assertEquals("sub", remote.guid)
         assertEquals("workspace", remote.collectionId)
+        assertFalse(remote.gc)
         assertEquals(mapOf("order" to 1L, "role" to "reference"), remote.meta)
         assertTrue(remote.autoLoad)
         assertTrue(remote.isSuggestionDoc)
         assertFalse(remote.cleanupFormatting)
-        assertFalse(remote.shouldLoad)
+        assertTrue(remote.shouldLoad)
         assertFalse(remote.isLoaded)
+    }
+
+    @Test
+    fun remoteAutoLoadSubdocsAreReportedAsLoadedOnApplyUpdate() {
+        val source = YDoc(clientId = 1)
+        val target = YDoc(clientId = 2)
+        val events = mutableListOf<YSubdocEvent>()
+        source.getArray("").push(YDoc(guid = "autoload", autoLoad = true))
+        target.observeSubdocs { events.add(it) }
+
+        target.applyUpdate(source.encodeStateAsUpdate())
+
+        val remote = target.getArray("").get(0) as YDoc
+        assertTrue(remote.shouldLoad)
+        assertTrue(remote.autoLoad)
+        assertEquals(listOf("autoload"), events.single().added.map(YDoc::guid))
+        assertEquals(listOf("autoload"), events.single().loaded.map(YDoc::guid))
+        assertSame(remote, events.single().added.single())
+        assertSame(remote, events.single().loaded.single())
+    }
+
+    @Test
+    fun autoloadSubdocDestroyAndRemoteApplyUpdateMirrorUpstreamEdgeCase() {
+        val source = YDoc(clientId = 1)
+        val array = source.getArray("")
+        val sourceEvents = mutableListOf<YSubdocEvent>()
+        source.observeSubdocs { events -> sourceEvents.add(events) }
+        val subdoc = YDoc(guid = "autoload", autoLoad = true)
+
+        array.insert(0, listOf(subdoc))
+
+        assertTrue(subdoc.shouldLoad)
+        assertTrue(subdoc.autoLoad)
+        assertSame(subdoc, sourceEvents.single().added.single())
+        assertSame(subdoc, sourceEvents.single().loaded.single())
+
+        sourceEvents.clear()
+        subdoc.destroy()
+        val replacement = array.get(0) as YDoc
+
+        assertNotSame(subdoc, replacement)
+        assertSame(replacement, sourceEvents.single().added.single())
+        assertFalse(replacement.isLoaded)
+
+        sourceEvents.clear()
+        replacement.load()
+
+        assertSame(replacement, sourceEvents.single().loaded.single())
+
+        val target = YDoc(clientId = 2)
+        val targetEvents = mutableListOf<YSubdocEvent>()
+        target.observeSubdocs { events -> targetEvents.add(events) }
+
+        target.applyUpdate(source.encodeStateAsUpdate())
+
+        val remote = target.getArray("").get(0) as YDoc
+        assertTrue(remote.shouldLoad)
+        assertTrue(remote.autoLoad)
+        assertSame(remote, targetEvents.single().added.single())
+        assertSame(remote, targetEvents.single().loaded.single())
+    }
+
+    @Test
+    fun subdocReferencesCanBeUndoneAndRedoneLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val array = doc.getArray("")
+        val undoManager = UndoManager(array)
+        val subdoc = YDoc(guid = "sub")
+
+        array.insert(0, listOf(subdoc))
+
+        assertEquals(1, array.length)
+        undoManager.undo()
+        assertEquals(0, array.length)
+
+        undoManager.redo()
+
+        assertEquals(1, array.length)
+        assertEquals("sub", (array.get(0) as YDoc).guid)
     }
 
     @Test

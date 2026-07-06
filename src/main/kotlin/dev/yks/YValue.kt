@@ -49,6 +49,7 @@ sealed interface YValue {
 
     data class SubdocRef(
         val guid: String,
+        val gc: Boolean,
         val shouldLoad: Boolean,
         val autoLoad: Boolean,
         val instanceId: String,
@@ -58,6 +59,7 @@ sealed interface YValue {
     ) : YValue {
         override fun toAny(): Any = mapOf(
             "guid" to guid,
+            "gc" to gc,
             "shouldLoad" to shouldLoad,
             "autoLoad" to autoLoad,
             "instanceId" to instanceId,
@@ -74,6 +76,7 @@ sealed interface YValue {
             is AbstractYType -> TypeRef(value.kind, value.name)
             is YDoc -> SubdocRef(
                 guid = value.guid,
+                gc = value.gc,
                 shouldLoad = value.shouldLoad,
                 autoLoad = value.autoLoad,
                 instanceId = value.subdocInstanceId,
@@ -144,6 +147,7 @@ fun writeYValue(encoder: BinaryEncoder, value: YValue) {
         is YValue.SubdocRef -> {
             encoder.writeByte(10)
             encoder.writeString(value.guid)
+            encoder.writeBoolean(value.gc)
             encoder.writeBoolean(value.autoLoad)
             encoder.writeString(value.instanceId)
             encoder.writeBoolean(value.collectionId != null)
@@ -187,6 +191,7 @@ fun readYValue(decoder: BinaryDecoder): YValue = when (val tag = decoder.readByt
     }
     10 -> YValue.SubdocRef(
         guid = decoder.readString(),
+        gc = decoder.readBoolean(),
         shouldLoad = false,
         autoLoad = decoder.readBoolean(),
         instanceId = decoder.readString(),

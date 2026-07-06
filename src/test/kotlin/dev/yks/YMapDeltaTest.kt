@@ -41,6 +41,40 @@ class YMapDeltaTest {
     }
 
     @Test
+    fun mapDeltaSetAttrsMatchesUpstreamBulkBuilder() {
+        val doc = YDoc(clientId = 1)
+        val map = doc.getMap("meta")
+
+        val delta = YMapDelta().setAttrs(
+            linkedMapOf(
+                "object" to mapOf("x" to 1),
+                "boolean" to true,
+            ),
+        )
+        map.applyDelta(delta)
+        val fromDelta = Type.from(delta, doc, "from-delta")
+
+        assertEquals(YMapDelta().setAttr("object", mapOf("x" to 1)).setAttr("boolean", true), delta)
+        assertEquals(mapOf("boolean" to true, "object" to mapOf("x" to 1L)), map.toMap())
+        assertEquals(mapOf("boolean" to true, "object" to mapOf("x" to 1L)), fromDelta.toMap())
+    }
+
+    @Test
+    fun mapDeltaSetAttrsCanCarryPreviousValues() {
+        val delta = YMapDelta().setAttrs(
+            mapOf("title" to "new", "count" to 2),
+            previousValues = mapOf("title" to "old"),
+        )
+
+        assertEquals(
+            YMapDelta()
+                .setAttr("title", "new", previousValue = "old")
+                .setAttr("count", 2),
+            delta,
+        )
+    }
+
+    @Test
     fun mapDeltaAllowsEmptyStringKeysLikeUpstream() {
         val doc = YDoc(clientId = 1)
         val map = doc.getMap("meta")

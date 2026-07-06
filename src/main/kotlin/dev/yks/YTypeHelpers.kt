@@ -457,7 +457,7 @@ private fun insertTextContent(
             1
         }
         is ContentDoc -> {
-            parent.insertEmbed(index, content.doc ?: YDoc(guid = content.guid), formats, origin)
+            parent.insertEmbed(index, content.toYDoc(), formats, origin)
             1
         }
         is ContentAny,

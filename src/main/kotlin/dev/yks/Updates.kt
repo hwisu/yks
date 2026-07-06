@@ -758,16 +758,7 @@ private fun AbstractContent.toSingleYValue(): YValue = when (this) {
     is ContentString -> YValue.StringValue(str)
     is ContentEmbed -> YValue.from(embed)
     is ContentType -> YValue.TypeRef(type.kind, type.name)
-    is ContentDoc -> doc?.let { YValue.from(it) }
-        ?: YValue.SubdocRef(
-            guid = guid,
-            shouldLoad = true,
-            autoLoad = opts["autoLoad"] as? Boolean ?: false,
-            instanceId = guid,
-            collectionId = opts["collectionId"] as? String,
-            meta = YValue.from(opts["meta"]),
-            isSuggestionDoc = opts["isSuggestionDoc"] as? Boolean ?: false,
-        )
+    is ContentDoc -> toSubdocRef()
     else -> error("unsupported array/map update content: ${this::class.simpleName}")
 }
 
@@ -821,7 +812,9 @@ private class UpdateObfuscator(
         )
         is ItemContent.MapEntry -> ItemContent.MapEntry(obfuscate(content.value))
         is ItemContent.XmlNode -> content.copy(value = obfuscate(content.value))
-        is ItemContent.XmlType -> content.copy(nodeName = content.nodeName.obfuscatedString())
+        is ItemContent.XmlType -> content.copy(
+            nodeName = if (options.name) obfuscateNodeName(content.nodeName) else content.nodeName,
+        )
         is ItemContent.TextFormat -> content.copy(
             attributes = if (options.formatting) obfuscateFormatting(content.attributes) else content.attributes,
             afterAttributes = if (options.formatting) obfuscateFormatting(content.afterAttributes) else content.afterAttributes,
@@ -858,7 +851,10 @@ private class UpdateObfuscator(
     }
 
     private fun obfuscate(value: YXmlNodeValue): YXmlNodeValue = when (value) {
-        is YXmlNodeValue.Text -> YXmlNodeValue.Text(value.text.obfuscatedString())
+        is YXmlNodeValue.Text -> YXmlNodeValue.Text(
+            value.text.obfuscatedString(),
+            if (options.formatting) obfuscateFormatting(value.attributes) else value.attributes,
+        )
         is YXmlNodeValue.Element -> YXmlNodeValue.Element(
             nodeName = if (options.name) obfuscateNodeName(value.nodeName) else value.nodeName,
             attributes = obfuscateValues(value.attributes),

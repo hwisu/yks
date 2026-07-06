@@ -150,13 +150,16 @@ class StructStore(private val owner: YDoc? = null) {
         children.values.forEach { sortSiblings(it) }
 
         val ordered = mutableListOf<StoreItem>()
-        fun visit(origin: Id?) {
-            children[origin].orEmpty().forEach { child ->
-                ordered.add(child)
-                visit(child.id)
+        val stack = ArrayDeque<StoreItem>()
+        children[null].orEmpty().asReversed().forEach(stack::addLast)
+        while (stack.isNotEmpty()) {
+            val child = stack.removeLast()
+            ordered.add(child)
+            val nestedChildren = children[child.id].orEmpty()
+            for (index in nestedChildren.lastIndex downTo 0) {
+                stack.addLast(nestedChildren[index])
             }
         }
-        visit(null)
         return ordered
     }
 

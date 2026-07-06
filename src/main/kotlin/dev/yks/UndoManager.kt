@@ -2,11 +2,13 @@ package dev.yks
 
 data class UndoManagerOptions(
     val captureTimeoutMillis: Long = 500,
+    val captureTimeout: Long? = null,
     val trackedOrigins: Set<Any?> = setOf(null),
     val captureTransaction: ((YTransactionEvent) -> Boolean)? = null,
-    val deleteFilter: (Id) -> Boolean = { true },
+    val deleteFilter: (Item) -> Boolean = { true },
     val ignoreRemoteAttributeChanges: Boolean = false,
     val ignoreRemoteMapChanges: Boolean = false,
+    val doc: YDoc? = null,
 ) {
     /**
      * Backwards-compatible alias for Yjs' former option name.
@@ -16,6 +18,9 @@ data class UndoManagerOptions(
      */
     internal fun shouldIgnoreRemoteAttributeChanges(): Boolean =
         ignoreRemoteAttributeChanges || ignoreRemoteMapChanges
+
+    internal fun effectiveCaptureTimeoutMillis(): Long =
+        captureTimeout ?: captureTimeoutMillis
 }
 
 class StackItem internal constructor(
@@ -67,7 +72,7 @@ class UndoManager private constructor(
         this(typeScope.doc, setOf(typeScope.name), options)
 
     constructor(typeScope: List<AbstractYType>, options: UndoManagerOptions = UndoManagerOptions()) :
-        this(resolveDoc(typeScope), typeScope.map { it.name }.toSet(), options)
+        this(resolveDoc(typeScope, options.doc), typeScope.map { it.name }.toSet(), options)
 
     constructor(doc: YDoc, options: UndoManagerOptions = UndoManagerOptions()) :
         this(doc, null, options)
@@ -167,24 +172,31 @@ class UndoManager private constructor(
     }
 
     fun undo(): StackItem? {
-        val stackItem = popNormalizedStackItem(undoStack) ?: return null
-        currStackItem = stackItem
         undoing = true
         redoing = false
         try {
-            val applied = applyStackItem(stackItem)
-            if (!applied.reverseStackItem.isEmpty) {
-                redoStack.add(applied.reverseStackItem)
-                emitStackItemEvent(
-                    "stack-item-added",
-                    applied.reverseStackItem,
-                    UndoStackItemType.Redo,
-                    this,
-                    applied.changedParentTypes,
-                )
+            while (true) {
+                val stackItem = popNormalizedStackItem(undoStack) ?: return null
+                currStackItem = stackItem
+                val applied = applyStackItem(stackItem)
+                if (!applied.performedChange) {
+                    currStackItem = null
+                    stopCapturing()
+                    continue
+                }
+                if (!applied.reverseStackItem.isEmpty) {
+                    redoStack.add(applied.reverseStackItem)
+                    emitStackItemEvent(
+                        "stack-item-added",
+                        applied.reverseStackItem,
+                        UndoStackItemType.Redo,
+                        this,
+                        applied.changedParentTypes,
+                    )
+                }
+                emitStackItemEvent("stack-item-popped", stackItem, UndoStackItemType.Undo, this, applied.changedParentTypes)
+                return stackItem
             }
-            emitStackItemEvent("stack-item-popped", stackItem, UndoStackItemType.Undo, this, applied.changedParentTypes)
-            return stackItem
         } finally {
             currStackItem = null
             undoing = false
@@ -193,24 +205,31 @@ class UndoManager private constructor(
     }
 
     fun redo(): StackItem? {
-        val stackItem = popNormalizedStackItem(redoStack) ?: return null
-        currStackItem = stackItem
         undoing = false
         redoing = true
         try {
-            val applied = applyStackItem(stackItem)
-            if (!applied.reverseStackItem.isEmpty) {
-                undoStack.add(applied.reverseStackItem)
-                emitStackItemEvent(
-                    "stack-item-added",
-                    applied.reverseStackItem,
-                    UndoStackItemType.Undo,
-                    this,
-                    applied.changedParentTypes,
-                )
+            while (true) {
+                val stackItem = popNormalizedStackItem(redoStack) ?: return null
+                currStackItem = stackItem
+                val applied = applyStackItem(stackItem)
+                if (!applied.performedChange) {
+                    currStackItem = null
+                    stopCapturing()
+                    continue
+                }
+                if (!applied.reverseStackItem.isEmpty) {
+                    undoStack.add(applied.reverseStackItem)
+                    emitStackItemEvent(
+                        "stack-item-added",
+                        applied.reverseStackItem,
+                        UndoStackItemType.Undo,
+                        this,
+                        applied.changedParentTypes,
+                    )
+                }
+                emitStackItemEvent("stack-item-popped", stackItem, UndoStackItemType.Redo, this, applied.changedParentTypes)
+                return stackItem
             }
-            emitStackItemEvent("stack-item-popped", stackItem, UndoStackItemType.Redo, this, applied.changedParentTypes)
-            return stackItem
         } finally {
             currStackItem = null
             redoing = false
@@ -255,8 +274,8 @@ class UndoManager private constructor(
         val now = System.currentTimeMillis()
         val shouldMerge = undoStack.isNotEmpty() &&
             lastCaptureTime != 0L &&
-            options.captureTimeoutMillis > 0 &&
-            now - lastCaptureTime <= options.captureTimeoutMillis
+            options.effectiveCaptureTimeoutMillis() > 0 &&
+            now - lastCaptureTime <= options.effectiveCaptureTimeoutMillis()
 
         if (shouldMerge) {
             val previous = undoStack.removeLast()
@@ -294,7 +313,7 @@ class UndoManager private constructor(
     private fun applyStackItem(stackItem: StackItem): AppliedStackItem {
         captureDisabled = true
         try {
-            val insertedItemsToDelete = stackItem.insertedItems.filter { options.deleteFilter(it.id) }
+            val insertedItemsToDelete = stackItem.insertedItems.filter { options.deleteFilter(it.toItemStruct(doc)) }
             val insertedIdsToDelete = insertedItemsToDelete.map { item -> item.id }.toSet()
             val deletedItemsToRestore = stackItem.deletedItems.filter { restore ->
                 val source = restore.item
@@ -321,6 +340,7 @@ class UndoManager private constructor(
                 changedTypesSubscription.close()
             }
             return AppliedStackItem(
+                performedChange = restoredItems.isNotEmpty() || deletedItems.isNotEmpty(),
                 reverseStackItem = normalizeStackItem(
                     StackItem(
                         insertedItems = restoredItems.map { it.copy(deleted = false) },
@@ -335,7 +355,15 @@ class UndoManager private constructor(
     }
 
     private fun isTrackedOrigin(origin: Any?): Boolean {
-        return trackedOrigins.contains(origin) || (origin != null && trackedOrigins.contains(origin::class))
+        if (trackedOrigins.contains(origin)) return true
+        if (origin == null) return false
+        return trackedOrigins.any { trackedOrigin ->
+            when (trackedOrigin) {
+                is kotlin.reflect.KClass<*> -> trackedOrigin.isInstance(origin)
+                is Class<*> -> trackedOrigin.isInstance(origin)
+                else -> false
+            }
+        }
     }
 
     private fun isInScope(event: YTransactionEvent): Boolean {
@@ -419,15 +447,21 @@ class UndoManager private constructor(
     }
 
     private data class AppliedStackItem(
+        val performedChange: Boolean,
         val reverseStackItem: StackItem,
         val changedParentTypes: Set<AbstractYType>,
     )
 
     companion object {
-        private fun resolveDoc(types: List<AbstractYType>): YDoc {
-            require(types.isNotEmpty()) { "UndoManager type scope must not be empty" }
+        private fun resolveDoc(types: List<AbstractYType>, optionsDoc: YDoc?): YDoc {
+            if (types.isEmpty()) {
+                return requireNotNull(optionsDoc) { "UndoManager type scope must not be empty without a doc option" }
+            }
             val doc = types.first().doc
             require(types.all { it.doc === doc }) { "all UndoManager scoped types must belong to the same YDoc" }
+            require(optionsDoc == null || optionsDoc === doc) {
+                "UndoManager doc option must match scoped type documents"
+            }
             return doc
         }
     }

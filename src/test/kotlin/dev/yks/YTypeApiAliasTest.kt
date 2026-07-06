@@ -49,12 +49,14 @@ class YTypeApiAliasTest {
         val map = doc.getMap("map")
         val text = doc.getText("text")
         val xml = doc.getXmlFragment("xml")
-        val nested = doc.createMap()
+        val arrayNested = doc.createMap()
+        val mapNested = doc.createMap()
 
-        nested.setAttr("name", "Ada")
-        array.push("a", "b", nested)
+        arrayNested.setAttr("name", "Ada")
+        mapNested.setAttr("name", "Ada")
+        array.push("a", "b", arrayNested)
         array.setAttr("kind", "list")
-        map.setAttrs(mapOf("title" to "hello", "count" to 2, "profile" to nested))
+        map.setAttrs(mapOf("title" to "hello", "count" to 2, "profile" to mapNested))
         text.insert(0, "hi")
         xml.setAttr("lang", "en")
         xml.push(YXmlElement("p").also { it.push(YXmlText("hello")) })
@@ -119,6 +121,24 @@ class YTypeApiAliasTest {
         array.clear()
         assertEquals(emptyList(), array.toArray())
         assertEquals(0, array.length)
+    }
+
+    @Test
+    fun arrayFactoryFromValuesMatchesUpstreamArrayFrom() {
+        val doc = YDoc(clientId = 1)
+        val externalNested = YMap(mapOf("kind" to "external"))
+        val values = listOf<Any?>("a", 1, mapOf("flag" to true), null, externalNested)
+
+        val array = YArray.from(values, doc, "items")
+        val nested = array.get(4) as YMap
+
+        assertEquals(listOf("a", 1L, mapOf("flag" to true), null, nested), array.toArray())
+        assertEquals(mapOf("kind" to "external"), nested.toMap())
+        assertTrue(nested.doc === doc)
+        assertFalse(nested === externalNested)
+
+        val remote = createDocFromUpdate(doc.encodeStateAsUpdate())
+        assertEquals(listOf("a", 1L, mapOf("flag" to true), null, mapOf("kind" to "external")), remote.getArray("items").toJson())
     }
 
     @Test
@@ -213,6 +233,53 @@ class YTypeApiAliasTest {
         assertEquals(mapOf("number" to 1L, "string" to "hello"), map.toMap())
         assertEquals(listOf(0L, 1L, 2L), array.toArray())
         assertEquals("hi", text.toString())
+    }
+
+    @Test
+    fun genericTypeAliasesExposeFactoryFromDeepDelta() {
+        val source = YDoc(clientId = 1)
+        val array = source.getArray("items")
+        val text = source.getText("body")
+        val map = source.getMap("meta")
+        val xml = source.getXmlFragment("xml")
+        val nestedMap = source.createMap()
+        val nestedText = source.createText()
+        val embedArray = source.createArray()
+        val mapText = source.createText()
+        val mapArray = source.createArray()
+
+        nestedMap.setAttrs(mapOf("label" to "nested"))
+        nestedText.insert(0, "child", mapOf("italic" to true))
+        embedArray.push("x", "y")
+        mapText.insert(0, "mapped")
+        mapArray.push("one", "two")
+        array.setAttr("kind", "mixed")
+        array.push("plain", nestedMap, nestedText)
+        text.setAttr("lang", "en")
+        text.insert(0, "hi", mapOf("bold" to true))
+        text.insertEmbed(text.length, mapOf("items" to embedArray), mapOf("kind" to "embed"))
+        map.setAttrs(mapOf("body" to mapText, "items" to mapArray))
+        xml.setAttr("role", "doc")
+        xml.push(YXmlElement("p").also { it.push(YXmlText("hello", mapOf("bold" to true))) })
+
+        val target = YDoc(clientId = 2)
+        val arrayCopy = YType.from(array.toDeltaDeep(), target, "items")
+        val textCopy = Type.from(text.toDeltaDeep(), target, "body")
+        val mapCopy = Type.from(map.toDeltaDeep(), target, "meta")
+        val xmlCopy = YType.from(xml.toDeltaDeep(), target, "xml")
+
+        assertEquals(array.toDeltaDeep(), arrayCopy.toDeltaDeep())
+        assertEquals(text.toDeltaDeep(), textCopy.toDeltaDeep())
+        assertEquals(map.toDeltaDeep(), mapCopy.toDeltaDeep())
+        assertEquals(xml.toDeltaDeep(), xmlCopy.toDeltaDeep())
+
+        val remote = YDoc(clientId = 3)
+        remote.applyUpdate(target.encodeStateAsUpdate())
+
+        assertEquals(arrayCopy.toDeltaDeep(), remote.getArray("items").toDeltaDeep())
+        assertEquals(textCopy.toDeltaDeep(), remote.getText("body").toDeltaDeep())
+        assertEquals(mapCopy.toDeltaDeep(), remote.getMap("meta").toDeltaDeep())
+        assertEquals(xmlCopy.toDeltaDeep(), remote.getXmlFragment("xml").toDeltaDeep())
     }
 
     @Test

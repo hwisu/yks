@@ -3,6 +3,7 @@ package dev.yks
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class YXmlTest {
@@ -78,6 +79,7 @@ class YXmlTest {
         assertEquals("link", child.toJson())
         assertTrue(element.hasAttribute("href"))
         assertEquals("https://example.com?a=1&b=2", element.getAttribute("href"))
+        assertEquals(element.getAttrs(), element.getAttributes())
         assertEquals(3, element.attrSize)
         assertEquals(setOf("count", "href", "title"), element.attrKeys())
         assertEquals(listOf(2L, "https://example.com?a=1&b=2", "Example"), element.attrValues().toList())
@@ -97,6 +99,27 @@ class YXmlTest {
         assertFalse(element.hasAttr("title"))
         element.clearAttrs()
         assertEquals(0, element.attrSize)
+    }
+
+    @Test
+    fun staticXmlElementsExposeFirstChildAndTreeWalker() {
+        val element = YXmlElement("section")
+        val paragraph = YXmlElement("p").also { it.push(YXmlText("body")) }
+        element.push(YXmlText("head"), paragraph, YXmlElement("footer"))
+
+        assertEquals("head", element.firstChild?.toJson())
+        assertEquals(
+            listOf("head", "p", "body", "footer"),
+            element.createTreeWalker().map { node ->
+                when (node) {
+                    is YXmlElement -> node.nodeName
+                    is YXmlText -> node.toJson()
+                }
+            }.toList(),
+        )
+        assertEquals(listOf("p", "footer"), element.createTreeWalker { it is YXmlElement }.map {
+            (it as YXmlElement).nodeName
+        }.toList())
     }
 
     @Test
@@ -200,6 +223,29 @@ class YXmlTest {
 
         assertEquals("<a /><B />c<d />", fragment.toString())
         assertEquals("<a /><B />c<d />", fragment.toDelta().single().insert!!.joinToString(separator = ""))
+    }
+
+    @Test
+    fun xmlFragmentApplyDeltaPreservesTextFormattingLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val fragment = doc.getXmlFragment("xml")
+        val emphasized = mapOf<String, Any?>("em" to emptyMap<String, Any?>())
+        val emphasizedStrong = mapOf<String, Any?>(
+            "em" to emptyMap<String, Any?>(),
+            "strong" to emptyMap<String, Any?>(),
+        )
+        val delta = listOf(
+            YArrayDeltaOp(insert = listOf("A"), attributes = emphasizedStrong),
+            YArrayDeltaOp(insert = listOf("B"), attributes = emphasized),
+            YArrayDeltaOp(insert = listOf("C"), attributes = emphasizedStrong),
+        )
+
+        fragment.applyDelta(delta)
+        val remote = createDocFromUpdate(doc.encodeStateAsUpdate())
+
+        assertEquals("ABC", fragment.toString())
+        assertEquals(delta, fragment.toDelta())
+        assertEquals(delta, remote.getXmlFragment("xml").toDelta())
     }
 
     @Test
@@ -319,6 +365,8 @@ class YXmlTest {
         val element = YXmlElement("section").setAttrs(mapOf("role" to "main"))
         val fragmentSeen = mutableListOf<String>()
         val elementSeen = mutableListOf<String>()
+        val fragmentSeenWithType = mutableListOf<String>()
+        val elementSeenWithType = mutableListOf<String>()
         val attrSeen = mutableListOf<String>()
 
         element.push(YXmlText("hello"), YXmlElement("br"))
@@ -327,9 +375,17 @@ class YXmlTest {
 
         assertEquals(listOf("<section role=\"main\">hello<br /></section>@0", "tail@1"), fragment.map { node, index -> "$node@$index" })
         assertEquals(listOf("hello@0", "<br />@1"), element.map { node, index -> "$node@$index" })
+        assertEquals(listOf("<section role=\"main\">hello<br /></section>@0:true", "tail@1:true"), fragment.map { node, index, type ->
+            "$node@$index:${type === fragment}"
+        })
+        assertEquals(listOf("hello@0:true", "<br />@1:true"), element.map { node, index, type ->
+            "$node@$index:${type === element}"
+        })
 
         fragment.forEach { node, index -> fragmentSeen.add("$node@$index") }
         element.forEach { node, index -> elementSeen.add("$node@$index") }
+        fragment.forEach { node, index, type -> fragmentSeenWithType.add("$node@$index:${type === fragment}") }
+        element.forEach { node, index, type -> elementSeenWithType.add("$node@$index:${type === element}") }
         fragment.forEachAttr { value, key, type ->
             assertTrue(type === fragment)
             attrSeen.add("fragment:$key=$value")
@@ -341,6 +397,8 @@ class YXmlTest {
 
         assertEquals(listOf("<section role=\"main\">hello<br /></section>@0", "tail@1"), fragmentSeen)
         assertEquals(listOf("hello@0", "<br />@1"), elementSeen)
+        assertEquals(listOf("<section role=\"main\">hello<br /></section>@0:true", "tail@1:true"), fragmentSeenWithType)
+        assertEquals(listOf("hello@0:true", "<br />@1:true"), elementSeenWithType)
         assertEquals(listOf("fragment:lang=en", "element:role=main"), attrSeen)
         assertEquals(listOf("fragment:lang=en"), fragment.mapAttrs { value, key, type -> "fragment:$key=$value:${type === fragment}" }.map { it.removeSuffix(":true") })
         assertEquals(listOf("element:role=main"), element.mapAttrs { value, key, type -> "element:$key=$value:${type === element}" }.map { it.removeSuffix(":true") })
@@ -434,5 +492,150 @@ class YXmlTest {
 
         assertEquals("hello!", fragment.toString())
         assertEquals(YTextDelta().insert("hello", mapOf("bold" to true)).insert("!"), text.toDelta())
+    }
+
+    @Test
+    fun liveXmlFragmentAccessorsExposeLiveTypesAndStaticNodes() {
+        val doc = YDoc(clientId = 1)
+        val fragment = doc.getXmlFragment("xml")
+        val liveElement = doc.createXmlElement("p").setAttrs(mapOf("id" to "live"))
+        val liveText = doc.createXmlText()
+        liveText.insert(0, "body")
+
+        fragment.push(listOf(YXmlText("head")))
+        fragment.push(liveElement, liveText)
+
+        assertEquals("head", (fragment.get(0) as YXmlText).toJson())
+        assertNull(fragment.getType(0))
+        assertTrue(fragment.get(1) === liveElement)
+        assertTrue(fragment.get(2) === liveText)
+        assertTrue(fragment.getType(1) === liveElement)
+        assertTrue(fragment.getType(2) === liveText)
+
+        val arrayValues = fragment.toArray()
+        val listValues = fragment.toList()
+        val slicedValues = fragment.slice(1, 3)
+        val iteratedValues = fragment.iterator().asSequence().toList()
+        val deltaValues = fragment.toDelta().single().insert!!
+
+        assertEquals("head", (arrayValues[0] as YXmlText).toJson())
+        assertTrue(arrayValues[1] === liveElement)
+        assertTrue(listValues[2] === liveText)
+        assertTrue(slicedValues[0] === liveElement)
+        assertTrue(slicedValues[1] === liveText)
+        assertTrue(iteratedValues[1] === liveElement)
+        assertTrue(deltaValues[1] === liveElement)
+        assertTrue(deltaValues[2] === liveText)
+
+        assertEquals(listOf("static@0", "element@1", "text@2"), fragment.map { value, index ->
+            "${xmlAccessorLabel(value, liveElement, liveText)}@$index"
+        })
+        assertEquals(listOf("static@0:true", "element@1:true", "text@2:true"), fragment.map { value, index, type ->
+            "${xmlAccessorLabel(value, liveElement, liveText)}@$index:${type === fragment}"
+        })
+
+        val seen = mutableListOf<String>()
+        val seenWithType = mutableListOf<String>()
+        fragment.forEach { value -> seen.add(xmlAccessorLabel(value, liveElement, liveText)) }
+        fragment.forEach { value, index, type ->
+            seenWithType.add("${xmlAccessorLabel(value, liveElement, liveText)}@$index:${type === fragment}")
+        }
+        assertEquals(listOf("static", "element", "text"), seen)
+        assertEquals(listOf("static@0:true", "element@1:true", "text@2:true"), seenWithType)
+    }
+
+    @Test
+    fun liveXmlTraversalAccessorsExposeFirstChildSiblingsAndTreeWalker() {
+        val doc = YDoc(clientId = 1)
+        val fragment = doc.getXmlFragment("xml")
+        val section = doc.createXmlElement("section").setAttrs(mapOf("id" to "main"))
+        val liveText = doc.createXmlText()
+        val span = doc.createXmlElement("span")
+
+        liveText.insert(0, "body")
+        section.push(YXmlText("prefix"))
+        section.push(liveText, span)
+        fragment.setAttrs(mapOf("lang" to "en"))
+        fragment.push(YXmlText("head"))
+        fragment.push(section)
+        fragment.push(YXmlElement("footer"))
+
+        assertEquals(fragment.getAttrs(), fragment.getAttributes())
+        assertEquals(section.getAttrs(), section.getAttributes())
+        assertEquals("head", (fragment.firstChild as YXmlText).toJson())
+        assertEquals("prefix", (section.firstChild as YXmlText).toJson())
+        assertTrue(section.prevSibling is YXmlText)
+        assertTrue(section.nextSibling is YXmlElement)
+        assertTrue(liveText.prevSibling is YXmlText)
+        assertTrue(liveText.nextSibling === span)
+        assertTrue(span.prevSibling === liveText)
+        assertNull(span.nextSibling)
+
+        assertEquals(
+            listOf("head", "section", "prefix", "text:body", "span", "footer"),
+            fragment.createTreeWalker().map { node ->
+                when (node) {
+                    is YXmlElementType -> node.nodeName
+                    is YXmlTextType -> "text:${node}"
+                    is YXmlElement -> node.nodeName
+                    is YXmlText -> node.toJson()
+                    else -> "unknown"
+                }
+            }.toList(),
+        )
+        assertEquals(
+            listOf("section", "span"),
+            fragment.createTreeWalker { it is YXmlElementType }.map { (it as YXmlElementType).nodeName }.toList(),
+        )
+        assertEquals(listOf("prefix@0:true", "text:body@1:true", "span@2:true"), section.map { node, index, type ->
+            val label = when (node) {
+                is YXmlText -> node.toJson()
+                is YXmlTextType -> "text:${node}"
+                is YXmlElementType -> node.nodeName
+                else -> "unknown"
+            }
+            "$label@$index:${type === section}"
+        })
+    }
+
+    @Test
+    fun liveXmlElementAccessorsExposeLiveTypesAndStaticNodes() {
+        val doc = YDoc(clientId = 1)
+        val element = doc.createXmlElement("section")
+        val liveText = doc.createXmlText()
+        val liveSpan = doc.createXmlElement("span")
+        liveText.insert(0, "body")
+
+        element.push(listOf(YXmlText("head")))
+        element.push(liveText, liveSpan)
+
+        assertEquals("head", (element.get(0) as YXmlText).toJson())
+        assertNull(element.getType(0))
+        assertTrue(element.get(1) === liveText)
+        assertTrue(element.get(2) === liveSpan)
+        assertTrue(element.getType(1) === liveText)
+        assertTrue(element.getType(2) === liveSpan)
+
+        val arrayValues = element.toArray()
+        val listValues = element.toList()
+        val slicedValues = element.slice(1, 3)
+        val iteratedValues = element.iterator().asSequence().toList()
+        val deltaValues = element.toDelta().single().insert!!
+
+        assertEquals("head", (arrayValues[0] as YXmlText).toJson())
+        assertTrue(arrayValues[1] === liveText)
+        assertTrue(listValues[2] === liveSpan)
+        assertTrue(slicedValues[0] === liveText)
+        assertTrue(slicedValues[1] === liveSpan)
+        assertTrue(iteratedValues[1] === liveText)
+        assertTrue(deltaValues[1] === liveText)
+        assertTrue(deltaValues[2] === liveSpan)
+    }
+
+    private fun xmlAccessorLabel(value: Any?, liveElement: YXmlElementType, liveText: YXmlTextType): String = when {
+        value === liveElement -> "element"
+        value === liveText -> "text"
+        value is YXmlText -> "static"
+        else -> "unknown"
     }
 }

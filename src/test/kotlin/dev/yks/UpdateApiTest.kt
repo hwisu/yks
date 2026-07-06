@@ -88,6 +88,36 @@ class UpdateApiTest {
     }
 
     @Test
+    fun mergeUpdatesHandlesOverlappingIncrementalBatchesLikeUpstream() {
+        val source = YDoc(clientId = 1, gc = false)
+        val updates = mutableListOf<ByteArray>()
+        source.observeUpdates { update, _ -> updates.add(update) }
+        val array = source.get()
+
+        array.insert(0, listOf(1))
+        array.insert(0, listOf(2))
+        array.insert(0, listOf(3))
+        array.insert(0, listOf(4))
+
+        assertMergedIncrementalUpdateCases(source, updates)
+    }
+
+    @Test
+    fun mergeUpdatesHandlesOverlappingIncrementalBatchesWithDeletesLikeUpstream() {
+        val source = YDoc(clientId = 1, gc = false)
+        val updates = mutableListOf<ByteArray>()
+        source.observeUpdates { update, _ -> updates.add(update) }
+        val array = source.get()
+
+        array.insert(0, listOf(1, 2))
+        array.delete(1)
+        array.insert(0, listOf(3, 4))
+        array.delete(1, 2)
+
+        assertMergedIncrementalUpdateCases(source, updates)
+    }
+
+    @Test
     fun mergePendingIncrementalUpdatesResolvesOutOfOrderLikeUpstream() {
         val source = YDoc(clientId = 1)
         val serverUpdates = mutableListOf<ByteArray>()
@@ -142,6 +172,39 @@ class UpdateApiTest {
 
         assertEquals("ab", target.getText("body").toString())
         assertEquals(emptyMap(), decodeStateVector(encodeStateVectorFromUpdate(diff)))
+    }
+
+    @Test
+    fun encodeStateVectorFromUpdateIsEmptyForSingleDiffUpdateMissingPriorOps() {
+        val source = YDoc(clientId = 1)
+        var diffUpdate: ByteArray? = null
+        val array = source.get()
+
+        array.insert(0, listOf("a"))
+        source.observeUpdates { update, _ -> diffUpdate = update }
+        array.insert(0, listOf("a"))
+
+        val stateVector = decodeStateVector(encodeStateVectorFromUpdate(checkNotNull(diffUpdate)))
+
+        assertEquals(emptyMap(), stateVector)
+        assertContentEquals(byteArrayOf(0), encodeStateVectorFromUpdate(checkNotNull(diffUpdate)))
+    }
+
+    @Test
+    fun encodeStateVectorFromUpdateStopsAtGapsInMergedUpdatesLikeUpstream() {
+        val source = YDoc(clientId = 1)
+        val updates = mutableListOf<ByteArray>()
+        source.observeUpdates { update, _ -> updates.add(update) }
+        val array = source.get()
+
+        array.insert(0, listOf("a"))
+        array.insert(0, listOf("b"))
+        array.insert(0, listOf("c"))
+
+        val updateWithGap = mergeUpdates(listOf(updates[0], updates[2]))
+        val stateVector = decodeStateVector(encodeStateVectorFromUpdate(updateWithGap))
+
+        assertEquals(mapOf(1L to 1L), stateVector)
     }
 
     @Test
@@ -535,12 +598,49 @@ class UpdateApiTest {
     }
 
     @Test
+    fun obfuscateUpdatePreservesOrReplacesFormattedXmlTextAttributes() {
+        val source = YDoc(clientId = 1)
+        source.getXmlFragment("xml").applyDelta(listOf(
+            YArrayDeltaOp(
+                insert = listOf("secret"),
+                attributes = mapOf("bold" to true, "label" to "private"),
+            ),
+        ))
+
+        val obfuscated = createDocFromUpdate(obfuscateUpdate(source.encodeStateAsUpdate()))
+        val preservedFormatting = createDocFromUpdate(
+            obfuscateUpdate(
+                source.encodeStateAsUpdate(),
+                ObfuscatorOptions(formatting = false),
+            ),
+        )
+
+        assertEquals(
+            listOf(YArrayDeltaOp(
+                insert = listOf("000000"),
+                attributes = mapOf("0" to false, "1" to "0000000"),
+            )),
+            obfuscated.getXmlFragment("xml").toDelta(),
+        )
+        assertEquals(
+            listOf(YArrayDeltaOp(
+                insert = listOf("000000"),
+                attributes = mapOf("bold" to true, "label" to "private"),
+            )),
+            preservedFormatting.getXmlFragment("xml").toDelta(),
+        )
+    }
+
+    @Test
     fun obfuscateUpdateOptionsCanPreserveFormattingSubdocsAndNames() {
         val source = YDoc(clientId = 1)
         val subdoc = YDoc(guid = "subdoc-secret")
+        val liveElement = source.createXmlElement("section")
+        liveElement.push(YXmlText("live"))
         source.getText("body").insert(0, "x", mapOf("label" to "secret"))
         source.getArray("items").push(listOf(subdoc))
         source.getXmlFragment("xml").push(YXmlElement("paragraph").also { it.push(YXmlText("hidden")) })
+        source.getXmlFragment("live-xml").push(liveElement)
 
         val obfuscated = createDocFromUpdate(
             obfuscateUpdate(
@@ -552,6 +652,7 @@ class UpdateApiTest {
         assertEquals(YTextDelta().insert("0", mapOf("label" to "secret")), obfuscated.getText("body").toDelta())
         assertEquals("subdoc-secret", (obfuscated.getArray("items").get(0) as YDoc).guid)
         assertEquals("<paragraph>000000</paragraph>", obfuscated.getXmlFragment("xml").toString())
+        assertEquals("<section>0000</section>", obfuscated.getXmlFragment("live-xml").toString())
     }
 
     @Test
@@ -653,4 +754,48 @@ class UpdateApiTest {
         deleted,
         length,
     )
+
+    private fun assertMergedIncrementalUpdateCases(source: YDoc, updates: List<ByteArray>) {
+        require(updates.size >= 4)
+        val expected = source.get().toArray()
+        val expectedState = decodeStateVector(encodeStateVector(source))
+        val cases = listOf(
+            mergeUpdates(updates),
+            mergeUpdates(listOf(
+                mergeUpdates(updates.drop(2)),
+                mergeUpdates(updates.take(2)),
+            )),
+            mergeUpdates(listOf(
+                mergeUpdates(updates.drop(2)),
+                mergeUpdates(updates.subList(1, 3)),
+                updates[0],
+            )),
+            mergeUpdates(listOf(
+                mergeUpdates(listOf(updates[0], updates[2])),
+                mergeUpdates(listOf(updates[1], updates[3])),
+                mergeUpdates(updates.drop(4)),
+            )),
+        )
+        val duplicated = mergeUpdates(cases)
+
+        (cases + duplicated).forEach { merged ->
+            val target = YDoc(clientId = 2, gc = false)
+            applyUpdate(target, merged)
+
+            assertEquals(expected, target.get().toArray())
+            assertEquals(expectedState, decodeStateVector(encodeStateVector(target)))
+            assertEquals(expectedState, decodeStateVector(encodeStateVectorFromUpdate(merged)))
+
+            for (index in 1 until updates.size) {
+                val partMerged = mergeUpdates(updates.drop(index))
+                val targetStateVector = encodeStateVectorFromUpdate(mergeUpdates(updates.take(index)))
+                val diffed = diffUpdate(merged, targetStateVector)
+
+                assertEquals(
+                    createContentIdsFromUpdate(partMerged).inserts.ranges(),
+                    createContentIdsFromUpdate(diffed).inserts.ranges(),
+                )
+            }
+        }
+    }
 }

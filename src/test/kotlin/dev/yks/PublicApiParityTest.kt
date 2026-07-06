@@ -69,23 +69,26 @@ class PublicApiParityTest {
         val map = doc.getMap("meta")
         val text = doc.getText("body")
         val xml = doc.getXmlFragment("xml")
+        val element = doc.getXmlElement("paragraph", "p")
 
-        assertEquals(setOf("body", "items", "meta", "xml"), doc.rootNames())
+        assertEquals(setOf("body", "items", "meta", "paragraph", "xml"), doc.rootNames())
         assertSame(array, doc.get("items"))
         assertSame(map, doc.get("meta"))
         assertSame(text, doc.get("body"))
         assertSame(xml, doc.get("xml"))
+        assertSame(element, doc.get("paragraph"))
         assertNull(doc.getOrNull("missing"))
         val missing = doc.get("missing")
         assertTrue(missing is YArray)
         assertSame(missing, doc.get("missing"))
         assertSame(missing, doc.getOrNull("missing"))
-        assertEquals(setOf("body", "items", "meta", "missing", "xml"), doc.rootNames())
+        assertEquals(setOf("body", "items", "meta", "missing", "paragraph", "xml"), doc.rootNames())
         assertEquals(doc.rootNames(), doc.share.keys)
         assertTrue(doc.share["items"] is YArray)
         assertTrue(doc.share["meta"] is YMap)
         assertTrue(doc.share["body"] is YText)
         assertTrue(doc.share["xml"] is YXmlFragment)
+        assertTrue(doc.share["paragraph"] is YXmlElementType)
     }
 
     @Test
@@ -96,21 +99,51 @@ class PublicApiParityTest {
         val map = doc.get("meta", RootKind.Map)
         val text = doc.get("body", YTextRefID)
         val xml = doc.get("xml", YXmlFragmentRefID)
+        val element = doc.get("element", YXmlElementRefID)
 
         assertTrue(array is YArray)
         assertTrue(map is YMap)
         assertTrue(text is YText)
         assertTrue(xml is YXmlFragment)
+        assertTrue(element is YXmlElementType)
+        assertEquals("element", element.nodeName)
         assertSame(array, doc.get("items", YArrayRefID))
         assertSame(map, doc.get("meta", YMapRefID))
         assertSame(text, doc.get("body", RootKind.Text))
         assertSame(xml, doc.get("xml", RootKind.XmlFragment))
+        assertSame(element, doc.get("element", RootKind.XmlElement))
         assertEquals(RootKind.XmlElement, rootKindFromTypeRefId(YXmlElementRefID))
         assertEquals(RootKind.XmlHook, rootKindFromTypeRefId(YXmlHookRefID))
         assertEquals(RootKind.XmlText, rootKindFromTypeRefId(YXmlTextRefID))
         assertFailsWith<IllegalArgumentException> { doc.get("items", RootKind.Map) }
-        assertFailsWith<IllegalStateException> { doc.get("element", YXmlElementRefID) }
+        assertFailsWith<IllegalStateException> { doc.get("hook", YXmlHookRefID) }
         assertFailsWith<IllegalStateException> { rootKindFromTypeRefId(99) }
+    }
+
+    @Test
+    fun documentGetXmlElementCreatesRootElementLikeUpstream() {
+        val source = YDoc(clientId = 1)
+        val paragraph = source.getXmlElement("paragraph", "p")
+        paragraph.setAttr("id", "intro")
+        paragraph.push(YXmlText("hello"), YXmlElement("br"))
+
+        assertEquals("p", paragraph.nodeName)
+        assertSame(paragraph, source.get("paragraph", RootKind.XmlElement))
+        assertEquals("<p id=\"intro\">hello<br /></p>", paragraph.toString())
+        assertTrue(source.share["paragraph"] is YXmlElementType)
+
+        val target = createDocFromUpdate(source.encodeStateAsUpdate())
+        val synced = target.getXmlElement("paragraph", "p")
+
+        assertEquals("<p id=\"intro\">hello<br /></p>", synced.toString())
+        assertEquals(
+            mapOf(
+                "nodeName" to "p",
+                "attributes" to mapOf("id" to "intro"),
+                "children" to listOf("hello", mapOf("nodeName" to "br", "attributes" to emptyMap<String, Any?>(), "children" to emptyList<Any?>())),
+            ),
+            synced.toJson(),
+        )
     }
 
     @Test
@@ -133,6 +166,28 @@ class PublicApiParityTest {
         assertEquals(listOf("hello"), target.get().toArray())
         assertEquals("default", target.get().getAttr("kind"))
         assertTrue(target.share[""] is YArray)
+    }
+
+    @Test
+    fun afterTransactionCanRenderJsonForLargeNestedDefaultRoot() {
+        val doc = YDoc(clientId = 1)
+        val root = doc.get()
+        val renderedSizes = mutableListOf<Int>()
+
+        doc.observeAfterTransactions { transaction ->
+            if (transaction.origin == "test") {
+                val rootJson = doc.toJSON()[""] as Map<*, *>
+                val children = rootJson["children"] as List<*>
+                renderedSizes.add(children.size)
+            }
+        }
+
+        doc.transact(origin = "test") {
+            root.insert(0, List(15_000) { doc.createXmlElement("a") })
+        }
+
+        assertEquals(listOf(15_000), renderedSizes)
+        assertEquals(15_000, root.length)
     }
 
     @Test
@@ -301,6 +356,30 @@ class PublicApiParityTest {
         assertEquals("root", findRootTypeKey(root))
         assertEquals(listOf(0, "body"), getPathTo(root, nestedText))
         assertFailsWith<IllegalStateException> { findRootTypeKey(nestedMap) }
+    }
+
+    @Test
+    fun findTypeInOtherDocResolvesRootAndNestedTypesByHistoryIdentity() {
+        val source = YDoc(clientId = 1)
+        val root = source.getArray("root")
+        val nestedMap = source.createMap()
+        val nestedText = source.createText()
+        root.push(nestedMap)
+        nestedMap.setAttr("body", nestedText)
+        nestedText.insert(0, "hello")
+        val target = cloneDoc(source)
+
+        val targetRoot = findTypeInOtherDoc(root, target)
+        val targetMap = findTypeInOtherDoc(nestedMap, target) as YMap
+        val targetText = findTypeInOtherDoc(nestedText, target) as YText
+
+        assertSame(target.getArray("root"), targetRoot)
+        assertEquals(listOf("body"), targetMap.keys().toList())
+        assertSame(targetMap.getAttr("body"), targetText)
+        assertEquals("hello", targetText.toString())
+        assertFailsWith<IllegalStateException> {
+            findTypeInOtherDoc(nestedText, YDoc(clientId = 2))
+        }
     }
 
     @Test

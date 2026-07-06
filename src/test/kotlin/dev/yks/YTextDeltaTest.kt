@@ -752,6 +752,58 @@ class YTextDeltaTest {
     }
 
     @Test
+    fun inconsistentFormattingMergeMatchesUpstreamLocallyAndAfterSync() {
+        fun initializeDoc(): YDoc {
+            val doc = YDoc(clientId = 1, gc = false)
+            val text = doc.getText("text")
+            text.insert(0, " After", mapOf("type" to "text", "italic" to true))
+            text.insert(0, "Test", mapOf("type" to "text"))
+            text.insert(0, "Merge ", mapOf("type" to "text", "bold" to true))
+            return doc
+        }
+
+        fun assertMerge(doc: YDoc) {
+            val text = doc.getText("text")
+            text.format(0, 6, mapOf("bold" to null))
+            text.format(6, 4, mapOf("type" to "text"))
+
+            assertEquals(
+                YTextDelta()
+                    .insert("Merge Test", mapOf("type" to "text"))
+                    .insert(" After", mapOf("italic" to true, "type" to "text")),
+                text.toDelta(),
+            )
+        }
+
+        assertMerge(initializeDoc())
+
+        val synced = YDoc(clientId = 2, gc = false)
+        synced.applyUpdate(initializeDoc().encodeStateAsUpdate())
+
+        assertMerge(synced)
+    }
+
+    @Test
+    fun overlappingUrlFormattingConvergesLikeUpstreamFormattingBugRegression() {
+        val left = YDoc(clientId = 1)
+        val right = YDoc(clientId = 2)
+        val text = left.getText("")
+
+        text.insert(0, "\n\n\n")
+        text.format(0, 3, mapOf("url" to "http://example.com"))
+        text.format(1, 1, mapOf("url" to "http://docs.yjs.dev"))
+        right.applyUpdate(left.encodeStateAsUpdate())
+
+        val expected = YTextDelta()
+            .insert("\n", mapOf("url" to "http://example.com"))
+            .insert("\n", mapOf("url" to "http://docs.yjs.dev"))
+            .insert("\n", mapOf("url" to "http://example.com"))
+
+        assertEquals(expected, text.toDelta())
+        assertEquals(expected, right.getText("").toDelta())
+    }
+
+    @Test
     fun cleanupYTextFormattingIsNoopForCanonicalTextStorage() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("body")
@@ -762,6 +814,46 @@ class YTextDeltaTest {
         assertEquals(0, cleanupYTextFormatting(text))
 
         assertEquals(before, text.toDelta())
+    }
+
+    @Test
+    fun cleanupYTextFormattingRemovesDuplicateFormatRanges() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val cleanupTransactions = mutableListOf<YTransactionEvent>()
+        text.insert(0, "abc")
+        text.format(0, 3, mapOf("bold" to true))
+        text.format(0, 3, mapOf("bold" to true))
+        val before = text.toDelta()
+        doc.observeAfterTransactions { event -> cleanupTransactions.add(event) }
+
+        assertEquals(2, text.liveFormatItemCountForTest())
+        assertEquals(1, cleanupYTextFormatting(text))
+
+        assertEquals(before, text.toDelta())
+        assertEquals(YTextDelta().insert("abc", mapOf("bold" to true)), text.toDelta())
+        assertEquals(1, text.liveFormatItemCountForTest())
+        assertEquals(1, cleanupTransactions.size)
+        assertEquals(1, cleanupTransactions.single().deletedItemCount)
+        assertEquals(listOf(1L to IdRange(3, 1)), cleanupTransactions.single().cleanUps.ranges())
+        assertEquals(setOf(text), cleanupTransactions.single().changedTypes)
+    }
+
+    @Test
+    fun cleanupYTextFormattingRemovesFullyOverwrittenFormatRanges() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        text.insert(0, "abc")
+        text.format(0, 3, mapOf("bold" to true))
+        text.format(0, 3, mapOf("bold" to false))
+        val before = text.toDelta()
+
+        assertEquals(2, text.liveFormatItemCountForTest())
+        assertEquals(1, cleanupYTextFormatting(text))
+
+        assertEquals(before, text.toDelta())
+        assertEquals(YTextDelta().insert("abc", mapOf("bold" to false)), text.toDelta())
+        assertEquals(1, text.liveFormatItemCountForTest())
     }
 
     @Test
@@ -801,6 +893,9 @@ class YTextDeltaTest {
         forEachIndexed { index, value -> values.add("$index:$value") }
         return values
     }
+
+    private fun YText.liveFormatItemCountForTest(): Int =
+        getTypeChildren(this).count { child -> !child.deleted } - length
 
     private fun syncDocs(vararg docs: YDoc) {
         val updates = docs.map { doc -> doc.encodeStateAsUpdate() }

@@ -148,6 +148,35 @@ class SnapshotTest {
     }
 
     @Test
+    fun createDocFromSnapshotRestoresDependentChangesFromEitherReplica() {
+        val left = YDoc(clientId = 1, gc = false)
+        val right = YDoc(clientId = 2, gc = false)
+        val leftArray = left.getArray("array")
+        val rightArray = right.getArray("array")
+
+        leftArray.insert(0, listOf("user1item1"))
+        syncDocs(left, right)
+        rightArray.insert(1, listOf("user2item1"))
+        syncDocs(left, right)
+
+        val snap = snapshot(left)
+
+        leftArray.insert(2, listOf("user1item2"))
+        syncDocs(left, right)
+        rightArray.insert(3, listOf("user2item2"))
+        syncDocs(left, right)
+
+        assertEquals(
+            listOf("user1item1", "user2item1"),
+            createDocFromSnapshot(left, snap).getArray("array").toArray(),
+        )
+        assertEquals(
+            listOf("user1item1", "user2item1"),
+            createDocFromSnapshot(right, snap).getArray("array").toArray(),
+        )
+    }
+
+    @Test
     fun createDocFromSnapshotRejectsGcEnabledOriginDocs() {
         val doc = YDoc(clientId = 1)
         doc.getArray("items").push(listOf("world"))
@@ -338,5 +367,63 @@ class SnapshotTest {
             typeXmlFragmentToJsonSnapshot(xml, initial),
         )
         assertEquals("<p class=\"updated\">new<br /></p>", xml.toString())
+    }
+
+    @Test
+    fun xmlSnapshotsReadHistoricalLiveXmlTextChildren() {
+        val doc = YDoc(clientId = 1)
+        val xml = doc.getXmlFragment("xml")
+        val text = doc.createXmlText()
+        text.insert(0, "old", mapOf("bold" to true))
+        xml.push(text)
+        val initial = snapshot(doc)
+
+        text.delete(0, text.length)
+        text.insert(0, "new", mapOf("italic" to true))
+        val updated = snapshot(doc)
+
+        assertEquals(listOf("old"), typeXmlFragmentToJsonSnapshot(xml, initial))
+        assertEquals("old", typeXmlFragmentToArraySnapshot(xml, initial).single().toJson())
+        assertEquals("old", typeXmlFragmentToDeltaSnapshot(xml, initial).single().insert!!.single().toString())
+        assertEquals("old", typeXmlFragmentToStringSnapshot(xml, initial))
+
+        assertEquals(listOf("new"), typeXmlFragmentToJsonSnapshot(xml, updated))
+        assertEquals("new", typeXmlFragmentToArraySnapshot(xml, updated).single().toJson())
+        assertEquals("new", typeXmlFragmentToDeltaSnapshot(xml, updated).single().insert!!.single().toString())
+        assertEquals("new", typeXmlFragmentToStringSnapshot(xml, updated))
+        assertEquals(YTextDelta().insert("new", mapOf("italic" to true)), text.toDelta())
+    }
+
+    @Test
+    fun xmlSnapshotDeltaPreservesFormattedStaticTextLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val xml = doc.getXmlFragment("xml")
+        val emphasized = mapOf<String, Any?>("em" to emptyMap<String, Any?>())
+        val emphasizedStrong = mapOf<String, Any?>(
+            "em" to emptyMap<String, Any?>(),
+            "strong" to emptyMap<String, Any?>(),
+        )
+        val initialDelta = listOf(
+            YArrayDeltaOp(insert = listOf("A"), attributes = emphasizedStrong),
+            YArrayDeltaOp(insert = listOf("B"), attributes = emphasized),
+            YArrayDeltaOp(insert = listOf("C"), attributes = emphasizedStrong),
+        )
+        xml.applyDelta(initialDelta)
+        val initial = snapshot(doc)
+
+        xml.clear()
+        xml.applyDelta(listOf(YArrayDeltaOp(insert = listOf("Z"))))
+
+        assertEquals(initialDelta, typeXmlFragmentToDeltaSnapshot(xml, initial))
+        assertEquals(listOf("A", "B", "C"), typeXmlFragmentToJsonSnapshot(xml, initial))
+        assertEquals("ABC", typeXmlFragmentToStringSnapshot(xml, initial))
+        assertEquals(listOf(YArrayDeltaOp(insert = listOf("Z"))), xml.toDelta())
+    }
+
+    private fun syncDocs(vararg docs: YDoc) {
+        val updates = docs.map { doc -> doc.encodeStateAsUpdate() }
+        docs.forEach { target ->
+            updates.forEach { update -> target.applyUpdate(update) }
+        }
     }
 }

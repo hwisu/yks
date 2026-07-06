@@ -56,11 +56,23 @@ sealed class AbstractYType protected constructor(
         fun from(delta: List<YArrayDeltaOp>, doc: YDoc = YDoc(), name: String = ""): YArray =
             YArray.from(delta, doc, name)
 
+        fun from(delta: YArrayDeepDelta, doc: YDoc = YDoc(), name: String = ""): YArray =
+            YArray.from(delta, doc, name)
+
         fun from(delta: YMapDelta, doc: YDoc = YDoc(), name: String = ""): YMap =
+            YMap.from(delta, doc, name)
+
+        fun from(delta: YMapDeepDelta, doc: YDoc = YDoc(), name: String = ""): YMap =
             YMap.from(delta, doc, name)
 
         fun from(delta: YTextDelta, doc: YDoc = YDoc(), name: String = ""): YText =
             YText.from(delta, doc, name)
+
+        fun from(delta: YTextDeepDelta, doc: YDoc = YDoc(), name: String = ""): YText =
+            YText.from(delta, doc, name)
+
+        fun from(delta: YXmlFragmentDeepDelta, doc: YDoc = YDoc(), name: String = ""): YXmlFragment =
+            YXmlFragment.from(delta, doc, name)
     }
 
     private val observers = mutableListOf<(YEvent) -> Unit>()
@@ -328,7 +340,7 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
             var origin = anchors.first
             val rightOrigin = anchors.second
             values.forEach { raw ->
-                val content = ItemContent.Value(doc.storeValue(raw))
+                val content = ItemContent.Value(doc.storeValue(raw, parent = name))
                 val item = StoreItem(
                     id = doc.nextId(),
                     origin = origin,
@@ -527,12 +539,19 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
     fun <T> map(transform: (value: Any?, index: Int) -> T): List<T> =
         toList().mapIndexed { index, value -> transform(value, index) }
 
+    fun <T> map(transform: (value: Any?, index: Int, type: YArray) -> T): List<T> =
+        toList().mapIndexed { index, value -> transform(value, index, this) }
+
     fun forEach(action: (Any?) -> Unit) {
         toList().forEach(action)
     }
 
     fun forEach(action: (value: Any?, index: Int) -> Unit) {
         toList().forEachIndexed { index, value -> action(value, index) }
+    }
+
+    fun forEach(action: (value: Any?, index: Int, type: YArray) -> Unit) {
+        toList().forEachIndexed { index, value -> action(value, index, this) }
     }
 
     fun forEachIndexed(action: (Int, Any?) -> Unit) {
@@ -551,8 +570,16 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
     )
 
     companion object {
+        fun from(values: Iterable<Any?>, doc: YDoc = YDoc(), name: String = ""): YArray {
+            return doc.getArray(name).also { it.push(values.toList()) }
+        }
+
         fun from(delta: List<YArrayDeltaOp>, doc: YDoc = YDoc(), name: String = ""): YArray {
             return doc.getArray(name).also { it.applyDelta(delta) }
+        }
+
+        fun from(delta: YArrayDeepDelta, doc: YDoc = YDoc(), name: String = ""): YArray {
+            return doc.getArray(name).also { it.applyDeltaDeep(delta) }
         }
     }
 
@@ -612,7 +639,7 @@ open class YText internal constructor(
                     is String -> value.map { ItemContent.Text(it.toString(), normalized, kind = kind) }
                     is Char -> listOf(ItemContent.Text(value.toString(), normalized, kind = kind))
                     null -> error("text embeds must not be null")
-                    else -> listOf(ItemContent.TextEmbed(doc.storeValue(value), normalized, kind = kind))
+                    else -> listOf(ItemContent.TextEmbed(doc.storeValue(value, parent = name), normalized, kind = kind))
                 }
             }
             insertTextEntries(start, entries)
@@ -626,7 +653,7 @@ open class YText internal constructor(
         doc.transact {
             insertTextEntries(
                 start,
-                listOf(ItemContent.TextEmbed(doc.storeValue(embed), normalizeTextAttributes(attributes), kind = kind)),
+                listOf(ItemContent.TextEmbed(doc.storeValue(embed, parent = name), normalizeTextAttributes(attributes), kind = kind)),
             )
         }
     }
@@ -638,7 +665,7 @@ open class YText internal constructor(
         doc.transact(origin = origin) {
             insertTextEntries(
                 start,
-                listOf(ItemContent.TextEmbed(doc.storeValue(embed), normalizeTextAttributes(attributes), kind = kind)),
+                listOf(ItemContent.TextEmbed(doc.storeValue(embed, parent = name), normalizeTextAttributes(attributes), kind = kind)),
             )
         }
     }
@@ -943,12 +970,19 @@ open class YText internal constructor(
     fun <T> map(transform: (value: Any?, index: Int) -> T): List<T> =
         toList().mapIndexed { index, value -> transform(value, index) }
 
+    fun <T> map(transform: (value: Any?, index: Int, type: YText) -> T): List<T> =
+        toList().mapIndexed { index, value -> transform(value, index, this) }
+
     fun forEach(action: (Any?) -> Unit) {
         toList().forEach(action)
     }
 
     fun forEach(action: (value: Any?, index: Int) -> Unit) {
         toList().forEachIndexed { index, value -> action(value, index) }
+    }
+
+    fun forEach(action: (value: Any?, index: Int, type: YText) -> Unit) {
+        toList().forEachIndexed { index, value -> action(value, index, this) }
     }
 
     fun forEachIndexed(action: (Int, Any?) -> Unit) {
@@ -979,6 +1013,10 @@ open class YText internal constructor(
     companion object {
         fun from(delta: YTextDelta, doc: YDoc = YDoc(), name: String = ""): YText {
             return doc.getText(name).also { it.applyDelta(delta) }
+        }
+
+        fun from(delta: YTextDeepDelta, doc: YDoc = YDoc(), name: String = ""): YText {
+            return doc.getText(name).also { it.applyDeltaDeep(delta) }
         }
     }
 
@@ -1091,7 +1129,7 @@ class YMap internal constructor(doc: YDoc, name: String) :
 
     fun set(key: String, value: Any?): Any? {
         doc.transact {
-            val content = ItemContent.MapEntry(doc.storeValue(value))
+            val content = ItemContent.MapEntry(doc.storeValue(value, parent = name))
             val item = StoreItem(
                 id = doc.nextId(),
                 origin = doc.currentMapItemId(name, key),
@@ -1256,6 +1294,10 @@ class YMap internal constructor(doc: YDoc, name: String) :
     companion object {
         fun from(delta: YMapDelta, doc: YDoc = YDoc(), name: String = ""): YMap {
             return doc.getMap(name).also { it.applyDelta(delta) }
+        }
+
+        fun from(delta: YMapDeepDelta, doc: YDoc = YDoc(), name: String = ""): YMap {
+            return doc.getMap(name).also { it.applyDeltaDeep(delta) }
         }
     }
 }

@@ -75,6 +75,9 @@ class YDoc(
     private val rootTypes = linkedMapOf<String, AbstractYType>()
     private val nestedTypes = linkedMapOf<String, AbstractYType>()
     private val nestedNames = linkedSetOf<String>()
+    private val referencedNestedNames = linkedSetOf<String>()
+    private val pendingNestedReferenceStack = mutableListOf<MutableSet<String>>()
+    private val pendingStoreParentStack = mutableListOf<String?>()
     private val subdocsByInstanceId = linkedMapOf<String, YDoc>()
     private val subdocObservers = mutableListOf<(YSubdocEvent) -> Unit>()
     private val subdocEventListeners = mutableListOf<(YSubdocEvent, YDoc, YTransactionEvent?) -> Unit>()
@@ -120,7 +123,7 @@ class YDoc(
         RootKind.Map -> getMap(name)
         RootKind.Text -> getText(name)
         RootKind.XmlFragment -> getXmlFragment(name)
-        RootKind.XmlElement,
+        RootKind.XmlElement -> getXmlElement(name, name)
         RootKind.XmlHook,
         RootKind.XmlText -> error("XML node type refs cannot be document roots")
     }
@@ -138,6 +141,9 @@ class YDoc(
     fun getText(name: String): YText = getOrCreate(name, RootKind.Text) { YText(this, name) }
 
     fun getXmlFragment(name: String): YXmlFragment = getOrCreate(name, RootKind.XmlFragment) { YXmlFragment(this, name) }
+
+    fun getXmlElement(name: String, nodeName: String = name): YXmlElementType =
+        getOrCreate(name, RootKind.XmlElement) { YXmlElementType(this, name, nodeName) }
 
     fun createArray(): YArray = createNestedType(RootKind.Array) { nestedName -> YArray(this, nestedName) }
 
@@ -693,7 +699,7 @@ class YDoc(
             RootKind.Map -> getMap(name)
             RootKind.Text -> getText(name)
             RootKind.XmlFragment -> getXmlFragment(name)
-            RootKind.XmlElement,
+            RootKind.XmlElement -> getXmlElement(name, name)
             RootKind.XmlHook,
             RootKind.XmlText -> error("XML node type refs cannot be document roots")
         }
@@ -705,10 +711,20 @@ class YDoc(
             .toSortedSet()
     }
 
-    internal fun storeValue(value: Any?): YValue = storeAnyValue(value).also(::rememberNestedRefs)
+    internal fun storeValue(value: Any?, parent: String? = null): YValue {
+        pendingNestedReferenceStack.add(linkedSetOf())
+        pendingStoreParentStack.add(parent)
+        return try {
+            storeAnyValue(value).also(::rememberNestedRefs)
+        } finally {
+            pendingStoreParentStack.removeAt(pendingStoreParentStack.lastIndex)
+            pendingNestedReferenceStack.removeAt(pendingNestedReferenceStack.lastIndex)
+        }
+    }
 
     private fun storeAnyValue(value: Any?): YValue = when (value) {
         null -> YValue.Null
+        is YValue.TypeRef -> registerNestedTypeRefValue(value)
         is YValue -> value
         is AbstractYType -> registerNestedTypeValue(value).let { nested ->
             YValue.TypeRef(nested.kind, nested.name)
@@ -821,7 +837,14 @@ class YDoc(
     private fun currentMapItem(parent: String, key: String): StoreItem? =
         mapItemOrder(parent, key).lastOrNull()
 
-    private fun mapItemOrder(parent: String, key: String): List<StoreItem> {
+    internal fun mapItemKeys(parent: String): Set<String> =
+        store.allItems()
+            .asSequence()
+            .filter { item -> item.parent == parent && item.parentSub != null && item.content is ItemContent.MapEntry }
+            .mapNotNull { item -> item.parentSub }
+            .toSortedSet()
+
+    internal fun mapItemOrder(parent: String, key: String): List<StoreItem> {
         val entries = store.mapEntries(parent, key)
         if (entries.isEmpty()) return emptyList()
         val knownIds = entries.map { item -> item.id }.toSet()
@@ -965,7 +988,7 @@ class YDoc(
 
     internal fun xmlFragmentDeltaAtSnapshot(type: YXmlFragment, snapshot: Snapshot): List<YArrayDeltaOp> {
         val nodes = xmlFragmentArrayAtSnapshot(type, snapshot)
-        return if (nodes.isEmpty()) emptyList() else listOf(YArrayDeltaOp(insert = nodes))
+        return xmlChildrenToDelta(nodes)
     }
 
     private fun xmlNodeAtSnapshot(content: ItemContent, snapshot: Snapshot): YXmlNode = when (content) {
@@ -984,7 +1007,7 @@ class YDoc(
 
     internal fun setTypeAttribute(parent: String, key: String, value: Any?): Any? {
         transact {
-            val content = ItemContent.MapEntry(storeValue(value))
+            val content = ItemContent.MapEntry(storeValue(value, parent = parent))
             val item = StoreItem(
                 id = nextId(),
                 origin = currentMapItem(parent, key)?.id,
@@ -1058,13 +1081,16 @@ class YDoc(
         }
     }
 
-    internal fun deleteItemsByIds(ids: Iterable<Id>) {
+    internal fun deleteItemsByIds(ids: Iterable<Id>, markCleanups: Boolean = false) {
         transact {
             val deleteSet = DeleteSet.empty()
             ids.forEach { id ->
                 val item = store.getStoreItem(id)
                 if (item != null && !item.deleted) {
                     deleteSet.add(id, item.length)
+                    if (markCleanups) {
+                        currentTransaction?.cleanUps?.add(id, item.length)
+                    }
                 }
             }
             applyDeleteSet(deleteSet)
@@ -1925,6 +1951,7 @@ class YDoc(
     }
 
     private fun typeFromRef(ref: YValue.TypeRef, xmlNodeName: String? = null): AbstractYType {
+        referencedNestedNames.add(ref.name)
         nestedNames.add(ref.name)
         nestedTypes[ref.name]?.let { existing ->
             require(existing.kind == ref.kind) { "nested type '${ref.name}' exists as ${existing.kind}, not ${ref.kind}" }
@@ -1953,7 +1980,10 @@ class YDoc(
             is ItemContent.Value -> rememberNestedRefs(content.value)
             is ItemContent.MapEntry -> rememberNestedRefs(content.value)
             is ItemContent.TextEmbed -> rememberNestedRefs(content.value)
-            is ItemContent.XmlType -> typeFromXmlType(content)
+            is ItemContent.XmlType -> {
+                referencedNestedNames.add(content.ref.name)
+                typeFromXmlType(content)
+            }
             is ItemContent.Text,
             is ItemContent.TextFormat,
             is ItemContent.XmlNode,
@@ -1963,7 +1993,10 @@ class YDoc(
 
     private fun rememberNestedRefs(value: YValue) {
         when (value) {
-            is YValue.TypeRef -> typeFromRef(value)
+            is YValue.TypeRef -> {
+                referencedNestedNames.add(value.name)
+                typeFromRef(value)
+            }
             is YValue.SubdocRef -> subdocFromRef(value)
             is YValue.ListValue -> value.value.forEach(::rememberNestedRefs)
             is YValue.MapValue -> value.value.values.forEach(::rememberNestedRefs)
@@ -1971,12 +2004,46 @@ class YDoc(
         }
     }
 
+    private fun registerNestedTypeRefValue(ref: YValue.TypeRef): YValue.TypeRef {
+        require(rootTypes[ref.name] == null) { "root shared types cannot be inserted as nested content" }
+        require(ref.name != pendingStoreParentStack.lastOrNull()) { "shared type '${ref.name}' cannot contain itself" }
+        require(!hasNestedTypeReference(ref.name)) { "shared type '${ref.name}' is already defined" }
+        pendingNestedReferenceStack.lastOrNull()?.add(ref.name) ?: referencedNestedNames.add(ref.name)
+        return ref
+    }
+
     private fun registerNestedTypeValue(value: AbstractYType): AbstractYType {
         val local = if (value.doc === this) value else value.cloneValueInto(this) as AbstractYType
         require(rootTypes[local.name] == null) { "root shared types cannot be inserted as nested content" }
+        require(local.name != pendingStoreParentStack.lastOrNull()) { "shared type '${local.name}' cannot contain itself" }
+        require(!hasNestedTypeReference(local.name)) { "shared type '${local.name}' is already defined" }
+        pendingNestedReferenceStack.lastOrNull()?.add(local.name) ?: referencedNestedNames.add(local.name)
         nestedTypes[local.name] = local
         nestedNames.add(local.name)
         return local
+    }
+
+    private fun hasNestedTypeReference(name: String): Boolean =
+        name in referencedNestedNames ||
+            pendingNestedReferenceStack.any { pending -> name in pending } ||
+            store.allItems().any { item -> item.content.nestedTypeRefNames().contains(name) }
+
+    private fun ItemContent.nestedTypeRefNames(): Set<String> = when (this) {
+        is ItemContent.Value -> value.nestedTypeRefNames()
+        is ItemContent.MapEntry -> value.nestedTypeRefNames()
+        is ItemContent.TextEmbed -> value.nestedTypeRefNames()
+        is ItemContent.XmlType -> setOf(ref.name)
+        is ItemContent.Text,
+        is ItemContent.TextFormat,
+        is ItemContent.XmlNode,
+        is ItemContent.Deleted -> emptySet()
+    }
+
+    private fun YValue.nestedTypeRefNames(): Set<String> = when (this) {
+        is YValue.TypeRef -> setOf(name)
+        is YValue.ListValue -> value.flatMap { nested -> nested.nestedTypeRefNames() }.toSet()
+        is YValue.MapValue -> value.values.flatMap { nested -> nested.nestedTypeRefNames() }.toSet()
+        else -> emptySet()
     }
 
     private fun registerSubdocValue(value: YDoc): YValue.SubdocRef {
@@ -1985,6 +2052,7 @@ class YDoc(
         value.parentDocs.add(this)
         return YValue.SubdocRef(
             guid = value.guid,
+            gc = value.gc,
             shouldLoad = value.shouldLoad,
             autoLoad = value.autoLoad,
             instanceId = value.subdocInstanceId,
@@ -2003,9 +2071,14 @@ class YDoc(
         if (existing != null) {
             subdocsByInstanceId.remove(ref.instanceId)
         }
-        val shouldLoad = shouldLoadOverride ?: if (existing?.isDestroyed == true) false else ref.shouldLoad
+        val shouldLoad = shouldLoadOverride ?: if (existing?.isDestroyed == true) {
+            false
+        } else {
+            ref.shouldLoad || ref.autoLoad
+        }
         return YDoc(
             guid = ref.guid,
+            gc = ref.gc,
             collectionId = ref.collectionId,
             meta = ref.meta.toAny(),
             shouldLoad = shouldLoad,
@@ -2463,6 +2536,7 @@ data class YArrayDeltaOp(
     val retain: Int? = null,
     val insert: List<Any?>? = null,
     val delete: Int? = null,
+    val attributes: Map<String, Any?> = emptyMap(),
 ) {
     init {
         val active = listOf(retain != null, insert != null, delete != null).count { it }

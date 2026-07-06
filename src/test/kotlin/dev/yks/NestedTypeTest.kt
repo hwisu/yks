@@ -2,6 +2,7 @@ package dev.yks
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -50,6 +51,75 @@ class NestedTypeTest {
             ),
             left.toJson(),
         )
+    }
+
+    @Test
+    fun sameDocumentNestedTypeCanOnlyBeInsertedOnceLikeUpstreamSharedTypes() {
+        val doc = YDoc(clientId = 1)
+        val root = doc.getMap("root")
+        val nested = doc.createArray()
+        nested.push("apple", "banana")
+
+        root.setAttr("food", nested)
+
+        assertFailsWith<IllegalArgumentException> {
+            root.setAttr("fruit", nested)
+        }
+        assertSame(nested, root.getAttr("food"))
+        assertNull(root.getAttr("fruit"))
+        assertSame(root, nested.parent)
+    }
+
+    @Test
+    fun failedDuplicateNestedTypeInsidePlainValueDoesNotConsumeFirstInsertion() {
+        val doc = YDoc(clientId = 1)
+        val root = doc.getMap("root")
+        val nested = doc.createText()
+        nested.insert(0, "child")
+
+        assertFailsWith<IllegalArgumentException> {
+            root.setAttr("bad", listOf(nested, nested))
+        }
+
+        assertNull(nested.parent)
+        assertNull(root.getAttr("bad"))
+
+        root.setAttr("child", nested)
+
+        assertSame(nested, root.getAttr("child"))
+        assertSame(root, nested.parent)
+        assertEquals("child", nested.toString())
+    }
+
+    @Test
+    fun nestedTypesCannotContainThemselves() {
+        val doc = YDoc(clientId = 1)
+        val map = doc.createMap()
+        val array = doc.createArray()
+        val text = doc.createText()
+        val xml = doc.createXmlElement("p")
+
+        assertFailsWith<IllegalArgumentException> {
+            map.setAttr("self", map)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            array.push(array)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            text.insertEmbed(0, text)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            xml.push(xml)
+        }
+
+        assertNull(map.parent)
+        assertNull(array.parent)
+        assertNull(text.parent)
+        assertNull(xml.parent)
+        assertEquals(emptyMap(), map.toMap())
+        assertEquals(emptyList(), array.toArray())
+        assertEquals("", text.toString())
+        assertEquals("<p />", xml.toString())
     }
 
     @Test

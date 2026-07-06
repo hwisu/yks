@@ -2,8 +2,10 @@ package dev.yks
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class UndoManagerTest {
@@ -242,6 +244,14 @@ class UndoManagerTest {
             text.setAttr("blocks", blocks3Block)
         }
 
+        val blocks4Block = doc.createMap()
+        doc.transact {
+            blocks4Block.setAttr("text", "Final")
+            text.setAttr("blocks", blocks4Block)
+        }
+
+        assertEquals("Final", designNestedBlockText(design))
+        undoManager.undo()
         assertEquals("Something Else", designNestedBlockText(design))
         undoManager.undo()
         assertEquals("Something", designNestedBlockText(design))
@@ -256,6 +266,8 @@ class UndoManagerTest {
         assertEquals("Something", designNestedBlockText(design))
         undoManager.redo()
         assertEquals("Something Else", designNestedBlockText(design))
+        undoManager.redo()
+        assertEquals("Final", designNestedBlockText(design))
     }
 
     @Test
@@ -366,6 +378,49 @@ class UndoManagerTest {
     }
 
     @Test
+    fun undoSkipsNoopStackItemsUntilChangeIsPerformedLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val doc2 = YDoc(clientId = 2)
+        doc.observeUpdates { update, _ -> doc2.applyUpdate(update) }
+        doc2.observeUpdates { update, _ -> doc.applyUpdate(update) }
+        val array = doc.getArray("array")
+        val array2 = doc2.getArray("array")
+        val map = doc.createMap()
+        val map2 = doc.createMap()
+
+        map.setAttr("hello", "world")
+        array.push(map)
+        map2.setAttr("key", "value")
+        array.push(map2)
+
+        val undoManager = UndoManager(
+            array,
+            UndoManagerOptions(trackedOrigins = setOf(doc.clientId)),
+        )
+        val undoManager2 = UndoManager(
+            array2,
+            UndoManagerOptions(trackedOrigins = setOf(doc2.clientId)),
+        )
+
+        doc.transact(origin = doc.clientId) {
+            map2.setAttr("key", "value modified")
+        }
+        undoManager.stopCapturing()
+        doc.transact(origin = doc.clientId) {
+            map.setAttr("hello", "world modified")
+        }
+        doc2.transact(origin = doc2.clientId) {
+            array2.delete(0)
+        }
+
+        undoManager2.undo()
+        undoManager.undo()
+
+        assertEquals("value", map2.getAttr("key"))
+        assertEquals("value", (array.get(1) as YMap).getAttr("key"))
+    }
+
+    @Test
     fun managerRespectsTypeScopeAndIgnoresRemoteUpdates() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("body")
@@ -385,6 +440,27 @@ class UndoManagerTest {
         assertTrue(undoManager.canUndo)
         undoManager.undo()
         assertEquals("remote", text.toString())
+    }
+
+    @Test
+    fun trackedOriginsCanMatchOriginClassesLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val undoManager = UndoManager(
+            text,
+            UndoManagerOptions(captureTimeoutMillis = 0, trackedOrigins = setOf(Number::class)),
+        )
+
+        doc.transact(origin = 42) {
+            text.insert(0, "abc")
+        }
+
+        assertEquals("abc", text.toString())
+        assertTrue(undoManager.canUndo)
+
+        undoManager.undo()
+
+        assertEquals("", text.toString())
     }
 
     @Test
@@ -539,6 +615,32 @@ class UndoManagerTest {
     }
 
     @Test
+    fun upstreamCaptureTimeoutOptionNameControlsCaptureMerging() {
+        val doc = YDoc(clientId = 1)
+        val array = doc.getArray("items")
+        val undoManager = UndoManager(
+            array,
+            UndoManagerOptions(captureTimeoutMillis = 0, captureTimeout = Long.MAX_VALUE),
+        )
+
+        array.push(1)
+        array.push(2)
+
+        assertEquals(1, undoManager.undoStackSize)
+
+        undoManager.stopCapturing()
+        array.push(3)
+
+        assertEquals(2, undoManager.undoStackSize)
+
+        undoManager.undo()
+        assertEquals(listOf(1L, 2L), array.toList())
+
+        undoManager.undo()
+        assertEquals(emptyList(), array.toList())
+    }
+
+    @Test
     fun publicStackItemConstructorStoresInsertionAndDeletionIdSets() {
         val insertions = idSet(1, 0, 2)
         val deletions = idSet(2, 3, 1)
@@ -638,7 +740,7 @@ class UndoManagerTest {
             text,
             UndoManagerOptions(
                 captureTimeoutMillis = 0,
-                deleteFilter = { id -> id.clock != 0L },
+                deleteFilter = { item -> item.id.clock != 0L },
             ),
         )
 
@@ -656,6 +758,34 @@ class UndoManagerTest {
         assertEquals(1, redoStackItem.deletedCount)
         assertTrue(redoStackItem.deletes.has(1, 1))
         assertFalse(redoStackItem.deletes.has(1, 0))
+    }
+
+    @Test
+    fun deleteFilterReceivesContentItemLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val array = doc.getArray("items")
+        val undoManager = UndoManager(
+            array,
+            UndoManagerOptions(
+                captureTimeoutMillis = 0,
+                deleteFilter = { item ->
+                    val contentType = item.content as? ContentType
+                    contentType == null || (contentType.type as? YMap)?.attrSize == 0
+                },
+            ),
+        )
+        val mapWithAttr = doc.createMap()
+        mapWithAttr.setAttr("hi", 1)
+        val emptyMap = doc.createMap()
+
+        array.insert(0, listOf(mapWithAttr, emptyMap))
+
+        undoManager.undo()
+
+        assertEquals(1, array.length)
+        val remaining = array.get(0) as YMap
+        assertSame(mapWithAttr, remaining)
+        assertEquals(setOf("hi"), remaining.attrKeys())
     }
 
     @Test
@@ -682,6 +812,30 @@ class UndoManagerTest {
         assertTrue(undoManager.canUndo)
         undoManager.undo()
         assertEquals(emptyList(), array.toList())
+    }
+
+    @Test
+    fun emptyTypeScopeCanBeExpandedWhenDocOptionIsProvidedLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val undoManager = UndoManager(
+            emptyList<AbstractYType>(),
+            UndoManagerOptions(captureTimeoutMillis = 0, doc = doc),
+        )
+        val array = doc.getArray("")
+
+        array.insert(0, listOf(1))
+        assertFalse(undoManager.canUndo)
+
+        undoManager.addToScope(array)
+        array.insert(1, listOf(2))
+
+        assertTrue(undoManager.canUndo)
+        undoManager.undo()
+        assertEquals(listOf(1L), array.toList())
+
+        assertFailsWith<IllegalArgumentException> {
+            UndoManager(emptyList<AbstractYType>())
+        }
     }
 
     @Test

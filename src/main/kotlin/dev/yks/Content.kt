@@ -190,6 +190,37 @@ fun createContentDocFromDoc(doc: YDoc): ContentDoc {
     return ContentDoc(doc.guid, opts).also { content -> content.doc = doc }
 }
 
+internal fun ContentDoc.toYDoc(): YDoc = doc ?: YDoc(
+    guid = guid,
+    collectionId = opts.stringOption("collectionId") ?: opts.stringOption("collectionid"),
+    gc = opts.booleanOption("gc", default = true),
+    meta = opts["meta"],
+    shouldLoad = opts.booleanOption("shouldLoad") || opts.booleanOption("autoLoad"),
+    autoLoad = opts.booleanOption("autoLoad"),
+    isSuggestionDoc = opts.booleanOption("isSuggestionDoc"),
+)
+
+internal fun ContentDoc.toSubdocRef(): YValue.SubdocRef {
+    doc?.let { return YValue.from(it) as YValue.SubdocRef }
+    val autoLoad = opts.booleanOption("autoLoad")
+    return YValue.SubdocRef(
+        guid = guid,
+        gc = opts.booleanOption("gc", default = true),
+        shouldLoad = opts.booleanOption("shouldLoad") || autoLoad,
+        autoLoad = autoLoad,
+        instanceId = guid,
+        collectionId = opts.stringOption("collectionId") ?: opts.stringOption("collectionid"),
+        meta = YValue.from(opts["meta"]),
+        isSuggestionDoc = opts.booleanOption("isSuggestionDoc"),
+    )
+}
+
+private fun Map<String, Any?>.booleanOption(key: String, default: Boolean = false): Boolean =
+    this[key] as? Boolean ?: default
+
+private fun Map<String, Any?>.stringOption(key: String): String? =
+    this[key] as? String
+
 class ContentEmbed(
     val embed: Any?,
 ) : AbstractContent() {

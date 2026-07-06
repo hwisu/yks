@@ -80,6 +80,57 @@ class ContentTest {
     }
 
     @Test
+    fun detachedContentDocOptionsAreUsedWhenInsertedAsTextContent() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val content = ContentDoc(
+            "auto",
+            mapOf(
+                "gc" to false,
+                "autoLoad" to true,
+                "collectionId" to "workspace",
+                "meta" to mapOf("role" to "reference"),
+                "isSuggestionDoc" to true,
+            ),
+        )
+
+        insertContent(text, 0, content)
+
+        val subdoc = text.get(0) as YDoc
+        assertEquals("auto", subdoc.guid)
+        assertFalse(subdoc.gc)
+        assertTrue(subdoc.shouldLoad)
+        assertTrue(subdoc.autoLoad)
+        assertEquals("workspace", subdoc.collectionId)
+        assertEquals(mapOf("role" to "reference"), subdoc.meta)
+        assertTrue(subdoc.isSuggestionDoc)
+
+        val plain = doc.getText("plain")
+        insertContent(plain, 0, ContentDoc("plain"))
+
+        assertFalse((plain.get(0) as YDoc).shouldLoad)
+    }
+
+    @Test
+    fun detachedContentDocSubdocRefUsesUpstreamLoadSemantics() {
+        val plain = ContentDoc("plain").toSubdocRef()
+        val explicit = ContentDoc("explicit", mapOf("shouldLoad" to true, "collectionid" to "legacy")).toSubdocRef()
+        val autoload = ContentDoc("autoload", mapOf("shouldLoad" to false, "autoLoad" to true)).toSubdocRef()
+
+        assertFalse(plain.shouldLoad)
+        assertFalse(plain.autoLoad)
+        assertTrue(plain.gc)
+        assertTrue(explicit.shouldLoad)
+        assertTrue(explicit.gc)
+        assertEquals("legacy", explicit.collectionId)
+        assertTrue(autoload.shouldLoad)
+        assertTrue(autoload.autoLoad)
+
+        val withoutGc = ContentDoc("no-gc", mapOf("gc" to false)).toSubdocRef()
+        assertFalse(withoutGc.gc)
+    }
+
+    @Test
     fun contentRefsAndReadersMirrorYjsStructReferenceTable() {
         assertEquals(11, contentRefs.size)
         assertFailsWith<IllegalStateException> { contentRefs[structGCRefNumber](UpdateDecoderV1(ByteArray(0))) }

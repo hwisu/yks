@@ -128,7 +128,22 @@ fun typeXmlFragmentToDeltaSnapshot(parent: YXmlFragment, snapshot: Snapshot): Li
 
 fun cleanupYTextFormatting(type: YText): Int {
     if (!type.doc.cleanupFormatting) return 0
-    return 0
+    var cleaned = 0
+    type.doc.transact {
+        var activeFormats = type.liveTextFormatItemsForCleanup()
+        var baseline = type.renderedTextAttributesForCleanup(activeFormats)
+        activeFormats.sortedWith(textFormatCleanupOrder).forEach { candidate ->
+            if (activeFormats.none { item -> item.id == candidate.id }) return@forEach
+            val withoutCandidate = activeFormats.filterNot { item -> item.id == candidate.id }
+            if (type.renderedTextAttributesForCleanup(withoutCandidate) == baseline) {
+                type.doc.deleteItemsByIds(listOf(candidate.id), markCleanups = true)
+                activeFormats = withoutCandidate
+                baseline = type.renderedTextAttributesForCleanup(activeFormats)
+                cleaned++
+            }
+        }
+    }
+    return cleaned
 }
 
 fun cleanupYTextAfterTransaction(transaction: YTransaction): Int =
@@ -146,7 +161,8 @@ fun cleanupContextlessFormattingGap(transaction: YTransactionEvent, item: Item?)
 @Suppress("UNUSED_PARAMETER")
 fun cleanupContextlessFormattingGap(doc: YDoc, item: Item?): Int {
     if (!doc.cleanupFormatting) return 0
-    return 0
+    val type = item?.parent?.let(doc::typeForParent) as? YText ?: return 0
+    return cleanupYTextFormatting(type)
 }
 
 fun cleanupFormattingGap(
@@ -174,7 +190,10 @@ fun cleanupFormattingGap(
     currFormats: MutableMap<String, Any?> = linkedMapOf(),
 ): Int {
     if (!doc.cleanupFormatting) return 0
-    return 0
+    val type = start?.parent?.let(doc::typeForParent) as? YText
+        ?: curr?.parent?.let(doc::typeForParent) as? YText
+        ?: return 0
+    return cleanupYTextFormatting(type)
 }
 
 fun findRootTypeKey(type: AbstractYType): String {
@@ -182,7 +201,66 @@ fun findRootTypeKey(type: AbstractYType): String {
     return type.name
 }
 
+fun findTypeInOtherDoc(type: AbstractYType, otherDoc: YDoc): AbstractYType {
+    if (type.name in type.doc.rootNames()) {
+        val rootKey = findRootTypeKey(type)
+        return otherDoc.rootType(rootKey) ?: error("type does not exist in other document")
+    }
+    val itemId = type.doc.typeRefItemId(type) ?: error("type does not exist in its source document")
+    return otherDoc.typeFromItemId(itemId) ?: error("type does not exist in other document")
+}
+
 private fun Id.logId(): String = "$client:$clock"
+
+private val textFormatCleanupOrder: Comparator<StoreItem> =
+    compareByDescending<StoreItem> { it.id.client }.thenBy { it.id.clock }
+
+private fun YText.liveTextFormatItemsForCleanup(): List<StoreItem> =
+    doc.sequence(name)
+        .filter { item -> !item.deleted && item.content.kind == kind && item.content is ItemContent.TextFormat }
+        .sortedWith(textFormatCleanupOrder)
+
+private fun YText.renderedTextAttributesForCleanup(
+    formatItems: List<StoreItem>,
+): List<Map<String, YValue>> {
+    val textItems = doc.sequence(name)
+        .filter { item -> !item.deleted && item.content.kind == kind && item.content.isTextCountableForCleanup() }
+    val attributes = textItems.map { item -> item.content.baseTextAttributesForCleanup().toMutableMap() }
+
+    formatItems.sortedWith(textFormatCleanupOrder).forEach { formatItem ->
+        val format = formatItem.content as? ItemContent.TextFormat ?: return@forEach
+        val start = textItems.indexOfFirst { textItem -> textItem.id == format.target }
+        if (start < 0) return@forEach
+        val end = (start + format.length.toInt()).coerceAtMost(textItems.size)
+        for (index in start until end) {
+            attributes[index].applyTextFormatAttributesForCleanup(format.attributes)
+        }
+        if (end < attributes.size) {
+            attributes[end].applyTextFormatAttributesForCleanup(format.afterAttributes)
+        }
+    }
+
+    return attributes.map { attrs -> attrs.toSortedMap() }
+}
+
+private fun MutableMap<String, YValue>.applyTextFormatAttributesForCleanup(attributes: Map<String, YValue>) {
+    attributes.forEach { (key, value) ->
+        if (value == YValue.Null) {
+            remove(key)
+        } else {
+            this[key] = value
+        }
+    }
+}
+
+private fun ItemContent.isTextCountableForCleanup(): Boolean =
+    this is ItemContent.Text || this is ItemContent.TextEmbed
+
+private fun ItemContent.baseTextAttributesForCleanup(): Map<String, YValue> = when (this) {
+    is ItemContent.Text -> baseAttributes
+    is ItemContent.TextEmbed -> baseAttributes
+    else -> emptyMap()
+}
 
 private fun ItemContent.logContent(doc: YDoc): String = when (this) {
     is ItemContent.Value -> "Value(${doc.valueToJson(value).logAny()})"
