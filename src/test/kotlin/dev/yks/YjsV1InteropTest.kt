@@ -649,6 +649,19 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun updateEventEmitsStandardUpstreamCompatibleV1ForRootText() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val updates = mutableListOf<ByteArray>()
+        doc.observeUpdates { update, _ -> updates.add(update) }
+
+        doc.getText("body").insert(0, "ab", mapOf("bold" to true))
+
+        assertEquals(1, updates.size)
+        assertStandardV1(updates.single())
+        assertUpstreamAppliesUpdate(updates.single(), "formatted-text")
+    }
+
+    @Test
     fun upstreamYjsAppliesNativeXmlTextFormattingAuthoredByKotlin() {
         val doc = YDoc(clientId = 1, gc = false)
         val fragment = doc.getXmlFragment("xml")
@@ -667,7 +680,7 @@ class YjsV1InteropTest {
     }
 
     @Test
-    fun legacyTransactionUpdatePreservesNativeFormatMarkers() {
+    fun standardTransactionUpdatePreservesNativeFormatMarkers() {
         val source = YDoc(clientId = 2, gc = false)
         val updates = mutableListOf<ByteArray>()
         source.observeUpdates { update, _ -> updates.add(update) }
@@ -675,7 +688,8 @@ class YjsV1InteropTest {
         applyUpdate(source, fixture("text-format-insert-v1"))
 
         val transactionUpdate = updates.single()
-        assertTrue(transactionUpdate.copyOfRange(0, 4).contentEquals(byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 1)))
+        assertStandardV1(transactionUpdate)
+        assertUpstreamAppliesUpdate(transactionUpdate, "formatted-text")
         val target = YDoc(clientId = 3, gc = false)
         applyUpdate(target, transactionUpdate)
         assertEquals(source.getText("body").toDelta(), target.getText("body").toDelta())

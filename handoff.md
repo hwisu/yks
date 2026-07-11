@@ -7,14 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 17개 커밋 앞서 있음
+- 현재 `origin/main`보다 18개 커밋 앞서 있음
 - 아직 push하지 않음
 - XML 문자열 surface parity 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
-HEAD feat: harden Yjs update decoding
+HEAD feat: emit standard root transaction updates
+a1e550e feat: harden Yjs update decoding
 e6a9b59 feat: extend native Yjs subdocument parity
 50a6505 feat: match upstream Yjs XML rendering
 ffd46dd feat: complete Yjs update V2 operations
@@ -239,6 +240,14 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - decoded anchor lookup을 client별 정렬 index + binary search로 전환해 large update의 반복 linear scan 제거
 - oversized state-vector count, string/buffer length, struct clock overflow regression test 추가
 
+### 15. root transaction-event V1 standardization
+
+- root text/array/map의 lossless insert/update transaction은 `update` event에서 표준 V1 payload 방출
+- upstream fixture relay와 Kotlin-authored formatted root text event를 실제 `Y.applyUpdate`로 검증
+- 기존 API와 동일한 `isSupportedV1Update` gate를 통과하지 못하면 legacy envelope 유지
+- pre-populated detached nested owner, nested child mutation, delete-set transaction은 이름/GC metadata 완성 전까지 legacy 유지
+- 이 제한으로 기존 bidirectional UndoManager 동기화 의미를 보존
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -319,7 +328,7 @@ BUILD SUCCESSFUL
 ```
 
 - 일반 Kotlin tests: 518 passed
-- Kotlin Yjs V1/V2 interop tests: 67 passed
+- Kotlin Yjs V1/V2 interop tests: 68 passed
 - JavaScript/Yjs oracle tests: 74 passed
 - `git diff --check`: passed
 
@@ -348,7 +357,8 @@ git diff --check
    - 일부 legacy pending serialization은 `isGc`/clock-continuity metadata를 완전히 표현하지 못함
 4. transaction-event V1 update
    - `updateV2`는 genuine V2로 전환 완료
-   - 기존 `update` event는 로컬 legacy compatibility envelope를 유지
+   - root의 safe `update` event는 표준 V1로 전환 완료
+   - nested owner/child와 delete-set transaction은 GC/pending metadata 완성까지 legacy compatibility envelope 유지
 
 ## 다음 권장 작업 순서
 
