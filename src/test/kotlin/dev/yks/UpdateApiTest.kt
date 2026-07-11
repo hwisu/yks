@@ -485,7 +485,10 @@ class UpdateApiTest {
         val convertedDecoded = decodeUpdate(converted)
 
         assertEquals(YTextDelta().insert("z", mapOf("bold" to true)), convertedDoc.getText("body").toDelta())
-        assertTrue(convertedDecoded.deleteSet.contains(Id(1, 1)))
+        val deletedTextId = convertedDecoded.structs.single { struct ->
+            struct.deleted && struct.content is ContentString
+        }.id
+        assertTrue(convertedDecoded.deleteSet.contains(deletedTextId))
         assertEquals(
             decodeUpdate(update).structs.map { it.structuralFields() },
             convertedDecoded.structs.map { it.structuralFields() },
@@ -495,7 +498,7 @@ class UpdateApiTest {
     @Test
     fun convertUpdateFormatExpandsTransformedStructContent() {
         val source = YDoc(clientId = 1)
-        source.getText("body").insert(0, "a", mapOf("bold" to true))
+        source.getText("body").insert(0, "a")
 
         val converted = convertUpdateFormat(source.encodeStateAsUpdate()) { struct ->
             if (struct.content is ContentString) {
@@ -507,7 +510,7 @@ class UpdateApiTest {
         val decoded = decodeUpdate(converted)
 
         assertEquals(
-            YTextDelta().insert("xy", mapOf("bold" to true)),
+            YTextDelta().insert("xy"),
             createDocFromUpdate(converted).getText("body").toDelta(),
         )
         assertEquals(listOf(Id(1, 0), Id(1, 1)), decoded.structs.map { it.id })
@@ -550,9 +553,14 @@ class UpdateApiTest {
             decoded.structs.map { it.structuralFields() },
             decodedObfuscated.structs.map { it.structuralFields() },
         )
-        assertNotEquals(decoded.structs.first().content, decodedObfuscated.structs.first().content)
+        val decodedText = decoded.structs.first { struct -> struct.content is ContentString }
+        val obfuscatedText = decodedObfuscated.structs.first { struct -> struct.id == decodedText.id }
+        assertNotEquals(decodedText.content, obfuscatedText.content)
         assertTrue(decoded.deleteSet.structurallyEquals(decodedObfuscated.deleteSet))
-        assertTrue(decodedObfuscated.deleteSet.contains(Id(1, 1)))
+        val deletedTextId = decodedObfuscated.structs.single { struct ->
+            struct.deleted && struct.content is ContentString
+        }.id
+        assertTrue(decodedObfuscated.deleteSet.contains(deletedTextId))
         assertEquals(
             decodeStateVector(encodeStateVectorFromUpdate(update)),
             decodeStateVector(encodeStateVectorFromUpdate(obfuscated)),

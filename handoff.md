@@ -7,14 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 8개 커밋 앞서 있음
+- 현재 `origin/main`보다 9개 커밋 앞서 있음
 - 아직 push하지 않음
 - 네이티브 XML/subdocument V1 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
-HEAD feat: author native Yjs text formatting
+HEAD feat: author native Yjs attributed inserts
+2a03ad7 feat: author native Yjs text formatting
 5436954 feat: emit standard Yjs V1 delete sets
 65ed0f8 feat: add Yjs V1 XML and subdocument parity
 68198d8 feat: support native Yjs V1 text formatting
@@ -122,7 +123,15 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - deep-delta format attribution이 native marker의 insert/delete attribution을 추적
 - Kotlin-authored partial text formatting과 formatted XML text를 upstream Yjs에서 검증
 
-명시적 attributes를 가진 신규 text/embed insert 자체는 아직 기존 base-attribute 모델을 유지하며, native marker가 이미 있는 위치에 삽입할 때만 marker shield를 생성함.
+명시적 attributes를 가진 신규 text/embed insert도 native marker pair를 생성함.
+
+- attributed text/list/embed insert의 base attributes를 비우고 시작/복원 `ContentFormat` marker 기록
+- text position anchor가 같은 위치의 기존 marker를 포함해 insertion order를 보존
+- attribute 없는 insert는 upstream Yjs처럼 현재 위치의 active formatting을 상속
+- `ContentEmbed` ref 5의 표준 V1 writer eligibility 추가
+- deep-delta sequence rendering에서 non-countable format marker를 retain 길이에 포함하지 않음
+- snapshot, clone, undo/redo, update transform/obfuscation 테스트를 native marker clock layout에 맞춤
+- Kotlin-authored attributed text와 embed를 upstream Yjs에서 직접 검증
 
 ### 6. 표준 V1 delete-set writer와 삭제 parity
 
@@ -214,8 +223,8 @@ BUILD SUCCESSFUL
 ```
 
 - 일반 Kotlin tests: 508 passed
-- Kotlin Yjs V1 interop tests: 51 passed
-- JavaScript/Yjs oracle tests: 59 passed
+- Kotlin Yjs V1 interop tests: 53 passed
+- JavaScript/Yjs oracle tests: 60 passed
 - `git diff --check`: passed
 
 검증 명령:
@@ -234,38 +243,35 @@ git diff --check
 
 우선순위가 높은 잔여 작업:
 
-1. attributed text/embed insert를 native marker 모델로 완전히 이전
-   - range formatting은 native marker로 이전 완료
-   - 신규 insert의 base-attribute 모델은 아직 legacy fallback을 사용할 수 있음
-2. XML surface parity
+1. XML surface parity
    - upstream `Y.XmlText.toString()`은 format을 tag로 렌더링하지만 Kotlin은 plain text로 렌더링함
    - empty element 문자열 표현도 upstream과 다름
    - root `XmlElement` node name은 wire에 없으므로 schema/pre-materialization이 필요함
-3. subdocument 확장
+2. subdocument 확장
    - deletion event cancellation/ordering
    - text/XML 내부 ContentDoc
    - upstream에 없는 local options 처리 정책
-4. 더 넓은 multi-client concurrency fixture
+3. 더 넓은 multi-client concurrency fixture
    - sequence conflict ordering
    - overlapping format/XML edits
    - randomized convergence oracle
-5. 실제 update V2 codec
+4. 실제 update V2 codec
    - 현재 여러 V2 API는 V1/legacy 구현에 alias되어 있음
-6. codec hardening
+5. codec hardening
    - decoded count/length allocation limit
    - Long overflow/Long-to-Int guard
    - large update에서 anchor lookup indexing
-7. GC/pending serialization 완성
+6. GC/pending serialization 완성
    - GC를 unit `StoreItem`으로 근사 중
    - 일부 legacy pending serialization은 `isGc`/clock-continuity metadata를 완전히 표현하지 못함
-8. transaction-event update
+7. transaction-event update
    - 현재 event update는 로컬 동작 보존을 위해 강제로 legacy envelope를 사용함
 
 ## 다음 권장 작업 순서
 
-1. attributed text/embed insert를 native ContentFormat marker 모델로 이전
-2. multi-client randomized convergence fixture 추가
-3. 실제 update V2 codec 분리
+1. multi-client randomized convergence fixture 추가
+2. 실제 update V2 codec 분리
+3. XML/subdocument surface parity 확장
 
 ## 주의 사항
 

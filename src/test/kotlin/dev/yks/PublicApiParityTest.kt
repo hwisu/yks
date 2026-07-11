@@ -410,8 +410,8 @@ class PublicApiParityTest {
 
         assertEquals(
             """
-            Children[1:0:Text(parent=body, parentSub=null, deleted=false, length=1), 1:1:Text(parent=body, parentSub=null, deleted=true, length=1), 1:2:Text(parent=body, parentSub=null, deleted=false, length=1)]
-            ChildrenContent[Text(value="a", attrs={"bold"=true}), TextEmbed(value={"src"="image"}, attrs={"kind"="asset"})]
+            Children[1:0:Text(parent=body, parentSub=null, deleted=false, length=1), 1:1:Text(parent=body, parentSub=null, deleted=false, length=1), 1:2:Text(parent=body, parentSub=null, deleted=true, length=1), 1:3:Text(parent=body, parentSub=null, deleted=false, length=1), 1:4:Text(parent=body, parentSub=null, deleted=false, length=1), 1:5:Text(parent=body, parentSub=null, deleted=false, length=1), 1:6:Text(parent=body, parentSub=null, deleted=false, length=1)]
+            ChildrenContent[NativeTextFormat(key="bold", value=true), Text(value="a", attrs={"bold"=true}), NativeTextFormat(key="bold", value=null), NativeTextFormat(key="kind", value="asset"), TextEmbed(value={"src"="image"}, attrs={"kind"="asset"}), NativeTextFormat(key="kind", value=null)]
             """.trimIndent(),
             log,
         )

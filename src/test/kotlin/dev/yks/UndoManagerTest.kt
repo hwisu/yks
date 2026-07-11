@@ -104,7 +104,7 @@ class UndoManagerTest {
         text.insertEmbed(0, embed, mapOf("kind" to "person"))
 
         assertEquals(YTextDelta().insertEmbed(embed, mapOf("kind" to "person")), text.toDelta())
-        assertEquals(1, assertNotNull(undoManager.undo()).insertedCount)
+        assertEquals(3, assertNotNull(undoManager.undo()).insertedCount)
         assertEquals(YTextDelta(), text.toDelta())
 
         undoManager.redo()
@@ -999,7 +999,9 @@ class UndoManagerTest {
         }
         text.insert(0, "abc", mapOf("bold" to true))
         text.delete(1)
-        val deleted = getItemCleanStart(doc, Id(1, 1))
+        val deleted = doc.sequence(text.name).first { item ->
+            (item.content as? ItemContent.Text)?.value == "b"
+        }.toItemStruct(doc)
         origins.clear()
 
         var restored: Item? = null

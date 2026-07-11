@@ -28,7 +28,11 @@ if (scenario === 'hello') {
     assert.deepEqual(actual.toJSON(), expected.toJSON())
   }
   assert.deepEqual(Y.encodeStateVector(actual), Y.encodeStateVector(expected))
-  if (scenario === 'formatted-text' || scenario === 'partial-formatted-text') {
+  if (
+    scenario === 'formatted-text' ||
+    scenario === 'formatted-embed' ||
+    scenario === 'partial-formatted-text'
+  ) {
     assert.deepEqual(actual.getText('body').toDelta(), expected.getText('body').toDelta())
   }
   if (scenario === 'nested-map') {

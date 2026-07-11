@@ -806,6 +806,14 @@ class YDoc(
     }
 
     internal fun insertionAnchors(parent: String, kind: RootKind, index: Int): Pair<Id?, Id?> {
+        if (kind == RootKind.Text || kind == RootKind.XmlText) {
+            val full = sequence(parent).filter { it.content.kind == kind }
+            val visible = full.filter { !it.deleted && it.content.isCountable() }
+            require(index <= visible.size) { "insert index is out of bounds" }
+            val right = visible.getOrNull(index)
+            val rightIndex = right?.let(full::indexOf) ?: full.size
+            return full.getOrNull(rightIndex - 1)?.id to right?.id
+        }
         val full = sequence(parent).filter { it.content.kind == kind && it.content.isCountable() }
         val visible = full.filter { !it.deleted }
         require(index <= visible.size) { "insert index is out of bounds" }

@@ -520,7 +520,7 @@ private fun renderSequenceItems(
     options: DeepDeltaRenderOptions,
 ): List<RenderedSequenceItem> =
     type.doc.sequence(type.name)
-        .filter { item -> item.content.kind == kind }
+        .filter { item -> item.content.kind == kind && item.content.isCountable() }
         .flatMap { item ->
             item.readRenderedContents(type.doc, options).map { content ->
                 RenderedSequenceItem(item, content, content.renderedAction(options))

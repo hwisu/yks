@@ -1016,10 +1016,7 @@ open class YText internal constructor(
         entries: List<ItemContent>,
         attributes: Map<String, YValue>,
     ) {
-        val hasNativeMarkers = doc.sequence(name).any { item ->
-            !item.deleted && item.content.kind == kind && item.content is ItemContent.NativeTextFormat
-        }
-        if (attributes.isEmpty() || !hasNativeMarkers) {
+        if (attributes.isEmpty()) {
             insertTextEntries(index, entries)
             return
         }
@@ -1039,7 +1036,7 @@ open class YText internal constructor(
         val markerOrigin = insertNativeFormatMarkers(index, desired)
         insertTextEntries(
             index,
-            entries.map { entry -> entry.withTextAttributes(emptyMap()) },
+            entries.map { entry -> entry.withoutTextAttributes() },
             originOverride = markerOrigin ?: anchors.first,
             rightOriginOverride = anchors.second,
         )
@@ -1052,6 +1049,12 @@ open class YText internal constructor(
         for (index in start until start + length) {
             desired[index].applyTextFormatAttributes(attributes)
         }
+        canonicalizeNativeFormatting(desired)
+    }
+
+    private fun canonicalizeNativeFormatting(desired: List<Map<String, YValue>>) {
+        val visible = textItems()
+        require(desired.size == visible.size) { "text formatting state must cover every visible item" }
         val nativeMarkers = doc.sequence(name)
             .filter { item ->
                 !item.deleted && item.content.kind == kind && item.content is ItemContent.NativeTextFormat
@@ -1137,6 +1140,12 @@ private fun MutableMap<String, YValue>.applyTextFormatAttributes(attributes: Map
 private fun ItemContent.withTextAttributes(attributes: Map<String, YValue>): ItemContent = when (this) {
     is ItemContent.Text -> copy(attributes = attributes)
     is ItemContent.TextEmbed -> copy(attributes = attributes)
+    else -> error("content is not text-like")
+}
+
+private fun ItemContent.withoutTextAttributes(): ItemContent = when (this) {
+    is ItemContent.Text -> copy(attributes = emptyMap(), baseAttributes = emptyMap())
+    is ItemContent.TextEmbed -> copy(attributes = emptyMap(), baseAttributes = emptyMap())
     else -> error("content is not text-like")
 }
 

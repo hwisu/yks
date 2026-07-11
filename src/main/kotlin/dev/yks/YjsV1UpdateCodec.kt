@@ -300,10 +300,13 @@ private fun StoreItem.hasCompatibleV1ParentKind(
         is ItemContent.Value -> nestedKind?.let { kind -> kind == RootKind.Array }
             ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.Value }
         is ItemContent.Text,
+        is ItemContent.TextEmbed,
         is ItemContent.NativeTextFormat -> nestedKind?.let { kind -> kind == content.kind }
             ?: items.filter { item -> item.parent == parent && item.parentSub == null }.all { item ->
                 item.content.kind == content.kind &&
-                    (item.content is ItemContent.Text || item.content is ItemContent.NativeTextFormat)
+                    (item.content is ItemContent.Text ||
+                        item.content is ItemContent.TextEmbed ||
+                        item.content is ItemContent.NativeTextFormat)
             }
         is ItemContent.XmlType -> {
             val xmlSequenceKinds = setOf(RootKind.XmlFragment, RootKind.XmlElement, RootKind.XmlHook)
@@ -324,7 +327,10 @@ private fun ItemContent.isSupportedV1Content(): Boolean = when (this) {
         kind in setOf(RootKind.Text, RootKind.XmlText) &&
             !Character.isSurrogate(value.single()) &&
             baseAttributes.isEmpty()
-    is ItemContent.TextEmbed -> false
+    is ItemContent.TextEmbed ->
+        kind in setOf(RootKind.Text, RootKind.XmlText) &&
+            baseAttributes.isEmpty() &&
+            value.isSupportedV1Value(topLevel = false)
     is ItemContent.TextFormat -> false
     is ItemContent.NativeTextFormat ->
         kind in setOf(RootKind.Text, RootKind.XmlText) && value.isSupportedV1Value(topLevel = false)

@@ -8,6 +8,7 @@ export const scenarioNames = [
   'nested-map-update',
   'nested-text',
   'formatted-text',
+  'formatted-embed',
   'partial-formatted-text',
   'xml',
   'xml-formatted',
@@ -65,6 +66,9 @@ export const createScenarioDocument = name => {
     }
     case 'formatted-text':
       doc.getText('body').insert(0, 'ab', { bold: true })
+      break
+    case 'formatted-embed':
+      doc.getText('body').insertEmbed(0, { image: 'x' }, { bold: true })
       break
     case 'partial-formatted-text':
       doc.getText('body').insert(0, 'abcd')
@@ -140,6 +144,7 @@ export const materializeScenario = (doc, name) => {
     case 'nested-text':
       return doc.getArray('nodes')
     case 'formatted-text':
+    case 'formatted-embed':
     case 'partial-formatted-text':
       return doc.getText('body')
     case 'xml':

@@ -429,6 +429,28 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun upstreamYjsAppliesAttributedTextInsertAuthoredByKotlin() {
+        val doc = YDoc(clientId = 1, gc = false)
+        doc.getText("body").insert(0, "ab", mapOf("bold" to true))
+
+        val update = encodeStateAsUpdate(doc)
+
+        assertStandardV1(update)
+        assertUpstreamAppliesUpdate(update, "formatted-text")
+    }
+
+    @Test
+    fun upstreamYjsAppliesAttributedEmbedInsertAuthoredByKotlin() {
+        val doc = YDoc(clientId = 1, gc = false)
+        doc.getText("body").insertEmbed(0, mapOf("image" to "x"), mapOf("bold" to true))
+
+        val update = encodeStateAsUpdate(doc)
+
+        assertStandardV1(update)
+        assertUpstreamAppliesUpdate(update, "formatted-embed")
+    }
+
+    @Test
     fun upstreamYjsAppliesNativeXmlTextFormattingAuthoredByKotlin() {
         val doc = YDoc(clientId = 1, gc = false)
         val fragment = doc.getXmlFragment("xml")

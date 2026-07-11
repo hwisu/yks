@@ -441,7 +441,7 @@ class YTextDeltaTest {
         assertEquals(
             YTextDelta()
                 .insert("a", mapOf("bold" to true))
-                .insertEmbed(image)
+                .insertEmbed(image, mapOf("bold" to true))
                 .insert("b", mapOf("bold" to true)),
             withoutAttrs.toDelta(),
         )
