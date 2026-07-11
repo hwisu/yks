@@ -4,4 +4,4 @@
 .mise-data/
 build/
 out/
-
+node_modules/

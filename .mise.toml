@@ -1,4 +1,4 @@
 [tools]
 gradle = "8.14.3"
+java = "temurin-21"
 kotlin = "2.2.20"
-

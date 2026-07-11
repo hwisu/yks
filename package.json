@@ -1,0 +1,13 @@
+{
+  "name": "yks-interop-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "interop:generate": "node interop/yjs-v1/generate-fixtures.mjs",
+    "interop:verify": "node interop/yjs-v1/verify-update.mjs",
+    "test:interop": "node --test interop/yjs-v1/*.test.mjs"
+  },
+  "devDependencies": {
+    "yjs": "13.6.31"
+  }
+}
