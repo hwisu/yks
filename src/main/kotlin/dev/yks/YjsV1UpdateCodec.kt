@@ -245,7 +245,6 @@ internal object UpdateCodec {
 }
 
 private fun DocumentUpdate.isSupportedV1Update(): Boolean {
-    if (!deleteSet.isEmpty) return false
     if (items.isEmpty()) return true
     val clients = items.groupBy { item -> item.id.client }
     if (clients.size != 1) return false
@@ -261,8 +260,7 @@ private fun DocumentUpdate.isSupportedV1Update(): Boolean {
         item.content.directTypeRef()?.let { ref -> ref.name to ref.kind }
     }.toMap()
     return sorted.all { item ->
-        !item.deleted &&
-            item.content.isSupportedV1Content() &&
+        item.content.isSupportedV1Content() &&
             item.hasCompatibleV1ParentKind(sorted, parentKinds) &&
             (startClock > 0 || item.origin == null || item.origin in ids) &&
             (startClock > 0 || item.rightOrigin == null || item.rightOrigin in ids) &&

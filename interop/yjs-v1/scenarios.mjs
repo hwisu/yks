@@ -13,6 +13,9 @@ export const scenarioNames = [
   'xml-formatted',
   'subdoc-map',
   'subdoc-array',
+  'text-delete',
+  'xml-delete',
+  'subdoc-delete',
 ]
 
 export const createScenarioDocument = name => {
@@ -98,6 +101,24 @@ export const createScenarioDocument = name => {
         }),
       ])
       break
+    case 'text-delete': {
+      const text = doc.getText('body')
+      text.insert(0, 'hello')
+      text.delete(1, 3)
+      break
+    }
+    case 'xml-delete': {
+      const fragment = doc.getXmlFragment('xml')
+      fragment.insert(0, [new Y.XmlElement('p')])
+      fragment.delete(0, 1)
+      break
+    }
+    case 'subdoc-delete': {
+      const subs = doc.getMap('subs')
+      subs.set('child', new Y.Doc({ guid: 'child', shouldLoad: false }))
+      subs.delete('child')
+      break
+    }
     default:
       throw new Error(`unknown interoperability scenario: ${name}`)
   }
@@ -128,6 +149,12 @@ export const materializeScenario = (doc, name) => {
       return doc.getMap('subs')
     case 'subdoc-array':
       return doc.getArray('subs')
+    case 'text-delete':
+      return doc.getText('body')
+    case 'xml-delete':
+      return doc.getXmlFragment('xml')
+    case 'subdoc-delete':
+      return doc.getMap('subs')
     default:
       throw new Error(`unknown interoperability scenario: ${name}`)
   }

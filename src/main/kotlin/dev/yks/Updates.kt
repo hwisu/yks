@@ -225,7 +225,7 @@ class LazyStructReader private constructor(
     update: DocumentUpdate,
     val filterSkips: Boolean = false,
 ) {
-    private val structs: List<AbstractStruct> = update.items.map { it.toItemStruct(YDoc()) }
+    private val structs: List<AbstractStruct> = update.itemsWithDeleteState().map { it.toItemStruct(YDoc()) }
     private var index: Int = 0
     private val decodedDeleteSet: DeleteSet = update.deleteSet.copy()
 
@@ -330,7 +330,7 @@ fun finishLazyStructWriting(lazyWriter: LazyStructWriter): BinaryEncoder = lazyW
 fun decodeUpdate(update: ByteArray): DecodedUpdate {
     val decoded = UpdateCodec.decode(update)
     return DecodedUpdate(
-        structs = decoded.items.map { it.toDecodedStruct() },
+        structs = decoded.itemsWithDeleteState().map { it.toDecodedStruct() },
         deleteSet = decoded.deleteSet.copy(),
     )
 }
@@ -406,7 +406,7 @@ fun createContentIds(
 ): ContentIds = ContentIds(inserts, deletes)
 
 fun createInsertSetFromDoc(doc: YDoc, filterDeleted: Boolean = false): IdSet =
-    createInsertIdSet(UpdateCodec.decode(doc.encodeStateAsUpdate()).items, filterDeleted)
+    createInsertIdSet(UpdateCodec.decode(doc.encodeStateAsUpdate()).itemsWithDeleteState(), filterDeleted)
 
 fun createDeleteSetFromDoc(doc: YDoc): IdSet = doc.deleteSet().toIdSet()
 
@@ -581,9 +581,13 @@ fun decodeContentMap(bytes: ByteArray): ContentMap {
 fun createContentIdsFromUpdate(update: ByteArray): ContentIds {
     val decoded = UpdateCodec.decode(update)
     return createContentIds(
-        inserts = createInsertIdSet(decoded.items),
+        inserts = createInsertIdSet(decoded.itemsWithDeleteState()),
         deletes = decoded.deleteSet.toIdSet(),
     )
+}
+
+private fun DocumentUpdate.itemsWithDeleteState(): List<StoreItem> = items.map { item ->
+    if (item.deleted || !deleteSet.contains(item.id)) item else item.copy(deleted = true)
 }
 
 fun createContentIdsFromUpdateV2(update: ByteArray): ContentIds = createContentIdsFromUpdate(update)

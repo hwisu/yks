@@ -596,6 +596,69 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun emitsStandardV1DeleteSetsForFullAndIncrementalTextUpdates() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val text = doc.getText("body")
+        text.insert(0, "hello")
+        val baseline = encodeStateAsUpdate(doc)
+        val baselineState = encodeStateVector(doc)
+
+        text.delete(1, 3)
+        val full = encodeStateAsUpdate(doc)
+        val incremental = encodeStateAsUpdate(doc, baselineState)
+
+        assertStandardV1(full)
+        assertStandardV1(incremental)
+        assertUpstreamAppliesUpdate(full, "text-delete")
+        assertUpstreamAppliesSequence("text-delete", baseline, incremental)
+    }
+
+    @Test
+    fun emitsStandardV1XmlDeletionAndPreservesRemoteDeleteEvents() {
+        val source = YDoc(clientId = 1, gc = false)
+        val fragment = source.getXmlFragment("xml")
+        fragment.push(source.createXmlElement("p"))
+        val baseline = encodeStateAsUpdate(source)
+        val baselineState = encodeStateVector(source)
+        fragment.delete(0)
+        val incremental = encodeStateAsUpdate(source, baselineState)
+
+        assertStandardV1(incremental)
+        assertUpstreamAppliesSequence("xml-delete", baseline, incremental)
+
+        val target = YDoc(clientId = 2, gc = false)
+        applyUpdate(target, baseline)
+        val events = mutableListOf<YEvent>()
+        target.getXmlFragment("xml").observe(events::add)
+        applyUpdate(target, incremental)
+        assertEquals(0, target.getXmlFragment("xml").length)
+        assertEquals(1, events.single().transaction?.deletedItemCount)
+    }
+
+    @Test
+    fun emitsStandardV1SubdocumentDeletionAndRemovalEvent() {
+        val source = YDoc(clientId = 1, gc = false)
+        val subs = source.getMap("subs")
+        subs.set("child", YDoc(guid = "child", shouldLoad = false))
+        val baseline = encodeStateAsUpdate(source)
+        val baselineState = encodeStateVector(source)
+        subs.delete("child")
+        val incremental = encodeStateAsUpdate(source, baselineState)
+
+        assertStandardV1(incremental)
+        assertUpstreamAppliesSequence("subdoc-delete", baseline, incremental)
+
+        val target = YDoc(clientId = 2, gc = false)
+        applyUpdate(target, baseline)
+        val child = target.getMap("subs").get("child") as YDoc
+        val events = mutableListOf<YSubdocEvent>()
+        target.observeSubdocs(events::add)
+        applyUpdate(target, incremental)
+        assertEquals(null, target.getMap("subs").get("child"))
+        assertEquals(listOf(child), events.single().removed)
+    }
+
+    @Test
     fun unsupportedXmlAndSubdocumentShapesRemainLegacy() {
         val staticXml = YDoc(clientId = 1)
         staticXml.getXmlFragment("xml").push(YXmlElement("p"))

@@ -7,13 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 이 문서를 포함할 다음 XML/subdocument 커밋 후 `origin/main`보다 6개 커밋 앞서게 됨
+- 현재 `origin/main`보다 7개 커밋 앞서 있음
 - 아직 push하지 않음
 - 네이티브 XML/subdocument V1 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
+HEAD feat: emit standard Yjs V1 delete sets
+65ed0f8 feat: add Yjs V1 XML and subdocument parity
 68198d8 feat: support native Yjs V1 text formatting
 a19f4ac feat: decode and integrate Yjs V1 updates
 357db04 feat: expand Yjs V1 update writer
@@ -109,6 +111,14 @@ ItemContent.NativeTextFormat(key, value, kind)
 
 Kotlin이 직접 생성하는 range formatting은 아직 native marker pair로 마이그레이션하지 않았으므로 legacy codec을 사용함.
 
+### 6. 표준 V1 delete-set writer와 삭제 parity
+
+- non-empty delete set을 표준 Yjs update V1으로 기록
+- full-state deleted struct와 state-vector 기반 delete-only incremental update 지원
+- Kotlin-authored text/XML/subdocument 삭제를 upstream Yjs full/sequence verifier로 검증
+- standard update 수신 시 XML observer delete metadata와 subdocument removal event 검증
+- `decodeUpdate`, `LazyStructReader`, content-ID helper가 delete set을 public struct의 `deleted` metadata에 반영
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -177,7 +187,7 @@ subdoc-duplicate-guid-v1.bin
 - `collectionId` 또는 suggestion-doc 같은 비표준 subdocument 옵션
 - `shouldLoad=true`, `autoLoad=false`처럼 upstream wire에서 보존할 수 없는 상태
 - text/XML 내부 subdocument
-- XML/subdocument delete update
+- text/XML 내부 subdocument delete update
 
 이 경우 모두 legacy `YKS` codec으로 fallback하는 테스트가 있음.
 
@@ -191,8 +201,8 @@ BUILD SUCCESSFUL
 ```
 
 - 일반 Kotlin tests: 508 passed
-- Kotlin Yjs V1 interop tests: 46 passed
-- JavaScript/Yjs oracle tests: 56 passed
+- Kotlin Yjs V1 interop tests: 49 passed
+- JavaScript/Yjs oracle tests: 59 passed
 - `git diff --check`: passed
 
 검증 명령:
@@ -211,41 +221,37 @@ git diff --check
 
 우선순위가 높은 잔여 작업:
 
-1. 표준 V1 delete emission
-   - 현재 non-empty delete set은 writer가 legacy로 fallback함
-   - XML/subdoc 삭제, pending delete event parity 포함
-2. Kotlin-authored formatting을 native marker pair로 전환
+1. Kotlin-authored formatting을 native marker pair로 전환
    - 현재 Kotlin range format 모델과 upstream marker 모델이 공존함
-3. XML surface parity
+2. XML surface parity
    - upstream `Y.XmlText.toString()`은 format을 tag로 렌더링하지만 Kotlin은 plain text로 렌더링함
    - empty element 문자열 표현도 upstream과 다름
    - root `XmlElement` node name은 wire에 없으므로 schema/pre-materialization이 필요함
-4. subdocument 확장
+3. subdocument 확장
    - deletion event cancellation/ordering
    - text/XML 내부 ContentDoc
    - upstream에 없는 local options 처리 정책
-5. 더 넓은 multi-client concurrency fixture
+4. 더 넓은 multi-client concurrency fixture
    - sequence conflict ordering
    - overlapping format/XML edits
    - randomized convergence oracle
-6. 실제 update V2 codec
+5. 실제 update V2 codec
    - 현재 여러 V2 API는 V1/legacy 구현에 alias되어 있음
-7. codec hardening
+6. codec hardening
    - decoded count/length allocation limit
    - Long overflow/Long-to-Int guard
    - large update에서 anchor lookup indexing
-8. GC/pending serialization 완성
+7. GC/pending serialization 완성
    - GC를 unit `StoreItem`으로 근사 중
    - 일부 legacy pending serialization은 `isGc`/clock-continuity metadata를 완전히 표현하지 못함
-9. transaction-event update
+8. transaction-event update
    - 현재 event update는 로컬 동작 보존을 위해 강제로 legacy envelope를 사용함
 
 ## 다음 권장 작업 순서
 
-1. 표준 V1 delete-set writer와 XML/subdocument deletion event parity 구현
-2. Kotlin local formatting을 native ContentFormat marker 모델로 이전
-3. multi-client randomized convergence fixture 추가
-4. 실제 update V2 codec 분리
+1. Kotlin local formatting을 native ContentFormat marker 모델로 이전
+2. multi-client randomized convergence fixture 추가
+3. 실제 update V2 codec 분리
 
 ## 주의 사항
 
