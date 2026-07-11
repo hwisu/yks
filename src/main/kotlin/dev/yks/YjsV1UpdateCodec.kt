@@ -63,7 +63,21 @@ internal object UpdateCodec {
             repeat(numberOfStructs) {
                 val info = decoder.readByte()
                 when (info and INFO_CONTENT_MASK) {
-                    structGCRefNumber -> error("Yjs GC structs are not supported yet")
+                    structGCRefNumber -> {
+                        val length = decoder.readVarUInt()
+                        structs.add(
+                            DecodedWireItem(
+                                id = Id(client, clock),
+                                origin = null,
+                                rightOrigin = null,
+                                parent = ParentReference.Root(gcParentName(client)),
+                                parentSub = null,
+                                content = WireContent.Deleted(length),
+                                isGc = true,
+                            ),
+                        )
+                        clock += length
+                    }
                     structSkipRefNumber -> clock += decoder.readVarUInt()
                     else -> {
                         val id = Id(client, clock)
@@ -188,7 +202,7 @@ internal object UpdateCodec {
         contentTypeRefNumber -> {
             val kind = rootKindFromTypeRefId(decoder.readVarUInt().toInt())
             val nodeName = if (kind == RootKind.XmlElement || kind == RootKind.XmlHook) decoder.readString() else ""
-            WireContent.Type(kind, nestedName(id), nodeName)
+            WireContent.Type(kind, nestedTypeName(id), nodeName)
         }
         contentAnyRefNumber -> WireContent.AnyContent(
             List(decoder.readVarUInt().toInt()) { readLib0Any(decoder) },
@@ -333,6 +347,7 @@ private data class DecodedWireItem(
     val parent: ParentReference,
     val parentSub: String?,
     val content: WireContent,
+    val isGc: Boolean = false,
 )
 
 private sealed interface WireContent {
@@ -365,19 +380,23 @@ private fun List<StoreItem>.withClockSkips(): List<EncodedStruct> {
 }
 
 private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
-    val byId = associateBy { item -> item.id }
     val resolvedParents = mutableMapOf<Id, String>()
+    val resolvedParentSubs = mutableMapOf<Id, String?>()
     val resolvedKinds = mutableMapOf<Id, RootKind>()
+
+    fun containing(id: Id): DecodedWireItem? = firstOrNull { item ->
+        item.id.client == id.client && id.clock >= item.id.clock && id.clock < item.id.clock + item.content.length
+    }
 
     fun resolveParent(item: DecodedWireItem, seen: Set<Id> = emptySet()): String {
         resolvedParents[item.id]?.let { return it }
         check(item.id !in seen) { "cyclic Yjs parent reference at ${item.id}" }
         val parent = when (val reference = item.parent) {
             is ParentReference.Root -> reference.name
-            is ParentReference.Nested -> byId[reference.id]?.content
+            is ParentReference.Nested -> containing(reference.id)?.content
                 ?.let { content -> (content as? WireContent.Type)?.name }
-                ?: nestedName(reference.id)
-            is ParentReference.Inherit -> byId[reference.id]
+                ?: nestedParentAlias(reference.id)
+            is ParentReference.Inherit -> containing(reference.id)
                 ?.let { anchor -> resolveParent(anchor, seen + item.id) }
                 ?: inheritedParentName(reference.id)
         }
@@ -385,29 +404,58 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
         return parent
     }
 
+    fun resolveParentSub(item: DecodedWireItem, seen: Set<Id> = emptySet()): String? {
+        if (resolvedParentSubs.containsKey(item.id)) return resolvedParentSubs[item.id]
+        check(item.id !in seen) { "cyclic Yjs parent-sub reference at ${item.id}" }
+        val parentSub = when (val reference = item.parent) {
+            is ParentReference.Root,
+            is ParentReference.Nested -> item.parentSub
+            is ParentReference.Inherit -> containing(reference.id)
+                ?.let { anchor -> resolveParentSub(anchor, seen + item.id) }
+        }
+        resolvedParentSubs[item.id] = parentSub
+        return parentSub
+    }
+
     fun resolveKind(item: DecodedWireItem, seen: Set<Id> = emptySet()): RootKind {
         resolvedKinds[item.id]?.let { return it }
         check(item.id !in seen) { "cyclic Yjs kind reference at ${item.id}" }
         val kind = when (val reference = item.parent) {
-            is ParentReference.Nested -> (byId[reference.id]?.content as? WireContent.Type)?.kind
-            is ParentReference.Inherit -> byId[reference.id]?.let { anchor -> resolveKind(anchor, seen + item.id) }
+            is ParentReference.Nested -> (containing(reference.id)?.content as? WireContent.Type)?.kind
+            is ParentReference.Inherit -> containing(reference.id)
+                ?.takeUnless { anchor -> anchor.content is WireContent.Deleted }
+                ?.let { anchor -> resolveKind(anchor, seen + item.id) }
             is ParentReference.Root -> null
-        } ?: item.content.inferRootKind(item.parentSub)
+        } ?: item.content.inferRootKind(resolveParentSub(item))
         resolvedKinds[item.id] = kind
         return kind
     }
 
+    fun resolvesToGc(item: DecodedWireItem): Boolean = item.isGc ||
+        listOfNotNull(item.origin, item.rightOrigin).any { anchorId -> containing(anchorId)?.isGc == true } ||
+        ((item.parent as? ParentReference.Nested)?.let { reference -> containing(reference.id)?.isGc } == true)
+
     return flatMap { item ->
-        val parent = resolveParent(item)
-        val kind = resolveKind(item)
-        item.content.toItemContents(kind).mapIndexed { index, content ->
+        val isGc = resolvesToGc(item)
+        val parent = if (isGc) gcParentName(item.id.client) else resolveParent(item)
+        val parentSub = if (isGc) null else resolveParentSub(item)
+        val kind = if (isGc) RootKind.Array else resolveKind(item)
+        val contents = if (isGc) {
+            List(item.content.length.toInt()) { ItemContent.Deleted(kind) }
+        } else {
+            item.content.toItemContents(kind)
+        }
+        contents.mapIndexed { index, content ->
             StoreItem(
                 id = Id(item.id.client, item.id.clock + index),
                 origin = if (index == 0) item.origin else Id(item.id.client, item.id.clock + index - 1),
                 rightOrigin = item.rightOrigin,
                 parent = parent,
-                parentSub = item.parentSub,
+                parentSub = parentSub,
                 content = content,
+                deleted = isGc || item.content is WireContent.Deleted,
+                requiresClockContinuity = true,
+                isGc = isGc,
             )
         }
     }
@@ -531,8 +579,10 @@ private fun BinaryEncoder.writeId(id: Id) {
 
 private fun BinaryDecoder.readId(): Id = Id(readVarUInt(), readVarUInt())
 
-private fun nestedName(id: Id): String = "__yjs_nested__:${id.client}:${id.clock}"
+private fun nestedTypeName(id: Id): String = "__yks_yjs_nested__:${id.client}:${id.clock}"
+private fun nestedParentAlias(id: Id): String = "__yjs_nested__:${id.client}:${id.clock}"
 private fun inheritedParentName(id: Id): String = "__yjs_inherit__:${id.client}:${id.clock}"
+private fun gcParentName(client: Long): String = "__yjs_gc__:$client"
 
 private fun ByteArray.hasLegacyMagic(): Boolean =
     size >= 4 && this[0] == 'Y'.code.toByte() && this[1] == 'K'.code.toByte() &&

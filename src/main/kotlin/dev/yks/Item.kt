@@ -8,6 +8,8 @@ internal data class StoreItem(
     val parentSub: String?,
     val content: ItemContent,
     var deleted: Boolean = false,
+    val requiresClockContinuity: Boolean = false,
+    val isGc: Boolean = false,
 ) {
     val length: Long get() = 1
 }

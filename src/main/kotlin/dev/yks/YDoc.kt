@@ -724,6 +724,7 @@ class YDoc(
     fun rootNames(): Set<String> {
         return (rootTypes.keys + store.allItems().map { it.parent })
             .filterNot { it in nestedNames }
+            .filterNot { it.startsWith("__yjs_gc__:") }
             .toSortedSet()
     }
 
@@ -1247,16 +1248,26 @@ class YDoc(
     }
 
     private fun integrateRemote(items: List<StoreItem>) {
-        pendingItems.addAll(items.filterNot { store.contains(it.id) }.map(::resolveRemoteParentAlias))
+        val pendingIds = pendingItems.mapTo(hashSetOf()) { item -> item.id }
+        pendingItems.addAll(
+            items.filterNot { item -> store.contains(item.id) || !pendingIds.add(item.id) }
+                .map(::resolveRemoteParentAlias),
+        )
         var madeProgress: Boolean
         do {
             madeProgress = false
             val iterator = pendingItems.iterator()
             while (iterator.hasNext()) {
                 val item = resolveRemoteParentAlias(iterator.next())
+                if (item.id.clock < store.getClock(item.id.client)) {
+                    iterator.remove()
+                    madeProgress = true
+                    continue
+                }
                 if (canIntegrate(item)) {
                     iterator.remove()
-                    if (pendingDeletes.contains(item.id)) {
+                    val wasPendingDelete = pendingDeletes.contains(item.id)
+                    if (wasPendingDelete) {
                         item.deleted = true
                     }
                     captureParentBefore(item.parent, item.content.kind)
@@ -1267,6 +1278,10 @@ class YDoc(
                         rememberNestedRefs(item.content)
                         currentTransaction?.addedItems?.add(item)
                         currentTransaction?.changedParents?.add(item.parent)
+                        if (wasPendingDelete) {
+                            currentTransaction?.deleteSet?.add(item.id, item.length)
+                            currentTransaction?.deletedItems?.add(item.copy(deleted = false))
+                        }
                         deletePreviousMapCurrentIfSuperseded(
                             item,
                             item.parentSub?.let { key ->
@@ -1281,16 +1296,32 @@ class YDoc(
     }
 
     private fun resolveRemoteParentAlias(item: StoreItem): StoreItem {
+        val gcAnchor = listOfNotNull(item.origin, item.rightOrigin)
+            .mapNotNull(store::getStoreItem)
+            .firstOrNull { anchor -> anchor.isGc }
+        if (gcAnchor != null) {
+            return item.asRemoteGc()
+        }
         item.parent.yjsNestedParentIdOrNull()?.let { parentItemId ->
-            val localName = store.getStoreItem(parentItemId)?.content?.directTypeRef()?.name ?: return item
-            return item.copy(parent = localName)
+            val parentItem = store.getStoreItem(parentItemId) ?: return item
+            if (parentItem.isGc) return item.asRemoteGc()
+            val ref = parentItem.content.directTypeRef() ?: return item
+            return item.copy(
+                parent = ref.name,
+                content = item.content.withRemoteParentKind(ref.kind),
+                deleted = item.deleted || parentItem.deleted,
+            )
         }
         val anchorId = item.parent.yjsInheritedParentIdOrNull() ?: return item
         val anchor = store.getStoreItem(anchorId) ?: return item
+        if (anchor.isGc) {
+            return item.asRemoteGc()
+        }
+        val inheritedKind = if (anchor.content is ItemContent.Deleted) item.content.kind else anchor.content.kind
         return item.copy(
             parent = anchor.parent,
             parentSub = anchor.parentSub,
-            content = item.content.withRemoteParentKind(anchor.content.kind),
+            content = item.content.withRemoteParentKind(inheritedKind),
         )
     }
 
@@ -1305,7 +1336,11 @@ class YDoc(
 
     private fun canIntegrate(item: StoreItem): Boolean {
         val textFormat = item.content as? ItemContent.TextFormat
-        return (item.origin == null || store.contains(item.origin)) &&
+        if (item.parent.yjsNestedParentIdOrNull() != null || item.parent.yjsInheritedParentIdOrNull() != null) {
+            return false
+        }
+        return (!item.requiresClockContinuity || item.id.clock == store.getClock(item.id.client)) &&
+            (item.origin == null || store.contains(item.origin)) &&
             (textFormat == null || store.contains(textFormat.target)) &&
             (item.rightOrigin == null || store.contains(item.rightOrigin))
     }
@@ -1396,7 +1431,7 @@ class YDoc(
 
         fun recordIfMissing(id: Id) {
             val clock = store.getClock(id.client)
-            if (id.clock >= clock && !store.skips.hasId(id)) {
+            if (id.clock >= clock) {
                 record(id.client, clock)
             }
         }
@@ -1404,10 +1439,12 @@ class YDoc(
         forEach { item ->
             val clientClock = store.getClock(item.id.client)
             if (item.id.clock > clientClock) {
-                record(item.id.client, clientClock)
+                record(item.id.client, item.id.clock - 1)
             }
             item.origin?.let(::recordIfMissing)
             item.rightOrigin?.let(::recordIfMissing)
+            item.parent.yjsNestedParentIdOrNull()?.let(::recordIfMissing)
+            (item.content as? ItemContent.TextFormat)?.target?.let(::recordIfMissing)
         }
         return missing.toSortedMap()
     }
@@ -2539,6 +2576,16 @@ private fun ItemContent.withRemoteParentKind(kind: RootKind): ItemContent = when
     is ItemContent.XmlType -> copy(kind = kind)
     is ItemContent.Deleted -> ItemContent.Deleted(kind)
 }
+
+private fun StoreItem.asRemoteGc(): StoreItem = copy(
+    origin = null,
+    rightOrigin = null,
+    parent = "__yjs_gc__:${id.client}",
+    parentSub = null,
+    content = ItemContent.Deleted(content.kind),
+    deleted = true,
+    isGc = true,
+)
 
 private val textFormatApplicationOrder: Comparator<StoreItem> =
     compareByDescending<StoreItem> { it.id.client }.thenBy { it.id.clock }

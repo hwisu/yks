@@ -9,6 +9,7 @@ import {
   helloExpectedPath,
   helloFixturePath,
 } from './fixture-helpers.mjs'
+import { createScenarioDocument } from './scenarios.mjs'
 
 const doc = createHelloDocument()
 const update = Y.encodeStateAsUpdate(doc)
@@ -23,3 +24,130 @@ const expected = {
 fs.mkdirSync(fixtureDirectory, { recursive: true })
 fs.writeFileSync(helloFixturePath, update)
 fs.writeFileSync(helloExpectedPath, `${JSON.stringify(expected, null, 2)}\n`)
+
+const writeFixture = (name, value) => {
+  fs.writeFileSync(`${fixtureDirectory}/${name}.bin`, value)
+}
+
+const writeHexFixture = (name, value) => {
+  writeFixture(name, Buffer.from(value, 'hex'))
+}
+
+// Canonical upstream encodings for a two-clock hole followed by a root-text
+// item at clock 2. Skip only describes omitted update data, while GC owns the
+// skipped clocks in the document store.
+writeHexFixture('skip-then-text-v1', '010201000a02040104626f6479017800')
+writeHexFixture('gc-then-text-v1', '010201000002040104626f6479017800')
+
+const replacedText = new Y.Doc()
+replacedText.clientID = 1
+const replacedBody = replacedText.getText('body')
+replacedBody.insert(0, 'old')
+replacedBody.delete(0, 3)
+replacedBody.insert(0, 'new')
+writeFixture('text-replace-full-v1', Y.encodeStateAsUpdate(replacedText))
+
+writeFixture(
+  'array-v1',
+  Y.encodeStateAsUpdate(createScenarioDocument('array')),
+)
+
+const array = new Y.Doc({ gc: false })
+array.clientID = 1
+const arrayUpdates = []
+array.on('update', value => arrayUpdates.push(value))
+array.getArray('numbers').insert(0, [1, 2, 3])
+array.getArray('numbers').insert(3, [4])
+writeFixture('array-base-v1', arrayUpdates[0])
+writeFixture('array-append-v1', arrayUpdates[1])
+
+const front = new Y.Doc({ gc: false })
+front.clientID = 1
+const frontUpdates = []
+front.on('update', value => frontUpdates.push(value))
+front.getArray('letters').insert(0, ['a', 'b'])
+front.getArray('letters').insert(0, ['x'])
+writeFixture('array-front-base-v1', frontUpdates[0])
+writeFixture('array-front-insert-v1', frontUpdates[1])
+
+const interior = new Y.Doc({ gc: false })
+interior.clientID = 1
+const interiorUpdates = []
+interior.on('update', value => interiorUpdates.push(value))
+interior.getArray('letters').insert(0, ['a', 'b', 'c'])
+interior.getArray('letters').insert(2, ['X'])
+writeFixture('array-interior-base-v1', interiorUpdates[0])
+writeFixture('array-interior-insert-v1', interiorUpdates[1])
+
+const map = new Y.Doc({ gc: false })
+map.clientID = 1
+const mapUpdates = []
+map.on('update', value => mapUpdates.push(value))
+map.getMap('meta').set('title', 'old')
+map.getMap('meta').set('title', 'new')
+writeFixture('map-base-v1', mapUpdates[0])
+writeFixture('map-replace-v1', mapUpdates[1])
+writeFixture('map-full-v1', Y.encodeStateAsUpdate(map))
+
+const mapKeys = new Y.Doc({ gc: false })
+mapKeys.clientID = 1
+const mapKeyUpdates = []
+mapKeys.on('update', value => mapKeyUpdates.push(value))
+mapKeys.getMap('meta').set('first', 1)
+mapKeys.getMap('meta').set('second', 2)
+writeFixture('map-first-key-v1', mapKeyUpdates[0])
+writeFixture('map-second-key-v1', mapKeyUpdates[1])
+
+const mapGc = new Y.Doc()
+mapGc.clientID = 1
+mapGc.getMap('meta').set('title', 'old')
+mapGc.getMap('meta').set('title', 'new')
+writeFixture('map-full-gc-v1', Y.encodeStateAsUpdate(mapGc))
+
+const mapDelete = new Y.Doc()
+mapDelete.clientID = 1
+mapDelete.getMap('meta').set('title', 'old')
+mapDelete.getMap('meta').set('title', 'new')
+mapDelete.getMap('meta').set('temporary', true)
+mapDelete.getMap('meta').delete('temporary')
+writeFixture('map-delete-full-v1', Y.encodeStateAsUpdate(mapDelete))
+
+const nested = new Y.Doc({ gc: false })
+nested.clientID = 1
+const profile = new Y.Map()
+nested.getMap('root').set('profile', profile)
+profile.set('name', 'Ada')
+const nestedState = Y.encodeStateVector(nested)
+const nestedBase = Y.encodeStateAsUpdate(nested)
+profile.set('city', 'Seoul')
+writeFixture('nested-map-base-v1', nestedBase)
+writeFixture(
+  'nested-map-city-v1',
+  Y.encodeStateAsUpdate(nested, nestedState),
+)
+
+const owner = new Y.Doc({ gc: false })
+owner.clientID = 1
+owner.getMap('root').set('profile', new Y.Map())
+const ownerUpdate = Y.encodeStateAsUpdate(owner)
+const child = new Y.Doc({ gc: false })
+child.clientID = 2
+Y.applyUpdate(child, ownerUpdate)
+const childUpdates = []
+child.on('update', value => childUpdates.push(value))
+child.getMap('root').get('profile').set('name', 'Ada')
+writeFixture('nested-owner-v1', ownerUpdate)
+writeFixture('nested-child-v1', childUpdates[0])
+const ownerDeleteUpdates = []
+owner.on('update', value => ownerDeleteUpdates.push(value))
+owner.getMap('root').delete('profile')
+writeFixture('nested-owner-delete-v1', ownerDeleteUpdates[0])
+
+const gcNested = new Y.Doc()
+gcNested.clientID = 1
+const gcRoot = gcNested.getArray('gc-root')
+const gcChild = new Y.Map()
+gcRoot.insert(0, [gcChild])
+gcChild.set('value', 1)
+gcRoot.delete(0)
+writeFixture('gc-nested-delete-v1', Y.encodeStateAsUpdate(gcNested))

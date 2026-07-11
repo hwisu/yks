@@ -40,6 +40,13 @@ Kotlin currently emits standard V1 bytes for compatible explicit state exports
 covering unformatted text, arrays, maps, binary values, and owner-first nested
 maps/text. The harness also covers an anchor-free incremental nested-map update.
 
+The standard V1 decoder accepts packed text/array content, binary values,
+root and nested maps, inherited map keys, interior origin/right-origin anchors,
+delete sets, GC structs, and out-of-order dependency updates. Dedicated fixtures
+also lock down the protocol distinction between Skip (an unavailable clock gap)
+and GC (stored clock ownership), deleted nested parents, and replacement content
+whose type must not be inferred from an opaque deleted struct.
+
 Live transaction-event updates and content that still needs a richer wire
 model—formatting, XML, subdocuments, deletes, unsafe numeric coercions, or
 pre-populated detached nested types—continue to use the legacy `YKS` envelope.

@@ -594,7 +594,10 @@ fun intersectUpdateWithContentIds(update: ByteArray, contentIds: ContentIds): By
     val filteredDeletes = decoded.deleteSet.toIdSet()
         .let { intersectSets(it, contentIds.deletes) }
         .toDeleteSet()
-    return UpdateCodec.encode(DocumentUpdate(filteredItems, filteredDeletes))
+    if (filteredItems.size == decoded.items.size && filteredDeletes.structurallyEquals(decoded.deleteSet)) {
+        return update
+    }
+    return UpdateCodec.encode(DocumentUpdate(filteredItems, filteredDeletes, allowV1 = false))
 }
 
 fun intersectUpdateWithContentIdsV2(update: ByteArray, contentIds: ContentIds): ByteArray =
