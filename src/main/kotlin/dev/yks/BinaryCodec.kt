@@ -1,6 +1,8 @@
 package dev.yks
 
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 
 class BinaryEncoder {
     private val out = ByteArrayOutputStream()
@@ -27,8 +29,28 @@ class BinaryEncoder {
         writeVarUInt((value shl 1) xor (value shr 63))
     }
 
+    fun writeLib0VarInt(value: Long) {
+        val negative = value < 0
+        var current = if (negative) -value else value
+        writeByte(
+            (if (current > 0x3f) 0x80 else 0) or
+                (if (negative) 0x40 else 0) or
+                (current and 0x3f).toInt(),
+        )
+        current /= 64
+        while (current > 0) {
+            writeByte((if (current > 0x7f) 0x80 else 0) or (current and 0x7f).toInt())
+            current /= 128
+        }
+    }
+
     fun writeString(value: String) {
-        val bytes = value.toByteArray(Charsets.UTF_8)
+        val encoder = Charsets.UTF_8.newEncoder()
+            .onMalformedInput(CodingErrorAction.REPLACE)
+            .onUnmappableCharacter(CodingErrorAction.REPLACE)
+            .replaceWith(byteArrayOf(0xef.toByte(), 0xbf.toByte(), 0xbd.toByte()))
+        val buffer = encoder.encode(java.nio.CharBuffer.wrap(value))
+        val bytes = ByteArray(buffer.remaining()).also(buffer::get)
         writeVarUInt(bytes.size.toLong())
         out.write(bytes)
     }
@@ -36,6 +58,30 @@ class BinaryEncoder {
     fun writeBytes(value: ByteArray) {
         writeVarUInt(value.size.toLong())
         out.write(value)
+    }
+
+    fun writeRawBytes(value: ByteArray) {
+        out.write(value)
+    }
+
+    fun writeFloat32(value: Float) {
+        val bits = java.lang.Float.floatToRawIntBits(value)
+        repeat(Int.SIZE_BYTES) { index ->
+            writeByte((bits ushr ((Int.SIZE_BYTES - index - 1) * 8)) and 0xff)
+        }
+    }
+
+    fun writeFloat64(value: Double) {
+        val bits = java.lang.Double.doubleToRawLongBits(value)
+        repeat(Long.SIZE_BYTES) { index ->
+            writeByte(((bits ushr ((Long.SIZE_BYTES - index - 1) * 8)) and 0xff).toInt())
+        }
+    }
+
+    fun writeInt64(value: Long) {
+        repeat(Long.SIZE_BYTES) { index ->
+            writeByte(((value ushr ((Long.SIZE_BYTES - index - 1) * 8)) and 0xff).toInt())
+        }
     }
 
     fun toByteArray(): ByteArray = out.toByteArray()
@@ -76,10 +122,31 @@ class BinaryDecoder(private val bytes: ByteArray) {
         return (value ushr 1) xor -(value and 1)
     }
 
+    fun readLib0VarInt(): Long {
+        var byte = readByte()
+        var result = (byte and 0x3f).toLong()
+        var multiplier = 64L
+        val sign = if ((byte and 0x40) != 0) -1 else 1
+        while ((byte and 0x80) != 0) {
+            byte = readByte()
+            result += (byte and 0x7f) * multiplier
+            check(multiplier <= Long.MAX_VALUE / 128) { "varint is too large" }
+            multiplier *= 128
+        }
+        return sign * result
+    }
+
     fun readString(): String {
         val length = readVarUInt().toInt()
         check(length >= 0 && offset + length <= bytes.size) { "invalid string length: $length" }
-        val value = bytes.copyOfRange(offset, offset + length).toString(Charsets.UTF_8)
+        val decoder = Charsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        val value = try {
+            decoder.decode(ByteBuffer.wrap(bytes, offset, length)).toString()
+        } catch (error: java.nio.charset.CharacterCodingException) {
+            throw IllegalStateException("invalid UTF-8 string", error)
+        }
         offset += length
         return value
     }
@@ -89,6 +156,30 @@ class BinaryDecoder(private val bytes: ByteArray) {
         check(length >= 0 && offset + length <= bytes.size) { "invalid byte array length: $length" }
         val value = bytes.copyOfRange(offset, offset + length)
         offset += length
+        return value
+    }
+
+    fun readFloat32(): Float {
+        var bits = 0
+        repeat(Int.SIZE_BYTES) { bits = (bits shl 8) or readByte() }
+        return java.lang.Float.intBitsToFloat(bits)
+    }
+
+    fun readFloat64(): Double {
+        var bits = 0L
+        repeat(Long.SIZE_BYTES) { bits = (bits shl 8) or readByte().toLong() }
+        return java.lang.Double.longBitsToDouble(bits)
+    }
+
+    fun readInt64(): Long {
+        var value = 0L
+        repeat(Long.SIZE_BYTES) { value = (value shl 8) or readByte().toLong() }
+        return value
+    }
+
+    fun readRemainingBytes(): ByteArray {
+        val value = bytes.copyOfRange(offset, bytes.size)
+        offset = bytes.size
         return value
     }
 }

@@ -26,6 +26,7 @@ class PublicApiParityTest {
 
         val generatedClientId = generateNewClientId()
         assertTrue(generatedClientId > 0)
+        assertTrue(generatedClientId <= 0xffff_ffffL)
         assertEquals(generatedClientId, Doc(clientId = generatedClientId).clientId)
     }
 

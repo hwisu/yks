@@ -72,6 +72,7 @@ sealed interface YValue {
     companion object {
         fun from(value: Any?): YValue = when (value) {
             null -> Null
+            Lib0Undefined -> Null
             is YValue -> value
             is AbstractYType -> TypeRef(value.kind, value.name)
             is YDoc -> SubdocRef(

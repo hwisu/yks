@@ -9,7 +9,7 @@ internal data class DocumentUpdate(
     val isEmpty: Boolean get() = items.isEmpty() && deleteSet.isEmpty
 }
 
-internal object UpdateCodec {
+internal object LegacyUpdateCodec {
     fun encode(update: DocumentUpdate): ByteArray {
         val encoder = BinaryEncoder()
         write(encoder, update)

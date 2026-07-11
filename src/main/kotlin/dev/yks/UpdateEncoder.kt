@@ -96,7 +96,7 @@ open class UpdateEncoderV1(
     }
 
     override fun writeAny(value: Any?) {
-        writeYValue(restEncoder, YValue.from(value))
+        writeLib0Any(restEncoder, value)
     }
 
     override fun writeBuf(value: ByteArray) {

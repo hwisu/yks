@@ -76,7 +76,7 @@ open class UpdateDecoderV1(
 
     override fun readLen(): Long = restDecoder.readVarUInt()
 
-    override fun readAny(): Any? = readYValue(restDecoder).toAny()
+    override fun readAny(): Any? = readLib0Any(restDecoder)
 
     override fun readBuf(): ByteArray = restDecoder.readBytes()
 

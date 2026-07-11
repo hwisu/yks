@@ -2278,7 +2278,8 @@ class YDoc(
         private fun randomClientId(excluding: Set<Long> = emptySet()): Long {
             var value: Long
             do {
-                value = random.nextLong() and Long.MAX_VALUE
+                // Yjs client IDs are unsigned 32-bit integers (`random.uint32`).
+                value = random.nextInt().toLong() and 0xffff_ffffL
                 if (value == 0L) value = 1
             } while (value in excluding)
             return value

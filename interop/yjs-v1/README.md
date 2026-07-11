@@ -18,9 +18,8 @@ Run the Kotlin-facing compatibility gate:
 ./gradlew interopTest
 ```
 
-`interopTest` is deliberately separate from the normal unit-test task. Both
-directions currently fail because Kotlin still emits and expects the private
-`YKS` envelope. They become the first green acceptance tests for the V1 codec.
+`interopTest` is deliberately separate from the normal unit-test task. The
+canonical `hello` fixture now passes in both directions.
 
 Validate an update produced by Kotlin:
 
@@ -28,7 +27,8 @@ Validate an update produced by Kotlin:
 npm run interop:verify -- build/interop/kotlin-hello-v1.bin
 ```
 
-The first codec milestone is complete when Kotlin can apply
-`fixtures/hello-text-v1.bin` and the verifier accepts Kotlin's update for the
-same document. The current private `YKS` update codec is expected to fail both
-cross-language directions until it is replaced.
+Kotlin currently emits standard V1 bytes only for self-contained, unformatted
+root-text updates. Complex, nested, formatted, deleted, or incremental updates
+still use the legacy `YKS` envelope so existing behavior remains intact while
+the standard wire model is expanded. The verifier must be extended with a
+fixture before each additional content type is moved off that fallback.
