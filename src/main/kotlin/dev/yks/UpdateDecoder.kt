@@ -44,13 +44,13 @@ open class IdSetDecoderV2(
     }
 
     override fun readDsClock(): Long {
-        dsCurrVal += restDecoder.readVarUInt()
+        dsCurrVal = checkedClockAdd(dsCurrVal, restDecoder.readVarUInt(), "delete clock")
         return dsCurrVal
     }
 
     override fun readDsLen(): Long {
-        val len = restDecoder.readVarUInt() + 1
-        dsCurrVal += len
+        val len = checkedClockAdd(restDecoder.readVarUInt(), 1, "delete length")
+        dsCurrVal = checkedClockAdd(dsCurrVal, len, "delete end")
         return len
     }
 }
@@ -72,7 +72,7 @@ open class UpdateDecoderV1(
 
     fun readParentInfo(): Boolean = restDecoder.readVarUInt() == 1L
 
-    override fun readTypeRef(): Int = restDecoder.readVarUInt().toInt()
+    override fun readTypeRef(): Int = restDecoder.readVarUInt().toDecodedCount("type ref")
 
     override fun readLen(): Long = restDecoder.readVarUInt()
 
@@ -157,7 +157,7 @@ open class UpdateDecoderV2 private constructor(
 
     fun readParentInfo(): Boolean = streams.parentInfos.read() == 1
 
-    override fun readTypeRef(): Int = streams.typeRefs.read().toInt()
+    override fun readTypeRef(): Int = streams.typeRefs.read().toDecodedCount("type ref")
 
     override fun readLen(): Long = streams.lengths.read()
 
@@ -168,7 +168,7 @@ open class UpdateDecoderV2 private constructor(
     override fun readJSON(): Any? = readAny()
 
     override fun readKey(): String {
-        val clock = streams.keyClocks.read().toInt()
+        val clock = streams.keyClocks.read().toDecodedCount("key clock")
         if (clock < keys.size) return keys[clock]
         return streams.strings.read().also(keys::add)
     }

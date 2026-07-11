@@ -1045,9 +1045,9 @@ private fun writeContentIdSet(encoder: BinaryEncoder, idSet: IdSet) {
 
 private fun readContentIdSet(decoder: BinaryDecoder): IdSet {
     val idSet = createIdSet()
-    repeat(decoder.readVarUInt().toInt()) {
+    repeat(decoder.readVarUInt().toDecodedCount()) {
         val client = decoder.readVarUInt()
-        repeat(decoder.readVarUInt().toInt()) {
+        repeat(decoder.readVarUInt().toDecodedCount()) {
             idSet.add(client, decoder.readVarUInt(), decoder.readVarUInt())
         }
     }
@@ -1087,12 +1087,12 @@ private fun writeContentIdMap(encoder: BinaryEncoder, idMap: IdMap) {
 
 private fun readContentIdMap(decoder: BinaryDecoder): IdMap {
     val idMap = createIdMap()
-    repeat(decoder.readVarUInt().toInt()) {
+    repeat(decoder.readVarUInt().toDecodedCount()) {
         val client = decoder.readVarUInt()
-        repeat(decoder.readVarUInt().toInt()) {
+        repeat(decoder.readVarUInt().toDecodedCount()) {
             val clock = decoder.readVarUInt()
             val len = decoder.readVarUInt()
-            val attrs = List(decoder.readVarUInt().toInt()) {
+            val attrs = List(decoder.readVarUInt().toDecodedCount()) {
                 ContentAttribute(decoder.readString(), readYValue(decoder))
             }
             idMap.add(client, clock, len, attrs)

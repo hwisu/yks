@@ -7,14 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 16개 커밋 앞서 있음
+- 현재 `origin/main`보다 17개 커밋 앞서 있음
 - 아직 push하지 않음
 - XML 문자열 surface parity 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
-HEAD feat: extend native Yjs subdocument parity
+HEAD feat: harden Yjs update decoding
+e6a9b59 feat: extend native Yjs subdocument parity
 50a6505 feat: match upstream Yjs XML rendering
 ffd46dd feat: complete Yjs update V2 operations
 1d3d219 feat: write genuine Yjs update V2
@@ -229,6 +230,15 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - 같은 transaction에서 추가 후 삭제된 subdocument는 upstream처럼 added/removed에서 상쇄하고 loaded event만 유지
 - subdocument reference 삭제 시 parent subdocs event 후 child destroy, 이어 cleanup removal transaction/event가 발생하는 upstream 순서 구현
 
+### 14. codec allocation/overflow hardening
+
+- decoded collection count를 최대 1,000,000개로 제한하고 모든 V1/V2/legacy count 변환에 checked `Long`→`Int` 적용
+- decoded string/buffer payload를 최대 64 MiB로 제한하고 remaining-byte 검사에서 `Int` 덧셈 overflow 제거
+- V1/V2 struct clock, skip, GC length, V2 delete delta 누산에 overflow-safe addition 적용
+- GC expansion count와 split item clock에도 동일한 checked conversion/arithmetic 적용
+- decoded anchor lookup을 client별 정렬 index + binary search로 전환해 large update의 반복 linear scan 제거
+- oversized state-vector count, string/buffer length, struct clock overflow regression test 추가
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -308,7 +318,7 @@ subdoc-duplicate-guid-v1.bin
 BUILD SUCCESSFUL
 ```
 
-- 일반 Kotlin tests: 515 passed
+- 일반 Kotlin tests: 518 passed
 - Kotlin Yjs V1/V2 interop tests: 67 passed
 - JavaScript/Yjs oracle tests: 74 passed
 - `git diff --check`: passed
@@ -333,21 +343,17 @@ git diff --check
    - root `XmlElement` node name은 wire에 없으므로 schema/pre-materialization이 필요함
 2. subdocument 확장
    - upstream에 없는 local options 처리 정책
-3. codec hardening
-   - decoded count/length allocation limit
-   - Long overflow/Long-to-Int guard
-   - large update에서 anchor lookup indexing
-4. GC/pending serialization 완성
+3. GC/pending serialization 완성
    - GC를 unit `StoreItem`으로 근사 중
    - 일부 legacy pending serialization은 `isGc`/clock-continuity metadata를 완전히 표현하지 못함
-5. transaction-event V1 update
+4. transaction-event V1 update
    - `updateV2`는 genuine V2로 전환 완료
    - 기존 `update` event는 로컬 legacy compatibility envelope를 유지
 
 ## 다음 권장 작업 순서
 
 1. XML/subdocument surface parity 확장
-2. codec hardening과 GC/pending serialization 완성
+2. GC/pending serialization 완성
 3. transaction-event V1 표준화
 
 ## 주의 사항

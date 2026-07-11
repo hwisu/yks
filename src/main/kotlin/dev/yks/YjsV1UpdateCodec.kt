@@ -92,8 +92,8 @@ internal object UpdateCodec {
     fun decodeV2(decoder: UpdateDecoderV2): DocumentUpdate {
         if (decoder.usesLegacyRest) return decode(decoder.restDecoder)
         val structs = mutableListOf<DecodedWireItem>()
-        repeat(decoder.restDecoder.readVarUInt().toInt()) {
-            val numberOfStructs = decoder.restDecoder.readVarUInt().toInt()
+        repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
+            val numberOfStructs = decoder.restDecoder.readVarUInt().toDecodedCount()
             val client = decoder.readClient()
             var clock = decoder.restDecoder.readVarUInt()
             repeat(numberOfStructs) {
@@ -112,9 +112,9 @@ internal object UpdateCodec {
                                 isGc = true,
                             ),
                         )
-                        clock += length
+                        clock = checkedClockAdd(clock, length)
                     }
-                    structSkipRefNumber -> clock += decoder.restDecoder.readVarUInt()
+                    structSkipRefNumber -> clock = checkedClockAdd(clock, decoder.restDecoder.readVarUInt())
                     else -> {
                         val id = Id(client, clock)
                         val origin = if ((info and INFO_HAS_ORIGIN) != 0) decoder.readLeftID() else null
@@ -133,16 +133,16 @@ internal object UpdateCodec {
                         ) decoder.readString() else null
                         val content = readWireContentV2(decoder, info and INFO_CONTENT_MASK, id)
                         structs.add(DecodedWireItem(id, origin, rightOrigin, parent, parentSub, content))
-                        clock += content.length
+                        clock = checkedClockAdd(clock, content.length)
                     }
                 }
             }
         }
         val deleteSet = DeleteSet.empty()
-        repeat(decoder.restDecoder.readVarUInt().toInt()) {
+        repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
             decoder.resetDsCurVal()
             val client = decoder.restDecoder.readVarUInt()
-            repeat(decoder.restDecoder.readVarUInt().toInt()) {
+            repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
                 deleteSet.add(Id(client, decoder.readDsClock()), decoder.readDsLen())
             }
         }
@@ -152,8 +152,8 @@ internal object UpdateCodec {
 
     private fun decodeV1(decoder: BinaryDecoder): DocumentUpdate {
         val structs = mutableListOf<DecodedWireItem>()
-        repeat(decoder.readVarUInt().toInt()) {
-            val numberOfStructs = decoder.readVarUInt().toInt()
+        repeat(decoder.readVarUInt().toDecodedCount()) {
+            val numberOfStructs = decoder.readVarUInt().toDecodedCount()
             val client = decoder.readVarUInt()
             var clock = decoder.readVarUInt()
             repeat(numberOfStructs) {
@@ -172,9 +172,9 @@ internal object UpdateCodec {
                                 isGc = true,
                             ),
                         )
-                        clock += length
+                        clock = checkedClockAdd(clock, length)
                     }
-                    structSkipRefNumber -> clock += decoder.readVarUInt()
+                    structSkipRefNumber -> clock = checkedClockAdd(clock, decoder.readVarUInt())
                     else -> {
                         val id = Id(client, clock)
                         val origin = if ((info and INFO_HAS_ORIGIN) != 0) decoder.readId() else null
@@ -197,7 +197,7 @@ internal object UpdateCodec {
                         }
                         val content = readWireContent(decoder, info and INFO_CONTENT_MASK, id)
                         structs.add(DecodedWireItem(id, origin, rightOrigin, parent, parentSub, content))
-                        clock += content.length
+                        clock = checkedClockAdd(clock, content.length)
                     }
                 }
             }
@@ -362,7 +362,7 @@ internal object UpdateCodec {
     private fun readWireContent(decoder: BinaryDecoder, ref: Int, id: Id): WireContent = when (ref) {
         contentDeletedRefNumber -> WireContent.Deleted(decoder.readVarUInt())
         contentJSONRefNumber -> WireContent.Json(
-            List(decoder.readVarUInt().toInt()) {
+            List(decoder.readVarUInt().toDecodedCount()) {
                 when (val json = decoder.readString()) {
                     "undefined" -> null
                     else -> parseJsonLiteral(json)
@@ -374,12 +374,12 @@ internal object UpdateCodec {
         contentEmbedRefNumber -> WireContent.Embed(parseJsonLiteral(decoder.readString()))
         contentFormatRefNumber -> WireContent.Format(decoder.readString(), parseJsonLiteral(decoder.readString()))
         contentTypeRefNumber -> {
-            val kind = rootKindFromTypeRefId(decoder.readVarUInt().toInt())
+            val kind = rootKindFromTypeRefId(decoder.readVarUInt().toDecodedCount())
             val nodeName = if (kind == RootKind.XmlElement || kind == RootKind.XmlHook) decoder.readString() else ""
             WireContent.Type(kind, nestedTypeName(id), nodeName)
         }
         contentAnyRefNumber -> WireContent.AnyContent(
-            List(decoder.readVarUInt().toInt()) { readLib0Any(decoder) },
+            List(decoder.readVarUInt().toDecodedCount()) { readLib0Any(decoder) },
         )
         contentDocRefNumber -> {
             val guid = decoder.readString()
@@ -395,7 +395,7 @@ internal object UpdateCodec {
     private fun readWireContentV2(decoder: UpdateDecoderV2, ref: Int, id: Id): WireContent = when (ref) {
         contentDeletedRefNumber -> WireContent.Deleted(decoder.readLen())
         contentJSONRefNumber -> WireContent.Json(
-            List(decoder.readLen().toInt()) {
+            List(decoder.readLen().toDecodedCount()) {
                 when (val json = decoder.readString()) {
                     "undefined" -> null
                     else -> parseJsonLiteral(json)
@@ -411,7 +411,7 @@ internal object UpdateCodec {
             val nodeName = if (kind == RootKind.XmlElement || kind == RootKind.XmlHook) decoder.readString() else ""
             WireContent.Type(kind, nestedTypeName(id), nodeName)
         }
-        contentAnyRefNumber -> WireContent.AnyContent(List(decoder.readLen().toInt()) { decoder.readAny() })
+        contentAnyRefNumber -> WireContent.AnyContent(List(decoder.readLen().toDecodedCount()) { decoder.readAny() })
         contentDocRefNumber -> WireContent.Doc(
             decoder.readString(),
             decoder.readAny(),
@@ -435,9 +435,9 @@ internal object UpdateCodec {
 
     private fun readDeleteSet(decoder: BinaryDecoder): DeleteSet {
         val deleteSet = DeleteSet.empty()
-        repeat(decoder.readVarUInt().toInt()) {
+        repeat(decoder.readVarUInt().toDecodedCount()) {
             val client = decoder.readVarUInt()
-            repeat(decoder.readVarUInt().toInt()) {
+            repeat(decoder.readVarUInt().toDecodedCount()) {
                 deleteSet.add(Id(client, decoder.readVarUInt()), decoder.readVarUInt())
             }
         }
@@ -643,9 +643,27 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
     val resolvedParents = mutableMapOf<Id, String>()
     val resolvedParentSubs = mutableMapOf<Id, String?>()
     val resolvedKinds = mutableMapOf<Id, RootKind>()
+    val itemsByClient = groupBy { item -> item.id.client }
+        .mapValues { (_, items) -> items.sortedBy { item -> item.id.clock } }
 
-    fun containing(id: Id): DecodedWireItem? = firstOrNull { item ->
-        item.id.client == id.client && id.clock >= item.id.clock && id.clock < item.id.clock + item.content.length
+    fun containing(id: Id): DecodedWireItem? {
+        val items = itemsByClient[id.client] ?: return null
+        var low = 0
+        var high = items.lastIndex
+        var candidate: DecodedWireItem? = null
+        while (low <= high) {
+            val middle = (low + high) ushr 1
+            val item = items[middle]
+            if (item.id.clock <= id.clock) {
+                candidate = item
+                low = middle + 1
+            } else {
+                high = middle - 1
+            }
+        }
+        return candidate?.takeIf { item ->
+            id.clock < checkedClockAdd(item.id.clock, item.content.length)
+        }
     }
 
     fun resolveParent(item: DecodedWireItem, seen: Set<Id> = emptySet()): String {
@@ -706,14 +724,18 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
         val parentSub = if (isGc) null else resolveParentSub(item)
         val kind = if (isGc) RootKind.Array else resolveKind(item)
         val contents = if (isGc) {
-            List(item.content.length.toInt()) { ItemContent.Deleted(kind) }
+            List(item.content.length.toDecodedCount("GC length")) { ItemContent.Deleted(kind) }
         } else {
             item.content.toItemContents(kind)
         }
         contents.mapIndexed { index, content ->
             StoreItem(
-                id = Id(item.id.client, item.id.clock + index),
-                origin = if (index == 0) item.origin else Id(item.id.client, item.id.clock + index - 1),
+                id = Id(item.id.client, checkedClockAdd(item.id.clock, index.toLong())),
+                origin = if (index == 0) {
+                    item.origin
+                } else {
+                    Id(item.id.client, checkedClockAdd(item.id.clock, index.toLong() - 1))
+                },
                 rightOrigin = item.rightOrigin,
                 parent = parent,
                 parentSub = parentSub,

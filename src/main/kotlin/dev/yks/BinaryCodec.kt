@@ -4,6 +4,26 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 
+internal const val MAX_DECODED_COLLECTION_SIZE: Int = 1_000_000
+internal const val MAX_DECODED_BINARY_SIZE: Int = 64 * 1024 * 1024
+
+internal fun Long.toDecodedCount(
+    label: String = "decoded count",
+    maximum: Int = MAX_DECODED_COLLECTION_SIZE,
+): Int {
+    check(this >= 0 && this <= maximum.toLong()) { "$label exceeds limit $maximum: $this" }
+    return toInt()
+}
+
+internal fun checkedClockAdd(left: Long, right: Long, label: String = "clock"): Long {
+    check(left >= 0 && right >= 0) { "$label operands must be non-negative: $left + $right" }
+    return try {
+        Math.addExact(left, right)
+    } catch (_: ArithmeticException) {
+        error("$label overflow: $left + $right")
+    }
+}
+
 class BinaryEncoder {
     private val out = ByteArrayOutputStream()
 
@@ -139,8 +159,8 @@ class BinaryDecoder(private val bytes: ByteArray) {
     }
 
     fun readString(): String {
-        val length = readVarUInt().toInt()
-        check(length >= 0 && offset + length <= bytes.size) { "invalid string length: $length" }
+        val length = readVarUInt().toDecodedCount("string byte length", minOf(MAX_DECODED_BINARY_SIZE, bytes.size - offset))
+        check(length <= bytes.size - offset) { "invalid string length: $length" }
         val decoder = Charsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT)
@@ -154,8 +174,8 @@ class BinaryDecoder(private val bytes: ByteArray) {
     }
 
     fun readBytes(): ByteArray {
-        val length = readVarUInt().toInt()
-        check(length >= 0 && offset + length <= bytes.size) { "invalid byte array length: $length" }
+        val length = readVarUInt().toDecodedCount("byte array length", minOf(MAX_DECODED_BINARY_SIZE, bytes.size - offset))
+        check(length <= bytes.size - offset) { "invalid byte array length: $length" }
         val value = bytes.copyOfRange(offset, offset + length)
         offset += length
         return value

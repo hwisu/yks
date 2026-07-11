@@ -94,9 +94,9 @@ class BlockSet(
 
 fun readBlockSet(decoder: UpdateDecoderV1): BlockSet {
     val clients = linkedMapOf<Long, BlockRange>()
-    repeat(decoder.restDecoder.readVarUInt().toInt()) {
+    repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
         val client = decoder.readClient()
-        val refs = MutableList(decoder.restDecoder.readVarUInt().toInt()) {
+        val refs = MutableList(decoder.restDecoder.readVarUInt().toDecodedCount()) {
             readBlockSetStruct(decoder)
         }
         clients[client] = BlockRange(refs)
@@ -106,9 +106,9 @@ fun readBlockSet(decoder: UpdateDecoderV1): BlockSet {
 
 fun readBlockSet(decoder: UpdateDecoderV2): BlockSet {
     val clients = linkedMapOf<Long, BlockRange>()
-    repeat(decoder.restDecoder.readVarUInt().toInt()) {
+    repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
         val client = decoder.readClient()
-        val refs = MutableList(decoder.restDecoder.readVarUInt().toInt()) {
+        val refs = MutableList(decoder.restDecoder.readVarUInt().toDecodedCount()) {
             readBlockSetStruct(decoder)
         }
         clients[client] = BlockRange(refs)
@@ -341,6 +341,6 @@ private fun writeBlockSetRootKind(encoder: BinaryEncoder, kind: RootKind) {
 }
 
 private fun readBlockSetRootKind(decoder: BinaryDecoder): RootKind {
-    val ordinal = decoder.readVarUInt().toInt()
+    val ordinal = decoder.readVarUInt().toDecodedCount()
     return enumValues<RootKind>().getOrNull(ordinal) ?: error("unknown root kind ordinal: $ordinal")
 }

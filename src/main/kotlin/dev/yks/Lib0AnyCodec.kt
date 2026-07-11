@@ -112,11 +112,11 @@ internal fun readLib0Any(decoder: BinaryDecoder): Any? = when (val tag = decoder
     LIB0_TRUE -> true
     LIB0_STRING -> decoder.readString()
     LIB0_OBJECT -> buildMap {
-        repeat(decoder.readVarUInt().toInt()) {
+        repeat(decoder.readVarUInt().toDecodedCount()) {
             put(decoder.readString(), readLib0Any(decoder))
         }
     }
-    LIB0_ARRAY -> List(decoder.readVarUInt().toInt()) { readLib0Any(decoder) }
+    LIB0_ARRAY -> List(decoder.readVarUInt().toDecodedCount()) { readLib0Any(decoder) }
     LIB0_BINARY -> decoder.readBytes()
     else -> error("unknown lib0 any tag: $tag")
 }

@@ -174,11 +174,11 @@ fun readYValue(decoder: BinaryDecoder): YValue = when (val tag = decoder.readByt
     5 -> YValue.StringValue(decoder.readString())
     6 -> YValue.BinaryValue(decoder.readBytes())
     7 -> {
-        val size = decoder.readVarUInt().toInt()
+        val size = decoder.readVarUInt().toDecodedCount()
         YValue.ListValue(List(size) { readYValue(decoder) })
     }
     8 -> {
-        val size = decoder.readVarUInt().toInt()
+        val size = decoder.readVarUInt().toDecodedCount()
         YValue.MapValue(buildMap {
             repeat(size) {
                 put(decoder.readString(), readYValue(decoder))

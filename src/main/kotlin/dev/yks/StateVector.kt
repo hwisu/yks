@@ -39,7 +39,7 @@ fun writeDocumentStateVector(encoder: IdSetEncoderV1, doc: YDoc): IdSetEncoderV1
     writeStateVector(encoder, getStateVector(doc))
 
 fun readStateVector(decoder: BinaryDecoder): StateVector {
-    val count = decoder.readVarUInt().toInt()
+    val count = decoder.readVarUInt().toDecodedCount()
     return buildMap {
         repeat(count) {
             put(decoder.readVarUInt(), decoder.readVarUInt())

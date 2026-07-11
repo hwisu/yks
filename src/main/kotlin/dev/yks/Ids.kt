@@ -304,9 +304,9 @@ fun encodeIdSet(idSet: IdSet): ByteArray {
 
 fun readIdSet(decoder: BinaryDecoder): IdSet {
     val idSet = createIdSet()
-    repeat(decoder.readVarUInt().toInt()) {
+    repeat(decoder.readVarUInt().toDecodedCount()) {
         val client = decoder.readVarUInt()
-        repeat(decoder.readVarUInt().toInt()) {
+        repeat(decoder.readVarUInt().toDecodedCount()) {
             idSet.add(client, decoder.readVarUInt(), decoder.readVarUInt())
         }
     }
@@ -315,10 +315,10 @@ fun readIdSet(decoder: BinaryDecoder): IdSet {
 
 fun readIdSet(decoder: IdSetDecoderV1): IdSet {
     val idSet = createIdSet()
-    repeat(decoder.restDecoder.readVarUInt().toInt()) {
+    repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
         decoder.resetDsCurVal()
         val client = decoder.restDecoder.readVarUInt()
-        repeat(decoder.restDecoder.readVarUInt().toInt()) {
+        repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
             idSet.add(client, decoder.readDsClock(), decoder.readDsLen())
         }
     }
@@ -714,12 +714,12 @@ fun encodeIdMap(idMap: IdMap): ByteArray {
 
 fun readIdMap(decoder: BinaryDecoder): IdMap {
     val idMap = createIdMap()
-    repeat(decoder.readVarUInt().toInt()) {
+    repeat(decoder.readVarUInt().toDecodedCount()) {
         val client = decoder.readVarUInt()
-        repeat(decoder.readVarUInt().toInt()) {
+        repeat(decoder.readVarUInt().toDecodedCount()) {
             val clock = decoder.readVarUInt()
             val len = decoder.readVarUInt()
-            val attrs = List(decoder.readVarUInt().toInt()) {
+            val attrs = List(decoder.readVarUInt().toDecodedCount()) {
                 ContentAttribute(decoder.readString(), readYValue(decoder))
             }
             idMap.add(client, clock, len, attrs)
@@ -733,17 +733,17 @@ fun readIdMap(decoder: IdSetDecoderV1): IdMap {
     val visitedAttributes = mutableListOf<ContentAttribute>()
     val visitedAttrNames = mutableListOf<String>()
     var lastClientId = 0L
-    repeat(decoder.restDecoder.readVarUInt().toInt()) {
+    repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
         decoder.resetDsCurVal()
         val client = lastClientId + decoder.restDecoder.readVarUInt()
         lastClientId = client
-        repeat(decoder.restDecoder.readVarUInt().toInt()) {
+        repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
             val clock = decoder.readDsClock()
             val len = decoder.readDsLen()
-            val attrs = List(decoder.restDecoder.readVarUInt().toInt()) {
-                val attrId = decoder.restDecoder.readVarUInt().toInt()
+            val attrs = List(decoder.restDecoder.readVarUInt().toDecodedCount()) {
+                val attrId = decoder.restDecoder.readVarUInt().toDecodedCount()
                 if (attrId >= visitedAttributes.size) {
-                    val attrNameId = decoder.restDecoder.readVarUInt().toInt()
+                    val attrNameId = decoder.restDecoder.readVarUInt().toDecodedCount()
                     if (attrNameId >= visitedAttrNames.size) {
                         visitedAttrNames.add(decoder.restDecoder.readString())
                     }

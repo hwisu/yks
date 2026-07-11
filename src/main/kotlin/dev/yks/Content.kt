@@ -457,7 +457,7 @@ fun readContentType(decoder: UpdateContentDecoder): ContentType = ContentType(re
 fun readContentString(decoder: UpdateContentDecoder): ContentString = ContentString(decoder.readString())
 
 fun readContentJSON(decoder: UpdateContentDecoder): ContentJSON {
-    val len = decoder.readLen().toInt()
+    val len = decoder.readLen().toDecodedCount()
     require(len >= 0) { "content JSON length must be non-negative" }
     return ContentJSON(List(len) {
         when (val encoded = decoder.readString()) {
@@ -477,7 +477,7 @@ fun readContentDoc(decoder: UpdateContentDecoder): ContentDoc =
     ContentDoc(decoder.readString(), decoder.readAny().asContentDocOpts())
 
 fun readContentAny(decoder: UpdateContentDecoder): ContentAny {
-    val len = decoder.readLen().toInt()
+    val len = decoder.readLen().toDecodedCount()
     require(len >= 0) { "content any length must be non-negative" }
     return ContentAny(List(len) { decoder.readAny() })
 }

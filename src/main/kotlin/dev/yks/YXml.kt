@@ -1025,17 +1025,17 @@ internal fun readXmlNodeValue(decoder: BinaryDecoder): YXmlNodeValue = when (val
     1 -> {
         val nodeName = decoder.readString()
         val attributes = buildMap {
-            repeat(decoder.readVarUInt().toInt()) {
+            repeat(decoder.readVarUInt().toDecodedCount()) {
                 put(decoder.readString(), readYValue(decoder))
             }
         }.toSortedMap()
-        val children = List(decoder.readVarUInt().toInt()) { readXmlNodeValue(decoder) }
+        val children = List(decoder.readVarUInt().toDecodedCount()) { readXmlNodeValue(decoder) }
         YXmlNodeValue.Element(nodeName, attributes, children)
     }
     2 -> {
         val text = decoder.readString()
         val attributes = buildMap {
-            repeat(decoder.readVarUInt().toInt()) {
+            repeat(decoder.readVarUInt().toDecodedCount()) {
                 put(decoder.readString(), readYValue(decoder))
             }
         }.toSortedMap()

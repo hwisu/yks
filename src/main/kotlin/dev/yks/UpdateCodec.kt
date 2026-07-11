@@ -37,7 +37,7 @@ internal object LegacyUpdateCodec {
             val actual = decoder.readByte().toByte()
             check(actual == expected) { "unsupported update format" }
         }
-        val itemCount = decoder.readVarUInt().toInt()
+        val itemCount = decoder.readVarUInt().toDecodedCount()
         val items = buildList {
             repeat(itemCount) {
                 add(readItem(decoder))
@@ -141,7 +141,7 @@ internal object LegacyUpdateCodec {
         val content = when (val tag = decoder.readByte()) {
             0 -> ItemContent.Value(readYValue(decoder))
             1 -> {
-                val value = decoder.readVarUInt().toInt().toChar().toString()
+                val value = decoder.readVarUInt().toDecodedCount().toChar().toString()
                 val attributes = readAttributes(decoder)
                 ItemContent.Text(value, attributes, readAttributes(decoder))
             }
@@ -158,7 +158,7 @@ internal object LegacyUpdateCodec {
                 length = decoder.readVarUInt(),
                 attributes = readAttributes(decoder),
                 afterAttributes = readAttributes(decoder),
-                beforeAttributes = List(decoder.readVarUInt().toInt()) { readAttributes(decoder) },
+                beforeAttributes = List(decoder.readVarUInt().toDecodedCount()) { readAttributes(decoder) },
             )
             7 -> {
                 val kind = readRootKind(decoder)
@@ -171,7 +171,7 @@ internal object LegacyUpdateCodec {
             }
             9 -> {
                 val kind = readRootKind(decoder)
-                val value = decoder.readVarUInt().toInt().toChar().toString()
+                val value = decoder.readVarUInt().toDecodedCount().toChar().toString()
                 val attributes = readAttributes(decoder)
                 ItemContent.Text(value, attributes, readAttributes(decoder), kind)
             }
@@ -188,7 +188,7 @@ internal object LegacyUpdateCodec {
                     length = decoder.readVarUInt(),
                     attributes = readAttributes(decoder),
                     afterAttributes = readAttributes(decoder),
-                    beforeAttributes = List(decoder.readVarUInt().toInt()) { readAttributes(decoder) },
+                    beforeAttributes = List(decoder.readVarUInt().toDecodedCount()) { readAttributes(decoder) },
                     kind = kind,
                 )
             }
@@ -236,7 +236,7 @@ internal object LegacyUpdateCodec {
     }
 
     private fun readAttributes(decoder: BinaryDecoder): Map<String, YValue> {
-        val count = decoder.readVarUInt().toInt()
+        val count = decoder.readVarUInt().toDecodedCount()
         return buildMap {
             repeat(count) {
                 put(decoder.readString(), readYValue(decoder))
@@ -259,10 +259,10 @@ internal object LegacyUpdateCodec {
 
     private fun readDeleteSet(decoder: BinaryDecoder): DeleteSet {
         val deleteSet = DeleteSet.empty()
-        val clientCount = decoder.readVarUInt().toInt()
+        val clientCount = decoder.readVarUInt().toDecodedCount()
         repeat(clientCount) {
             val client = decoder.readVarUInt()
-            val rangeCount = decoder.readVarUInt().toInt()
+            val rangeCount = decoder.readVarUInt().toDecodedCount()
             repeat(rangeCount) {
                 val clock = decoder.readVarUInt()
                 val length = decoder.readVarUInt()
