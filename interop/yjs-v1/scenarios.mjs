@@ -1,6 +1,15 @@
 import * as Y from 'yjs'
 
-export const scenarioNames = ['hello', 'array', 'map', 'nested-map', 'nested-map-update', 'nested-text']
+export const scenarioNames = [
+  'hello',
+  'array',
+  'map',
+  'nested-map',
+  'nested-map-update',
+  'nested-text',
+  'formatted-text',
+  'partial-formatted-text',
+]
 
 export const createScenarioDocument = name => {
   const doc = new Y.Doc()
@@ -47,6 +56,13 @@ export const createScenarioDocument = name => {
       text.insert(0, 'child')
       break
     }
+    case 'formatted-text':
+      doc.getText('body').insert(0, 'ab', { bold: true })
+      break
+    case 'partial-formatted-text':
+      doc.getText('body').insert(0, 'abcd')
+      doc.getText('body').format(1, 2, { bold: true })
+      break
     default:
       throw new Error(`unknown interoperability scenario: ${name}`)
   }
@@ -67,6 +83,9 @@ export const materializeScenario = (doc, name) => {
       return doc.getMap('root')
     case 'nested-text':
       return doc.getArray('nodes')
+    case 'formatted-text':
+    case 'partial-formatted-text':
+      return doc.getText('body')
     default:
       throw new Error(`unknown interoperability scenario: ${name}`)
   }

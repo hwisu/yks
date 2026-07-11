@@ -545,6 +545,7 @@ internal fun ItemContent.toContent(doc: YDoc): AbstractContent = when (this) {
     is ItemContent.Text -> ContentString(value)
     is ItemContent.TextEmbed -> ContentEmbed(doc.valueToAny(value))
     is ItemContent.TextFormat -> ContentTextFormatRange(target, length, attributes, afterAttributes, beforeAttributes)
+    is ItemContent.NativeTextFormat -> ContentFormat(key, doc.valueToAny(value))
     is ItemContent.MapEntry -> value.toContent(doc)
     is ItemContent.XmlNode -> ContentAny(listOf(value.toEventJson()))
     is ItemContent.XmlType -> ContentType(doc.typeFromXmlType(this))

@@ -17,5 +17,8 @@ for (const name of scenarioNames) {
     materializeScenario(target, name)
 
     assert.deepEqual(target.toJSON(), source.toJSON())
+    if (name === 'formatted-text' || name === 'partial-formatted-text') {
+      assert.deepEqual(target.getText('body').toDelta(), source.getText('body').toDelta())
+    }
   })
 }

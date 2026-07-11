@@ -766,6 +766,7 @@ private fun AbstractContent.toTextItemContents(
             kind = kind,
         ),
     )
+    is ContentFormat -> listOf(ItemContent.NativeTextFormat(key, YValue.from(value), kind))
     else -> error("unsupported text update content: ${this::class.simpleName}")
 }
 
@@ -852,6 +853,14 @@ private class UpdateObfuscator(
                 content.beforeAttributes
             },
         )
+        is ItemContent.NativeTextFormat -> if (options.formatting) {
+            content.copy(
+                key = formattingKeyCache.getOrPut(content.key, ::nextToken),
+                value = obfuscate(content.value),
+            )
+        } else {
+            content
+        }
         is ItemContent.Deleted -> content
     }
 

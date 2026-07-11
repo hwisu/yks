@@ -145,6 +145,10 @@ internal object UpdateCodec {
                 encoder.writeString("__yks_text_format")
                 encoder.writeString(toJsonLiteral(content.toWireValue()))
             }
+            is ItemContent.NativeTextFormat -> {
+                encoder.writeString(content.key)
+                encoder.writeString(toJsonLiteral(content.value.toAny()))
+            }
             is ItemContent.Value -> writeValueContent(encoder, content.value)
             is ItemContent.MapEntry -> writeValueContent(encoder, content.value)
             is ItemContent.XmlNode -> {
@@ -288,8 +292,11 @@ private fun StoreItem.hasCompatibleV1ParentKind(
             ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.MapEntry }
         is ItemContent.Value -> nestedKind?.let { kind -> kind == RootKind.Array }
             ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.Value }
-        is ItemContent.Text -> nestedKind?.let { kind -> kind == RootKind.Text }
-            ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.Text }
+        is ItemContent.Text,
+        is ItemContent.NativeTextFormat -> nestedKind?.let { kind -> kind == RootKind.Text }
+            ?: items.filter { item -> item.parent == parent }.all { item ->
+                item.content is ItemContent.Text || item.content is ItemContent.NativeTextFormat
+            }
         else -> false
     }
 }
@@ -300,10 +307,10 @@ private fun ItemContent.isSupportedV1Content(): Boolean = when (this) {
     is ItemContent.Text ->
         kind == RootKind.Text &&
             !Character.isSurrogate(value.single()) &&
-            attributes.isEmpty() &&
             baseAttributes.isEmpty()
     is ItemContent.TextEmbed -> false
     is ItemContent.TextFormat -> false
+    is ItemContent.NativeTextFormat -> kind == RootKind.Text && value.isSupportedV1Value(topLevel = false)
     is ItemContent.XmlNode -> false
     is ItemContent.XmlType -> false
     is ItemContent.Deleted -> false
@@ -472,7 +479,7 @@ private fun WireContent.toItemContents(kind: RootKind): List<ItemContent> = when
     is WireContent.Deleted -> List(length.toInt()) { ItemContent.Deleted(kind) }
     is WireContent.StringContent -> value.map { char -> ItemContent.Text(char.toString(), kind = kind) }
     is WireContent.Embed -> listOf(ItemContent.TextEmbed(YValue.from(value), kind = kind))
-    is WireContent.Format -> listOf(toTextFormat(kind))
+    is WireContent.Format -> listOf(toItemContent(kind))
     is WireContent.Binary -> listOf(value.toSequenceContent(kind))
     is WireContent.Json -> values.map { value -> value.toSequenceContent(kind) }
     is WireContent.AnyContent -> values.map { value -> value.toSequenceContent(kind) }
@@ -487,8 +494,10 @@ private fun WireContent.toItemContents(kind: RootKind): List<ItemContent> = when
     is WireContent.Doc -> listOf(options.toSubdocValue(guid).toSequenceContent(kind))
 }
 
-private fun WireContent.Format.toTextFormat(kind: RootKind): ItemContent {
-    require(key == "__yks_text_format") { "standard Y.Text format items are not supported yet" }
+private fun WireContent.Format.toItemContent(kind: RootKind): ItemContent {
+    if (key != "__yks_text_format") {
+        return ItemContent.NativeTextFormat(key, YValue.from(value), kind)
+    }
     val data = value as? Map<*, *> ?: error("invalid YKS text format payload")
     val target = data["target"] as? Map<*, *> ?: error("text format target is missing")
     fun number(name: String, source: Map<*, *> = data): Long =
@@ -541,6 +550,7 @@ private fun ItemContent.yjsContentRef(): Int = when (this) {
     is ItemContent.Text -> contentStringRefNumber
     is ItemContent.TextEmbed -> contentEmbedRefNumber
     is ItemContent.TextFormat -> contentFormatRefNumber
+    is ItemContent.NativeTextFormat -> contentFormatRefNumber
     is ItemContent.XmlType -> contentTypeRefNumber
     is ItemContent.XmlNode -> contentAnyRefNumber
     is ItemContent.Value -> value.yjsContentRef()

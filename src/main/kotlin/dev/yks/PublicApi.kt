@@ -128,6 +128,9 @@ fun typeXmlFragmentToDeltaSnapshot(parent: YXmlFragment, snapshot: Snapshot): Li
 
 fun cleanupYTextFormatting(type: YText): Int {
     if (!type.doc.cleanupFormatting) return 0
+    // Native Yjs markers are order-sensitive. Keep the legacy range cleanup
+    // conservative until marker equivalence can be proven across both models.
+    if (type.hasNativeTextFormatMarkersForCleanup()) return 0
     var cleaned = 0
     type.doc.transact {
         var activeFormats = type.liveTextFormatItemsForCleanup()
@@ -215,6 +218,11 @@ private fun Id.logId(): String = "$client:$clock"
 private val textFormatCleanupOrder: Comparator<StoreItem> =
     compareByDescending<StoreItem> { it.id.client }.thenBy { it.id.clock }
 
+private fun YText.hasNativeTextFormatMarkersForCleanup(): Boolean =
+    doc.sequence(name).any { item ->
+        !item.deleted && item.content.kind == kind && item.content is ItemContent.NativeTextFormat
+    }
+
 private fun YText.liveTextFormatItemsForCleanup(): List<StoreItem> =
     doc.sequence(name)
         .filter { item -> !item.deleted && item.content.kind == kind && item.content is ItemContent.TextFormat }
@@ -267,6 +275,7 @@ private fun ItemContent.logContent(doc: YDoc): String = when (this) {
     is ItemContent.Text -> "Text(value=${value.logAny()}, attrs=${attributes.logValues(doc)})"
     is ItemContent.TextEmbed -> "TextEmbed(value=${doc.valueToJson(value).logAny()}, attrs=${attributes.logValues(doc)})"
     is ItemContent.TextFormat -> "TextFormat(target=${target.logId()}, length=$length, attrs=${attributes.logValues(doc)})"
+    is ItemContent.NativeTextFormat -> "NativeTextFormat(key=${key.logAny()}, value=${doc.valueToJson(value).logAny()})"
     is ItemContent.MapEntry -> "MapEntry(${doc.valueToJson(value).logAny()})"
     is ItemContent.XmlNode -> "XmlNode(${value.toEventJson().logAny()})"
     is ItemContent.XmlType -> "XmlType(ref=${ref.kind}:${ref.name}, nodeName=${nodeName.logAny()})"

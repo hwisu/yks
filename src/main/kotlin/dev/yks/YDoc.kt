@@ -927,14 +927,12 @@ class YDoc(
 
     private fun textItemsAtSnapshot(type: YText, snapshot: Snapshot): List<StoreItem> {
         require(type.doc === this) { "type must belong to this document" }
-        val textItems = sequence(type.name)
-            .filter { item -> item.content.kind == type.kind && item.content.isTextCountable() && item.isVisibleIn(snapshot) }
-            .map { item -> item.withBaseTextAttributes() }
-            .toMutableList()
-        sequence(type.name)
-            .filter { item ->
-                item.content.kind == type.kind && item.content is ItemContent.TextFormat && item.isVisibleIn(snapshot)
-            }
+        val visibleItems = sequence(type.name).filter { item ->
+            item.content.kind == type.kind && item.isVisibleIn(snapshot)
+        }
+        val textItems = visibleItems.withNativeTextFormatting()
+        visibleItems
+            .filter { item -> item.content is ItemContent.TextFormat }
             .sortedWith(textFormatApplicationOrder)
             .forEach { formatItem -> applySingleTextFormat(textItems, formatItem) }
         return textItems
@@ -1064,6 +1062,9 @@ class YDoc(
             captureParentBefore(item.parent, item.content.kind)
             check(store.add(item)) { "duplicate local item id: ${item.id}" }
             rememberNestedRefs(item.content)
+            if (shouldReapplyTextFormatsAfter(item)) {
+                reapplyTextFormats(item.parent)
+            }
             currentTransaction?.addedItems?.add(item)
             currentTransaction?.changedParents?.add(item.parent)
             deletePreviousMapCurrentIfSuperseded(item, previousMapCurrent)
@@ -1172,7 +1173,7 @@ class YDoc(
                 }
             }
             restored
-                .filter { item -> item.content is ItemContent.TextFormat }
+                .filter { item -> item.content.isTextFormatControl() }
                 .map { item -> item.parent to item.content.kind }
                 .toSet()
                 .forEach { (parent, kind) ->
@@ -1209,7 +1210,7 @@ class YDoc(
                 currentTransaction?.changedParents?.add(it.parent)
             }
             newlyDeleted
-                .filter { item -> item.content is ItemContent.TextFormat }
+                .filter { item -> item.content.isTextFormatControl() }
                 .map { item -> item.parent }
                 .toSet()
                 .forEach { parent ->
@@ -1272,8 +1273,8 @@ class YDoc(
                     }
                     captureParentBefore(item.parent, item.content.kind)
                     if (store.add(item)) {
-                        if (item.content is ItemContent.TextFormat) {
-                            applyTextFormat(item)
+                        if (shouldReapplyTextFormatsAfter(item)) {
+                            reapplyTextFormats(item.parent)
                         }
                         rememberNestedRefs(item.content)
                         currentTransaction?.addedItems?.add(item)
@@ -1346,15 +1347,32 @@ class YDoc(
     }
 
     private fun applyTextFormat(item: StoreItem): List<StoreItem> {
-        if (item.content !is ItemContent.TextFormat) return emptyList()
+        if (!item.content.isTextFormatControl()) return emptyList()
         return reapplyTextFormats(item.parent)
     }
 
+    private fun shouldReapplyTextFormatsAfter(item: StoreItem): Boolean =
+        item.content.isTextFormatControl() ||
+            item.content.isTextCountable() &&
+            sequence(item.parent).any { candidate ->
+                !candidate.deleted && candidate.content is ItemContent.NativeTextFormat
+            }
+
     private fun reapplyTextFormats(parent: String): List<StoreItem> {
         val changed = mutableListOf<StoreItem>()
-        sequence(parent)
-            .filter { item -> !item.deleted && item.content.isTextCountable() }
-            .forEach { textItem -> resetTextAttributes(textItem)?.let(changed::add) }
+        val activeNativeAttributes = linkedMapOf<String, YValue>()
+        sequence(parent).forEach { item ->
+            if (item.deleted) return@forEach
+            when (val content = item.content) {
+                is ItemContent.NativeTextFormat -> activeNativeAttributes[content.key] = content.value
+                is ItemContent.Text,
+                is ItemContent.TextEmbed -> {
+                    val attributes = content.effectiveTextAttributes(activeNativeAttributes)
+                    setTextAttributes(item, attributes)?.let(changed::add)
+                }
+                else -> Unit
+            }
+        }
         sequence(parent)
             .filter { item -> !item.deleted && item.content is ItemContent.TextFormat }
             .sortedWith(textFormatApplicationOrder)
@@ -1396,12 +1414,6 @@ class YDoc(
         }
     }
 
-    private fun resetTextAttributes(item: StoreItem): StoreItem? {
-        val current = store.getStoreItem(item.id) ?: return null
-        val baseAttributes = current.content.baseTextAttributesOrEmpty()
-        return setTextAttributes(current, baseAttributes)
-    }
-
     private fun replaceTextAttributes(item: StoreItem, attributes: Map<String, YValue>): StoreItem? {
         if (attributes.isEmpty()) return null
         val current = store.getStoreItem(item.id) ?: return null
@@ -1440,6 +1452,7 @@ class YDoc(
             val clientClock = store.getClock(item.id.client)
             if (item.id.clock > clientClock) {
                 record(item.id.client, item.id.clock - 1)
+                return@forEach
             }
             item.origin?.let(::recordIfMissing)
             item.rightOrigin?.let(::recordIfMissing)
@@ -2066,6 +2079,7 @@ class YDoc(
             }
             is ItemContent.Text,
             is ItemContent.TextFormat,
+            is ItemContent.NativeTextFormat,
             is ItemContent.XmlNode,
             is ItemContent.Deleted -> Unit
         }
@@ -2115,6 +2129,7 @@ class YDoc(
         is ItemContent.XmlType -> setOf(ref.name)
         is ItemContent.Text,
         is ItemContent.TextFormat,
+        is ItemContent.NativeTextFormat,
         is ItemContent.XmlNode,
         is ItemContent.Deleted -> emptySet()
     }
@@ -2215,6 +2230,7 @@ class YDoc(
         is ItemContent.TextEmbed -> subdocRefs(content.value)
         is ItemContent.Text,
         is ItemContent.TextFormat,
+        is ItemContent.NativeTextFormat,
         is ItemContent.XmlType,
         is ItemContent.XmlNode,
         is ItemContent.Deleted -> emptyList()
@@ -2540,6 +2556,7 @@ internal fun ItemContent.directTypeRef(): YValue.TypeRef? = when (this) {
     is ItemContent.Text,
     is ItemContent.TextEmbed,
     is ItemContent.TextFormat,
+    is ItemContent.NativeTextFormat,
     is ItemContent.XmlNode,
     is ItemContent.Deleted -> null
 }
@@ -2572,6 +2589,7 @@ private fun ItemContent.withRemoteParentKind(kind: RootKind): ItemContent = when
     is ItemContent.Text -> copy(kind = kind)
     is ItemContent.TextEmbed -> copy(kind = kind)
     is ItemContent.TextFormat -> copy(kind = kind)
+    is ItemContent.NativeTextFormat -> copy(kind = kind)
     is ItemContent.XmlNode -> copy(kind = kind)
     is ItemContent.XmlType -> copy(kind = kind)
     is ItemContent.Deleted -> ItemContent.Deleted(kind)
@@ -2590,8 +2608,21 @@ private fun StoreItem.asRemoteGc(): StoreItem = copy(
 private val textFormatApplicationOrder: Comparator<StoreItem> =
     compareByDescending<StoreItem> { it.id.client }.thenBy { it.id.clock }
 
-private fun StoreItem.withBaseTextAttributes(): StoreItem =
-    copy(content = content.withTextAttributesOrNull(content.baseTextAttributesOrEmpty()) ?: content)
+private fun List<StoreItem>.withNativeTextFormatting(): MutableList<StoreItem> {
+    val activeAttributes = linkedMapOf<String, YValue>()
+    return buildList {
+        this@withNativeTextFormatting.forEach { item ->
+            when (val content = item.content) {
+                is ItemContent.NativeTextFormat -> activeAttributes[content.key] = content.value
+                is ItemContent.Text,
+                is ItemContent.TextEmbed -> add(
+                    item.copy(content = content.withTextAttributesOrNull(content.effectiveTextAttributes(activeAttributes))!!),
+                )
+                else -> Unit
+            }
+        }
+    }.toMutableList()
+}
 
 private fun ItemContent.retargetTextFormat(restoredByOriginal: Map<Id, Id>): ItemContent = when (this) {
     is ItemContent.TextFormat -> copy(target = restoredByOriginal[target] ?: target)
@@ -2615,6 +2646,21 @@ private fun ItemContent.withTextAttributesOrNull(attributes: Map<String, YValue>
     is ItemContent.TextEmbed -> copy(attributes = attributes)
     else -> null
 }
+
+private fun ItemContent.effectiveTextAttributes(activeAttributes: Map<String, YValue>): Map<String, YValue> {
+    val attributes = baseTextAttributesOrEmpty().toMutableMap()
+    activeAttributes.forEach { (key, value) ->
+        if (value == YValue.Null) {
+            attributes.remove(key)
+        } else {
+            attributes[key] = value
+        }
+    }
+    return attributes.toSortedMap()
+}
+
+private fun ItemContent.isTextFormatControl(): Boolean =
+    this is ItemContent.TextFormat || this is ItemContent.NativeTextFormat
 
 private fun ItemContent.isTextCountable(): Boolean =
     this is ItemContent.Text || this is ItemContent.TextEmbed

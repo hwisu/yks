@@ -47,6 +47,42 @@ replacedBody.delete(0, 3)
 replacedBody.insert(0, 'new')
 writeFixture('text-replace-full-v1', Y.encodeStateAsUpdate(replacedText))
 
+const formattedInsert = new Y.Doc({ gc: false })
+formattedInsert.clientID = 1
+formattedInsert.getText('body').insert(0, 'ab', { bold: true })
+writeFixture('text-format-insert-v1', Y.encodeStateAsUpdate(formattedInsert))
+
+const formattedRemoval = new Y.Doc({ gc: false })
+formattedRemoval.clientID = 1
+const removalUpdates = []
+formattedRemoval.getText('body').insert(0, 'ab', { bold: true })
+formattedRemoval.on('update', value => removalUpdates.push(value))
+formattedRemoval.getText('body').format(0, 2, { bold: null })
+writeFixture('text-format-remove-v1', removalUpdates[0])
+
+const partialFormat = new Y.Doc({ gc: false })
+partialFormat.clientID = 1
+const partialFormatUpdates = []
+partialFormat.on('update', value => partialFormatUpdates.push(value))
+partialFormat.getText('body').insert(0, 'abcd')
+partialFormat.getText('body').format(1, 2, { bold: true })
+writeFixture('text-format-base-v1', partialFormatUpdates[0])
+writeFixture('text-format-partial-v1', partialFormatUpdates[1])
+writeFixture('text-format-partial-full-v1', Y.encodeStateAsUpdate(partialFormat))
+
+const formattedEmbed = new Y.Doc({ gc: false })
+formattedEmbed.clientID = 1
+formattedEmbed.getText('body').insertEmbed(0, { image: 'x' }, { bold: true })
+writeFixture('text-format-embed-v1', Y.encodeStateAsUpdate(formattedEmbed))
+
+const restoredFormat = new Y.Doc({ gc: false })
+restoredFormat.clientID = 1
+const restoredBody = restoredFormat.getText('body')
+restoredBody.insert(0, 'abc')
+restoredBody.format(0, 3, { url: 'outer' })
+restoredBody.format(1, 1, { url: 'inner' })
+writeFixture('text-format-restoration-v1', Y.encodeStateAsUpdate(restoredFormat))
+
 writeFixture(
   'array-v1',
   Y.encodeStateAsUpdate(createScenarioDocument('array')),

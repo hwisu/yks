@@ -629,7 +629,8 @@ private fun ItemContent.textRetainAttributesForDeepDelta(
 private fun DeepDeltaRenderOptions.hasTextFormatChange(type: YText): Boolean {
     val items = itemsToRender ?: return false
     return type.doc.sequence(type.name).any { item ->
-        item.content is ItemContent.TextFormat && items.intersects(item.id, item.length)
+        (item.content is ItemContent.TextFormat || item.content is ItemContent.NativeTextFormat) &&
+            items.intersects(item.id, item.length)
     }
 }
 

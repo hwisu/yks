@@ -60,6 +60,19 @@ internal sealed class ItemContent {
         }
     }
 
+    /** A native Yjs ContentFormat marker. Its value applies until the next marker with the same key. */
+    data class NativeTextFormat(
+        val key: String,
+        val value: YValue,
+        override val kind: RootKind = RootKind.Text,
+    ) : ItemContent() {
+        init {
+            require(kind == RootKind.Text || kind == RootKind.XmlText) {
+                "native text format content must belong to a text sequence"
+            }
+        }
+    }
+
     data class MapEntry(val value: YValue) : ItemContent() {
         override val kind: RootKind = RootKind.Map
     }
@@ -95,6 +108,7 @@ internal sealed class ItemContent {
 
 internal fun ItemContent.isCountable(): Boolean = when (this) {
     is ItemContent.TextFormat,
+    is ItemContent.NativeTextFormat,
     is ItemContent.Deleted -> false
     else -> true
 }

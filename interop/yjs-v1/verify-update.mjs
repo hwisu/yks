@@ -26,6 +26,9 @@ if (scenario === 'hello') {
   materializeScenario(actual, scenario)
   assert.deepEqual(actual.toJSON(), expected.toJSON())
   assert.deepEqual(Y.encodeStateVector(actual), Y.encodeStateVector(expected))
+  if (scenario === 'formatted-text' || scenario === 'partial-formatted-text') {
+    assert.deepEqual(actual.getText('body').toDelta(), expected.getText('body').toDelta())
+  }
   if (scenario === 'nested-map') {
     assert.ok(actual.getMap('root').get('profile') instanceof Y.Map)
   }

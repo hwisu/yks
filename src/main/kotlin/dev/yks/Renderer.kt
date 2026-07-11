@@ -530,6 +530,7 @@ private fun ItemContent.nestedTypeRefs(): List<YValue.TypeRef> = when (this) {
     is ItemContent.XmlType -> listOf(ref)
     is ItemContent.Text,
     is ItemContent.TextFormat,
+    is ItemContent.NativeTextFormat,
     is ItemContent.XmlNode,
     is ItemContent.Deleted -> emptyList()
 }

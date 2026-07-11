@@ -116,6 +116,12 @@ internal object LegacyUpdateCodec {
                 encoder.writeVarUInt(content.beforeAttributes.size.toLong())
                 content.beforeAttributes.forEach { attributes -> writeAttributes(encoder, attributes) }
             }
+            is ItemContent.NativeTextFormat -> {
+                encoder.writeByte(12)
+                writeRootKind(encoder, content.kind)
+                encoder.writeString(content.key)
+                writeYValue(encoder, content.value)
+            }
             is ItemContent.XmlType -> {
                 encoder.writeByte(7)
                 writeRootKind(encoder, content.kind)
@@ -183,6 +189,14 @@ internal object LegacyUpdateCodec {
                     attributes = readAttributes(decoder),
                     afterAttributes = readAttributes(decoder),
                     beforeAttributes = List(decoder.readVarUInt().toInt()) { readAttributes(decoder) },
+                    kind = kind,
+                )
+            }
+            12 -> {
+                val kind = readRootKind(decoder)
+                ItemContent.NativeTextFormat(
+                    key = decoder.readString(),
+                    value = readYValue(decoder),
                     kind = kind,
                 )
             }

@@ -268,6 +268,164 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun appliesNativeTextFormatMarkersProducedByUpstreamYjs() {
+        val update = fixture("text-format-insert-v1")
+        val doc = YDoc(clientId = 2, gc = false)
+
+        applyUpdate(doc, update)
+
+        assertEquals(
+            YTextDelta().insert("ab", mapOf("bold" to true)),
+            doc.getText("body").toDelta(),
+        )
+        assertEquals(mapOf(1L to 4L), decodeStateVector(doc.encodeStateVector()))
+        assertEquals(
+            listOf("bold" to true, "bold" to null),
+            decodeUpdate(update).structs.mapNotNull { struct ->
+                (struct.content as? ContentFormat)?.let { format -> format.key to format.value }
+            },
+        )
+    }
+
+    @Test
+    fun appliesNativeFormatRemovalInEitherOrder() {
+        listOf(
+            listOf("text-format-insert-v1", "text-format-remove-v1"),
+            listOf("text-format-remove-v1", "text-format-insert-v1"),
+        ).forEach { order ->
+            val doc = YDoc(clientId = 2, gc = false)
+            order.forEach { name -> applyUpdate(doc, fixture(name)) }
+
+            assertEquals(YTextDelta().insert("ab"), doc.getText("body").toDelta())
+            assertEquals(mapOf(1L to 4L), decodeStateVector(doc.encodeStateVector()))
+            assertEquals(null, doc.store.pendingDs)
+        }
+    }
+
+    @Test
+    fun appliesIncrementalNativeFormattingInEitherOrder() {
+        listOf(
+            listOf("text-format-base-v1", "text-format-partial-v1"),
+            listOf("text-format-partial-v1", "text-format-base-v1"),
+        ).forEach { order ->
+            val doc = YDoc(clientId = 2, gc = false)
+            applyUpdate(doc, fixture(order.first()))
+            if (order.first() == "text-format-partial-v1") {
+                assertEquals(mapOf(1L to 3L), doc.store.pendingStructs?.missing)
+                assertEquals(emptyMap(), decodeStateVector(doc.encodeStateVector()))
+            }
+            applyUpdate(doc, fixture(order.last()))
+
+            assertEquals(
+                YTextDelta()
+                    .insert("a")
+                    .insert("bc", mapOf("bold" to true))
+                    .insert("d"),
+                doc.getText("body").toDelta(),
+            )
+            assertEquals(mapOf(1L to 6L), decodeStateVector(doc.encodeStateVector()))
+            assertEquals(null, doc.store.pendingStructs)
+        }
+    }
+
+    @Test
+    fun nativeFormatOnlyUpdateEmitsFormattingDeltaAndPreservesSnapshots() {
+        val doc = YDoc(clientId = 2, gc = false)
+        val text = doc.getText("body")
+        applyUpdate(doc, fixture("text-format-base-v1"))
+        val before = snapshot(doc)
+        var observed = YTextDelta()
+        text.observe { event -> observed = event.textDelta }
+
+        applyUpdate(doc, fixture("text-format-partial-v1"))
+        val after = snapshot(doc)
+
+        assertEquals(
+            YTextDelta().retain(1).retain(2, mapOf("bold" to true)),
+            observed,
+        )
+        assertEquals(YTextDelta().insert("abcd"), typeTextToDeltaSnapshot(text, before))
+        assertEquals(
+            YTextDelta()
+                .insert("a")
+                .insert("bc", mapOf("bold" to true))
+                .insert("d"),
+            typeTextToDeltaSnapshot(text, after),
+        )
+    }
+
+    @Test
+    fun appliesNativeFormattingToEmbed() {
+        val doc = YDoc(clientId = 2, gc = false)
+
+        applyUpdate(doc, fixture("text-format-embed-v1"))
+
+        assertEquals(
+            YTextDelta().insertEmbed(mapOf("image" to "x"), mapOf("bold" to true)),
+            doc.getText("body").toDelta(),
+        )
+        assertEquals(mapOf(1L to 3L), decodeStateVector(doc.encodeStateVector()))
+    }
+
+    @Test
+    fun nativeFormatMarkerRestoresPreviousNonNullValue() {
+        val doc = YDoc(clientId = 2, gc = false)
+
+        applyUpdate(doc, fixture("text-format-restoration-v1"))
+
+        assertEquals(
+            YTextDelta()
+                .insert("a", mapOf("url" to "outer"))
+                .insert("b", mapOf("url" to "inner"))
+                .insert("c", mapOf("url" to "outer")),
+            doc.getText("body").toDelta(),
+        )
+    }
+
+    @Test
+    fun upstreamYjsAppliesNativeFormattingRelayedByKotlin() {
+        val doc = YDoc(clientId = 2, gc = false)
+        applyUpdate(doc, fixture("text-format-insert-v1"))
+
+        val update = encodeStateAsUpdate(doc)
+
+        assertTrue(!update.copyOfRange(0, 4).contentEquals(byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 1)))
+        assertUpstreamAppliesUpdate(update, "formatted-text")
+    }
+
+    @Test
+    fun upstreamYjsAppliesIncrementalNativeFormattingRelayedByKotlin() {
+        val doc = YDoc(clientId = 2, gc = false)
+        val baseline = fixture("text-format-base-v1")
+        applyUpdate(doc, baseline)
+        val baselineState = encodeStateVector(doc)
+        applyUpdate(doc, fixture("text-format-partial-v1"))
+
+        val incremental = encodeStateAsUpdate(doc, baselineState)
+
+        assertTrue(
+            !incremental.copyOfRange(0, 4)
+                .contentEquals(byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 1)),
+        )
+        assertUpstreamAppliesSequence("partial-formatted-text", baseline, incremental)
+    }
+
+    @Test
+    fun legacyTransactionUpdatePreservesNativeFormatMarkers() {
+        val source = YDoc(clientId = 2, gc = false)
+        val updates = mutableListOf<ByteArray>()
+        source.observeUpdates { update, _ -> updates.add(update) }
+
+        applyUpdate(source, fixture("text-format-insert-v1"))
+
+        val transactionUpdate = updates.single()
+        assertTrue(transactionUpdate.copyOfRange(0, 4).contentEquals(byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 1)))
+        val target = YDoc(clientId = 3, gc = false)
+        applyUpdate(target, transactionUpdate)
+        assertEquals(source.getText("body").toDelta(), target.getText("body").toDelta())
+    }
+
+    @Test
     fun upstreamYjsAppliesHelloUpdateProducedByKotlin() {
         val doc = YDoc(clientId = 1)
         doc.getText("body").insert(0, "hello")
@@ -330,10 +488,14 @@ class YjsV1InteropTest {
     }
 
     private fun assertUpstreamApplies(doc: YDoc, scenario: String) {
+        assertUpstreamAppliesUpdate(encodeStateAsUpdate(doc), scenario)
+    }
+
+    private fun assertUpstreamAppliesUpdate(bytes: ByteArray, scenario: String) {
         val update = Files.createTempFile("yks-$scenario-v1-", ".bin")
 
         try {
-            Files.write(update, encodeStateAsUpdate(doc))
+            Files.write(update, bytes)
             val process = ProcessBuilder(
                 "node",
                 "interop/yjs-v1/verify-update.mjs",

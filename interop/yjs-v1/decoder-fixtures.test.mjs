@@ -98,6 +98,66 @@ test('content targeting a GC parent becomes GC instead of a synthetic root', () 
   )
 })
 
+test('native format markers render attributed text', () => {
+  const doc = new Y.Doc({ gc: false })
+  Y.applyUpdate(doc, fixture('text-format-insert-v1'))
+
+  assert.deepEqual(doc.getText('body').toDelta(), [
+    { insert: 'ab', attributes: { bold: true } },
+  ])
+  assert.deepEqual(Array.from(Y.decodeStateVector(Y.encodeStateVector(doc))), [[1, 4]])
+})
+
+for (const names of [
+  ['text-format-insert-v1', 'text-format-remove-v1'],
+  ['text-format-remove-v1', 'text-format-insert-v1'],
+]) {
+  test(`format removal converges in order ${names.join(', ')}`, () => {
+    const doc = new Y.Doc({ gc: false })
+    for (const name of names) Y.applyUpdate(doc, fixture(name))
+    assert.deepEqual(doc.getText('body').toDelta(), [{ insert: 'ab' }])
+    assert.deepEqual(Array.from(Y.decodeStateVector(Y.encodeStateVector(doc))), [[1, 4]])
+    assert.equal(doc.store.pendingDs, null)
+  })
+}
+
+for (const names of [
+  ['text-format-base-v1', 'text-format-partial-v1'],
+  ['text-format-partial-v1', 'text-format-base-v1'],
+]) {
+  test(`partial formatting converges in order ${names.join(', ')}`, () => {
+    const doc = new Y.Doc({ gc: false })
+    for (const name of names) Y.applyUpdate(doc, fixture(name))
+    assert.deepEqual(doc.getText('body').toDelta(), [
+      { insert: 'a' },
+      { insert: 'bc', attributes: { bold: true } },
+      { insert: 'd' },
+    ])
+    assert.deepEqual(Array.from(Y.decodeStateVector(Y.encodeStateVector(doc))), [[1, 6]])
+    assert.equal(doc.store.pendingStructs, null)
+  })
+}
+
+test('native format markers apply to embeds', () => {
+  const doc = new Y.Doc({ gc: false })
+  Y.applyUpdate(doc, fixture('text-format-embed-v1'))
+
+  assert.deepEqual(doc.getText('body').toDelta(), [
+    { insert: { image: 'x' }, attributes: { bold: true } },
+  ])
+})
+
+test('native format markers restore a previous non-null value', () => {
+  const doc = new Y.Doc({ gc: false })
+  Y.applyUpdate(doc, fixture('text-format-restoration-v1'))
+
+  assert.deepEqual(doc.getText('body').toDelta(), [
+    { insert: 'a', attributes: { url: 'outer' } },
+    { insert: 'b', attributes: { url: 'inner' } },
+    { insert: 'c', attributes: { url: 'outer' } },
+  ])
+})
+
 for (const names of [
   ['array-interior-base-v1', 'array-interior-insert-v1'],
   ['array-interior-insert-v1', 'array-interior-base-v1'],
