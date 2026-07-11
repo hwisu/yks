@@ -258,7 +258,11 @@ internal object UpdateCodec {
     private fun writeContent(encoder: BinaryEncoder, content: ItemContent) {
         when (content) {
             is ItemContent.Text -> encoder.writeString(content.value)
-            is ItemContent.TextEmbed -> encoder.writeString(toJsonLiteral(content.value.toAny()))
+            is ItemContent.TextEmbed -> if (content.value is YValue.SubdocRef) {
+                writeValueContent(encoder, content.value)
+            } else {
+                encoder.writeString(toJsonLiteral(content.value.toAny()))
+            }
             is ItemContent.TextFormat -> {
                 encoder.writeString("__yks_text_format")
                 encoder.writeString(toJsonLiteral(content.toWireValue()))
@@ -281,7 +285,11 @@ internal object UpdateCodec {
     private fun writeContentV2(encoder: UpdateEncoderV2, content: ItemContent) {
         when (content) {
             is ItemContent.Text -> encoder.writeString(content.value)
-            is ItemContent.TextEmbed -> encoder.writeJSON(content.value.toAny())
+            is ItemContent.TextEmbed -> if (content.value is YValue.SubdocRef) {
+                writeValueContentV2(encoder, content.value)
+            } else {
+                encoder.writeJSON(content.value.toAny())
+            }
             is ItemContent.TextFormat -> {
                 encoder.writeKey("__yks_text_format")
                 encoder.writeJSON(content.toWireValue())
@@ -568,8 +576,7 @@ private fun YValue.isSupportedV1Value(topLevel: Boolean): Boolean = when (this) 
     is YValue.MapValue -> value.values.all { nested -> nested.isSupportedV1Value(topLevel = false) }
     is YValue.TypeRef -> topLevel && kind in setOf(RootKind.Array, RootKind.Map, RootKind.Text)
     is YValue.SubdocRef ->
-        topLevel &&
-            collectionId == null &&
+        collectionId == null &&
             !isSuggestionDoc &&
             (!shouldLoad || autoLoad) &&
             meta.isSupportedV1Value(topLevel = false)
@@ -800,7 +807,9 @@ private fun Any?.toSubdocValue(guid: String, instanceId: String): YValue.SubdocR
 private fun ItemContent.yjsContentRef(): Int = when (this) {
     is ItemContent.Deleted -> contentDeletedRefNumber
     is ItemContent.Text -> contentStringRefNumber
-    is ItemContent.TextEmbed -> contentEmbedRefNumber
+    is ItemContent.TextEmbed -> {
+        value.yjsContentRef().takeIf { it == contentDocRefNumber } ?: contentEmbedRefNumber
+    }
     is ItemContent.TextFormat -> contentFormatRefNumber
     is ItemContent.NativeTextFormat -> contentFormatRefNumber
     is ItemContent.XmlType -> contentTypeRefNumber

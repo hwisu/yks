@@ -327,9 +327,50 @@ class SubdocTest {
 
         map.deleteAttr("a")
 
-        assertEquals(listOf("a"), events.single().removed.map(YDoc::guid))
+        assertEquals(listOf(listOf("a"), listOf("a")), events.map { event -> event.removed.map(YDoc::guid) })
         assertEquals(emptySet(), doc.subdocs)
         assertEquals(emptySet(), doc.getSubdocGuids())
+        assertTrue(subdoc.isDestroyed)
+    }
+
+    @Test
+    fun deletingSubdocEmitsParentEventBeforeDestroyAndCleanupEvent() {
+        val doc = YDoc(clientId = 1)
+        val array = doc.getArray("subdocs")
+        val subdoc = YDoc(guid = "ordered", shouldLoad = false)
+        val order = mutableListOf<String>()
+        doc.observeAfterTransactions { transaction ->
+            if (subdoc in transaction.subdocsRemoved) order.add("after")
+        }
+        doc.observeSubdocs { event ->
+            if (subdoc in event.removed) order.add("subdocs")
+        }
+        subdoc.on("destroy") { order.add("destroy") }
+        array.push(subdoc)
+        order.clear()
+
+        array.delete(0)
+
+        assertEquals(listOf("after", "subdocs", "destroy", "after", "subdocs"), order)
+    }
+
+    @Test
+    fun insertingAndDeletingSubdocInOneTransactionCancelsAddedAndRemovedLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val events = mutableListOf<YSubdocEvent>()
+        doc.observeSubdocs(events::add)
+
+        doc.transact {
+            val array = doc.getArray("subdocs")
+            array.push(YDoc(guid = "temporary", shouldLoad = true))
+            array.delete(0)
+        }
+
+        assertEquals(1, events.size)
+        assertEquals(emptyList(), events.single().added)
+        assertEquals(emptyList(), events.single().removed)
+        assertEquals(listOf("temporary"), events.single().loaded.map(YDoc::guid))
+        assertEquals(emptySet(), doc.subdocs)
     }
 
     @Test

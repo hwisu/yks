@@ -7,14 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 15개 커밋 앞서 있음
+- 현재 `origin/main`보다 16개 커밋 앞서 있음
 - 아직 push하지 않음
 - XML 문자열 surface parity 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
-HEAD feat: match upstream Yjs XML rendering
+HEAD feat: extend native Yjs subdocument parity
+50a6505 feat: match upstream Yjs XML rendering
 ffd46dd feat: complete Yjs update V2 operations
 1d3d219 feat: write genuine Yjs update V2
 4c826bf feat: decode genuine Yjs update V2
@@ -220,6 +221,14 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - Kotlin V1 fixture decode 결과가 `<p class="intro"><strong level="1">hi</strong></p>`인지 직접 검증
 - Kotlin의 별도 extension인 forced empty fragment 표기는 기존 `<xml />` 계약 유지
 
+### 13. subdocument sequence와 lifecycle parity
+
+- low-level `ContentDoc`를 `Y.Text`와 `Y.XmlText` 내부에서 native content ref 9로 V1/V2 작성
+- Kotlin-authored text/XML-text subdocument full update를 upstream Yjs가 적용하고 `doc.subdocs`에 등록하는지 검증
+- text/XML-text 내부 subdocument deletion update도 표준 V1 delete set으로 작성하고 upstream sequence로 검증
+- 같은 transaction에서 추가 후 삭제된 subdocument는 upstream처럼 added/removed에서 상쇄하고 loaded event만 유지
+- subdocument reference 삭제 시 parent subdocs event 후 child destroy, 이어 cleanup removal transaction/event가 발생하는 upstream 순서 구현
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -287,8 +296,6 @@ subdoc-duplicate-guid-v1.bin
 - root `XmlFragment`의 Kotlin-only attributes
 - `collectionId` 또는 suggestion-doc 같은 비표준 subdocument 옵션
 - `shouldLoad=true`, `autoLoad=false`처럼 upstream wire에서 보존할 수 없는 상태
-- text/XML 내부 subdocument
-- text/XML 내부 subdocument delete update
 
 이 경우 모두 legacy `YKS` codec으로 fallback하는 테스트가 있음.
 
@@ -301,8 +308,8 @@ subdoc-duplicate-guid-v1.bin
 BUILD SUCCESSFUL
 ```
 
-- 일반 Kotlin tests: 513 passed
-- Kotlin Yjs V1/V2 interop tests: 65 passed
+- 일반 Kotlin tests: 515 passed
+- Kotlin Yjs V1/V2 interop tests: 67 passed
 - JavaScript/Yjs oracle tests: 74 passed
 - `git diff --check`: passed
 
@@ -325,8 +332,6 @@ git diff --check
 1. XML root surface parity
    - root `XmlElement` node name은 wire에 없으므로 schema/pre-materialization이 필요함
 2. subdocument 확장
-   - deletion event cancellation/ordering
-   - text/XML 내부 ContentDoc
    - upstream에 없는 local options 처리 정책
 3. codec hardening
    - decoded count/length allocation limit

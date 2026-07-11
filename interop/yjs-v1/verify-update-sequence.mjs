@@ -13,11 +13,17 @@ if (scenario == null || inputs.length === 0) {
   )
 }
 
-const expected = createScenarioDocument(scenario)
 const actual = new Y.Doc()
+if (scenario === 'subdoc-text-delete') actual.getText('body')
 for (const input of inputs) {
   Y.applyUpdate(actual, fs.readFileSync(input))
 }
+if (scenario === 'subdoc-text-delete' || scenario === 'subdoc-xml-text-delete') {
+  assert.equal(actual.subdocs.size, 0)
+  process.exit(0)
+}
+
+const expected = createScenarioDocument(scenario)
 materializeScenario(actual, scenario)
 
 if (scenario !== 'subdoc-map' && scenario !== 'subdoc-array') {

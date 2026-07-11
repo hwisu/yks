@@ -12,7 +12,15 @@ if (input == null) {
   throw new Error('usage: npm run interop:verify -- <update.bin> [scenario]')
 }
 
-if (scenario === 'hello') {
+if (scenario === 'subdoc-text' || scenario === 'subdoc-xml-text') {
+  const actual = new Y.Doc()
+  if (scenario === 'subdoc-text') actual.getText('body')
+  Y.applyUpdate(actual, fs.readFileSync(input))
+  const child = [...actual.subdocs][0]
+  assert.ok(child instanceof Y.Doc)
+  assert.equal(child.guid, scenario === 'subdoc-text' ? 'text-child' : 'xml-child')
+  assert.deepEqual([...actual.subdocs], [child])
+} else if (scenario === 'hello') {
   const expected = readHelloExpected()
   const actual = applyAndDescribe(fs.readFileSync(input))
 

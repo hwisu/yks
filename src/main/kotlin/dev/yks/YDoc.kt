@@ -1650,6 +1650,11 @@ class YDoc(
         )
         event.subdocEvent()?.let { subdocEvent ->
             callbacks.add { emitSubdocEvent(subdocEvent, event) }
+            callbacks.add {
+                subdocEvent.removed.forEach { subdoc ->
+                    if (!subdoc.isDestroyed) subdoc.destroy()
+                }
+            }
         }
         updateListeners.toList().forEach { listener ->
             callbacks.add { listener(event.update, transaction.origin) }
@@ -2260,17 +2265,25 @@ class YDoc(
     }
 
     private fun collectSubdocEvent(transaction: Transaction): YSubdocEvent? {
-        val added = transaction.addedItems.flatMap { subdocRefs(it.content) }.map(::subdocFromRef) +
-            transaction.addedSubdocs
-        val removed = transaction.deletedItems.flatMap { subdocRefs(it.content) }.map(::subdocFromRef) +
-            transaction.removedSubdocs
+        val added = (transaction.addedItems.flatMap { subdocRefs(it.content) }.map(::subdocFromRef) +
+            transaction.addedSubdocs).toMutableList()
+        val loadedFromAdded = added.filter { it.shouldLoad }
+        val removed = (transaction.deletedItems.flatMap { subdocRefs(it.content) }.map(::subdocFromRef) +
+            transaction.removedSubdocs).toMutableList()
+        removed.toList().forEach { subdoc ->
+            val addedIndex = added.indexOfFirst { candidate -> candidate.subdocInstanceId == subdoc.subdocInstanceId }
+            if (addedIndex >= 0) {
+                added.removeAt(addedIndex)
+                removed.remove(subdoc)
+            }
+        }
         added.forEach { subdoc ->
             subdoc.clientID = clientID
             if (subdoc.collectionid == null) {
                 subdoc.collectionid = collectionid
             }
         }
-        val loaded = (added.filter { it.shouldLoad } + transaction.loadedSubdocs)
+        val loaded = (loadedFromAdded + transaction.loadedSubdocs)
             .distinctBy { it.subdocInstanceId }
         if (added.isEmpty() && removed.isEmpty() && loaded.isEmpty()) return null
         return YSubdocEvent(added = added, removed = removed, loaded = loaded)

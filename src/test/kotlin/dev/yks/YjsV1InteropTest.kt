@@ -912,7 +912,68 @@ class YjsV1InteropTest {
         target.observeSubdocs(events::add)
         applyUpdate(target, incremental)
         assertEquals(null, target.getMap("subs").get("child"))
-        assertEquals(listOf(child), events.single().removed)
+        assertEquals(listOf(listOf(child), listOf(child)), events.map(YSubdocEvent::removed))
+    }
+
+    @Test
+    fun emitsStandardV1SubdocumentsInsideTextAndXmlText() {
+        val textDoc = YDoc(clientId = 1, gc = false)
+        val text = textDoc.getText("body")
+        insertContent(text, 0, ContentDoc("text-child"))
+        val textUpdate = encodeStateAsUpdate(textDoc)
+
+        assertStandardV1(textUpdate)
+        assertUpstreamAppliesUpdate(textUpdate, "subdoc-text")
+        val textTarget = YDoc(clientId = 2, gc = false)
+        textTarget.getText("body")
+        applyUpdate(textTarget, textUpdate)
+        assertEquals("text-child", (textTarget.getText("body").get(0) as YDoc).guid)
+
+        val xmlDoc = YDoc(clientId = 1, gc = false)
+        val paragraph = xmlDoc.createXmlElement("p")
+        val xmlText = xmlDoc.createXmlText()
+        xmlDoc.getXmlFragment("xml").push(paragraph)
+        paragraph.push(xmlText)
+        insertContent(xmlText, 0, ContentDoc("xml-child"))
+        val xmlUpdate = encodeStateAsUpdate(xmlDoc)
+
+        assertStandardV1(xmlUpdate)
+        assertUpstreamAppliesUpdate(xmlUpdate, "subdoc-xml-text")
+        val xmlTarget = YDoc(clientId = 2, gc = false)
+        applyUpdate(xmlTarget, xmlUpdate)
+        val remoteParagraph = xmlTarget.getXmlFragment("xml").getType(0) as YXmlElementType
+        val remoteText = remoteParagraph.getType(0) as YXmlTextType
+        assertEquals("xml-child", (remoteText.get(0) as YDoc).guid)
+    }
+
+    @Test
+    fun emitsStandardV1DeletionForSubdocumentsInsideTextAndXmlText() {
+        val textDoc = YDoc(clientId = 1, gc = false)
+        val text = textDoc.getText("body")
+        insertContent(text, 0, ContentDoc("text-child"))
+        val textBaseline = encodeStateAsUpdate(textDoc)
+        val textState = encodeStateVector(textDoc)
+        text.delete(0)
+        val textDelete = encodeStateAsUpdate(textDoc, textState)
+
+        assertStandardV1(textBaseline)
+        assertStandardV1(textDelete)
+        assertUpstreamAppliesSequence("subdoc-text-delete", textBaseline, textDelete)
+
+        val xmlDoc = YDoc(clientId = 1, gc = false)
+        val paragraph = xmlDoc.createXmlElement("p")
+        val xmlText = xmlDoc.createXmlText()
+        xmlDoc.getXmlFragment("xml").push(paragraph)
+        paragraph.push(xmlText)
+        insertContent(xmlText, 0, ContentDoc("xml-child"))
+        val xmlBaseline = encodeStateAsUpdate(xmlDoc)
+        val xmlState = encodeStateVector(xmlDoc)
+        xmlText.delete(0)
+        val xmlDelete = encodeStateAsUpdate(xmlDoc, xmlState)
+
+        assertStandardV1(xmlBaseline)
+        assertStandardV1(xmlDelete)
+        assertUpstreamAppliesSequence("subdoc-xml-text-delete", xmlBaseline, xmlDelete)
     }
 
     @Test
