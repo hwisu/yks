@@ -7,14 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 19개 커밋 앞서 있음
+- 현재 `origin/main`보다 20개 커밋 앞서 있음
 - 아직 push하지 않음
 - XML 문자열 surface parity 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
-HEAD feat: preserve pending GC update metadata
+HEAD feat: emit standard delete transaction updates
+50b2b2e feat: preserve pending GC update metadata
 828c39d feat: emit standard root transaction updates
 a1e550e feat: harden Yjs update decoding
 e6a9b59 feat: extend native Yjs subdocument parity
@@ -246,7 +247,7 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - root text/array/map의 lossless insert/update transaction은 `update` event에서 표준 V1 payload 방출
 - upstream fixture relay와 Kotlin-authored formatted root text event를 실제 `Y.applyUpdate`로 검증
 - 기존 API와 동일한 `isSupportedV1Update` gate를 통과하지 못하면 legacy envelope 유지
-- pre-populated detached nested owner, nested child mutation, delete-set transaction은 이름/GC metadata 완성 전까지 legacy 유지
+- pre-populated detached nested owner와 nested child mutation은 이름 통합 전까지 legacy 유지
 - 이 제한으로 기존 bidirectional UndoManager 동기화 의미를 보존
 
 ### 16. pending/GC private serialization metadata
@@ -256,6 +257,13 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - pending struct view를 decode/re-encode해도 GC와 clock-continuity metadata가 보존되는 regression test 추가
 - sparse content intersection은 의도적인 standalone chunk이므로 continuity requirement를 명시적으로 해제
 - V1/V2 native GC fixture의 clock ownership/convergence 검증과 함께 pending metadata 손실 제거
+
+### 17. delete transaction-event V1 standardization
+
+- root delete-set transaction의 `update` event도 표준 V1 payload로 전환
+- subdocument insert, delete, destroy-cleanup에서 방출된 3개 event payload 모두 표준 V1인지 검증
+- 실제 upstream `Y.applyUpdate` sequence가 최종 subdocument deletion state로 수렴하는지 검증
+- detached nested owner fallback을 유지한 상태에서 bidirectional UndoManager regression이 다시 통과함을 확인
 
 ## 완료된 작업: XML + subdocument V1
 
@@ -337,7 +345,7 @@ BUILD SUCCESSFUL
 ```
 
 - 일반 Kotlin tests: 521 passed
-- Kotlin Yjs V1/V2 interop tests: 68 passed
+- Kotlin Yjs V1/V2 interop tests: 69 passed
 - JavaScript/Yjs oracle tests: 74 passed
 - `git diff --check`: passed
 
@@ -366,8 +374,8 @@ git diff --check
    - GC range를 내부에서 unit `StoreItem`으로 펼치므로 큰 GC range의 메모리 최적화는 남아 있음
 4. transaction-event V1 update
    - `updateV2`는 genuine V2로 전환 완료
-   - root의 safe `update` event는 표준 V1로 전환 완료
-   - nested owner/child와 delete-set transaction은 GC/pending metadata 완성까지 legacy compatibility envelope 유지
+   - root insert/update/delete의 safe `update` event는 표준 V1로 전환 완료
+   - pre-populated detached nested owner/child transaction은 preliminary-content 이름 통합까지 legacy compatibility envelope 유지
 
 ## 다음 권장 작업 순서
 

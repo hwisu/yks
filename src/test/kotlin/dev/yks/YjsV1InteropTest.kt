@@ -659,6 +659,21 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun updateEventEmitsStandardUpstreamCompatibleV1DeleteSet() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val updates = mutableListOf<ByteArray>()
+        doc.observeUpdates { update, _ -> updates.add(update) }
+        val subs = doc.getMap("subs")
+
+        subs.set("child", YDoc(guid = "child", shouldLoad = false))
+        subs.delete("child")
+
+        assertEquals(3, updates.size)
+        updates.forEach(::assertStandardV1)
+        assertUpstreamAppliesSequence("subdoc-delete", *updates.toTypedArray())
+    }
+
+    @Test
     fun upstreamYjsAppliesNativeXmlTextFormattingAuthoredByKotlin() {
         val doc = YDoc(clientId = 1, gc = false)
         val fragment = doc.getXmlFragment("xml")

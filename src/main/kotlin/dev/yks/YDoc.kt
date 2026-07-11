@@ -1571,7 +1571,7 @@ class YDoc(
                 transaction.deleteSet,
                 store.parentItemIds(),
                 store.parentKinds(),
-                allowV1 = transaction.deleteSet.isEmpty && transaction.addedItems.all { item ->
+                allowV1 = transaction.addedItems.all { item ->
                     !item.parent.startsWith("__yks_nested__:") &&
                         !item.parent.startsWith("__yjs_nested__:") &&
                         item.content !is ItemContent.XmlType &&
