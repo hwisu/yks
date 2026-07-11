@@ -132,6 +132,10 @@ open class UpdateEncoderV2(
     private var keyClock = 0L
     private var hasOptimizedContent = false
 
+    internal fun forceV2Envelope() {
+        hasOptimizedContent = true
+    }
+
     override fun toByteArray(): ByteArray {
         if (!hasOptimizedContent) return restEncoder.toByteArray()
         return BinaryEncoder().also { encoder ->

@@ -446,7 +446,7 @@ class UpdateApiTest {
     }
 
     @Test
-    fun updateFormatConversionsAreStableForLocalUnifiedCodec() {
+    fun updateFormatConversionsRoundTripBetweenGenuineV1AndV2() {
         val source = YDoc(clientId = 1)
         source.getArray("items").push(listOf("x"))
         val update = source.encodeStateAsUpdate()
@@ -454,8 +454,9 @@ class UpdateApiTest {
         val asV2 = convertUpdateFormatV1ToV2(update)
         val backToV1 = convertUpdateFormatV2ToV1(asV2)
 
-        assertContentEquals(update, asV2)
+        assertFalse(update.contentEquals(asV2))
         assertContentEquals(update, backToV1)
+        assertEquals(source.toJson(), createDocFromUpdateV2(asV2).toJson())
 
         asV2[0] = (asV2[0].toInt() xor 1).toByte()
         assertFalse(update.contentEquals(asV2))

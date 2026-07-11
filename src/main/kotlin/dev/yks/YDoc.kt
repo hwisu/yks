@@ -579,6 +579,21 @@ class YDoc(
         return if (updates.size == 1) updates.single() else mergeUpdates(updates)
     }
 
+    internal fun encodeStateAsUpdateV2(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
+        if (pendingDeleteSetUpdate() != null || pendingStructsView() != null) {
+            return encodeStateAsUpdate(encodedStateVector)
+        }
+        val stateVector = decodeStateVector(encodedStateVector)
+        return UpdateCodec.encodeV2(
+            DocumentUpdate(
+                store.itemsSince(stateVector),
+                store.deleteSet(),
+                store.parentItemIds(),
+                store.parentKinds(),
+            ),
+        )
+    }
+
     fun applyUpdate(update: ByteArray, origin: Any? = null) {
         val decoded = UpdateCodec.decode(update)
         applyUpdate(decoded, origin)

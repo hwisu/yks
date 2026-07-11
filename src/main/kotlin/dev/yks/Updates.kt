@@ -62,7 +62,7 @@ fun encodeStateAsUpdate(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0))
     doc.encodeStateAsUpdate(encodedStateVector)
 
 fun encodeStateAsUpdateV2(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
-    encodeStateAsUpdate(doc, encodedStateVector)
+    doc.encodeStateAsUpdateV2(encodedStateVector)
 
 fun encodeStateVector(doc: YDoc): ByteArray = doc.encodeStateVector()
 
@@ -249,7 +249,7 @@ class LazyStructReader private constructor(
         this(decoder.restDecoder, filterSkips)
 
     constructor(decoder: UpdateDecoderV2, filterSkips: Boolean = false) :
-        this(decoder.restDecoder, filterSkips)
+        this(UpdateCodec.decodeV2(decoder), filterSkips)
 
     init {
         next()
@@ -343,10 +343,11 @@ fun decodeUpdateV2(update: ByteArray): DecodedUpdate {
     )
 }
 
-fun logUpdate(update: ByteArray): String = logUpdateV2(update)
+fun logUpdate(update: ByteArray): String = formatDecodedUpdate(decodeUpdate(update))
 
-fun logUpdateV2(update: ByteArray): String {
-    val decoded = decodeUpdate(update)
+fun logUpdateV2(update: ByteArray): String = formatDecodedUpdate(decodeUpdateV2(update))
+
+private fun formatDecodedUpdate(decoded: DecodedUpdate): String {
     val structs = decoded.structs.joinToString(
         prefix = "Structs[",
         postfix = "]",
@@ -374,9 +375,9 @@ fun convertUpdateFormat(
     return UpdateCodec.encode(DocumentUpdate(transformed, decoded.deleteSet.copy()))
 }
 
-fun convertUpdateFormatV1ToV2(update: ByteArray): ByteArray = convertUpdateFormat(update)
+fun convertUpdateFormatV1ToV2(update: ByteArray): ByteArray = UpdateCodec.encodeV2(UpdateCodec.decode(update))
 
-fun convertUpdateFormatV2ToV1(update: ByteArray): ByteArray = convertUpdateFormat(update)
+fun convertUpdateFormatV2ToV1(update: ByteArray): ByteArray = UpdateCodec.encode(UpdateCodec.decodeV2(update))
 
 data class ObfuscatorOptions(
     val formatting: Boolean = true,

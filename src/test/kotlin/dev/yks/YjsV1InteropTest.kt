@@ -565,6 +565,57 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun upstreamYjsAppliesGenuineV2UpdatesAuthoredByKotlin() {
+        val hello = YDoc(clientId = 1).also { it.getText("body").insert(0, "hello") }
+        val formatted = YDoc(clientId = 1, gc = false).also {
+            it.getText("body").insert(0, "ab", mapOf("bold" to true))
+        }
+        val array = YDoc(clientId = 1).also {
+            it.getArray("items").insert(0, listOf("a", 42, true, null, byteArrayOf(1, 2)))
+        }
+        val xml = YDoc(clientId = 1, gc = false).also { doc ->
+            val paragraph = doc.createXmlElement("p")
+            doc.getXmlFragment("xml").push(paragraph)
+            paragraph.setAttr("class", "intro")
+            val text = doc.createXmlText()
+            paragraph.push(text)
+            text.insert(0, "hi")
+            text.format(0, 2, mapOf("strong" to mapOf("level" to "1")))
+        }
+        val subdoc = YDoc(clientId = 1, gc = false).also {
+            it.getArray("subs").push(
+                YDoc(
+                    guid = "child-guid",
+                    gc = false,
+                    autoLoad = true,
+                    meta = mapOf("role" to "child"),
+                ),
+            )
+        }
+        val deleted = YDoc(clientId = 1, gc = false).also {
+            val text = it.getText("body")
+            text.insert(0, "hello")
+            text.delete(1, 3)
+        }
+        val concurrent = YDoc(clientId = 4, gc = false).also { doc ->
+            listOf("concurrent-format-base-v1", "concurrent-format-bold-v1", "concurrent-format-italic-v1")
+                .forEach { name -> applyUpdate(doc, fixture(name)) }
+        }
+
+        listOf(
+            Triple(hello, "hello", "hello"),
+            Triple(formatted, "formatted-text", "formatted"),
+            Triple(array, "array", "array"),
+            Triple(xml, "xml-formatted", "xml"),
+            Triple(subdoc, "subdoc-array", "subdoc"),
+            Triple(deleted, "text-delete", "delete"),
+            Triple(concurrent, "concurrent-format", "concurrent"),
+        ).forEach { (doc, scenario, label) ->
+            assertUpstreamAppliesUpdateV2(encodeStateAsUpdateV2(doc), scenario, label)
+        }
+    }
+
+    @Test
     fun upstreamYjsAppliesNativeXmlTextFormattingAuthoredByKotlin() {
         val doc = YDoc(clientId = 1, gc = false)
         val fragment = doc.getXmlFragment("xml")
@@ -959,6 +1010,26 @@ class YjsV1InteropTest {
             val exitCode = process.waitFor()
 
             assertTrue(exitCode == 0, "upstream Yjs rejected the Kotlin update:\n$output")
+        } finally {
+            Files.deleteIfExists(update)
+        }
+    }
+
+    private fun assertUpstreamAppliesUpdateV2(bytes: ByteArray, scenario: String, label: String) {
+        val update = Files.createTempFile("yks-$label-v2-", ".bin")
+        try {
+            Files.write(update, bytes)
+            val process = ProcessBuilder(
+                "node",
+                "interop/yjs-v1/verify-update-v2.mjs",
+                update.absolutePathString(),
+                scenario,
+            )
+                .directory(projectDirectory.toFile())
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().readText()
+            assertTrue(process.waitFor() == 0, "upstream Yjs rejected the Kotlin V2 update:\n$output")
         } finally {
             Files.deleteIfExists(update)
         }

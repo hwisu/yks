@@ -11,6 +11,38 @@ internal object UpdateCodec {
         .also { encoder -> write(encoder, update) }
         .toByteArray()
 
+    fun encodeV2(update: DocumentUpdate): ByteArray {
+        if (!update.allowV1 || !update.isSupportedV1Update()) return LegacyUpdateCodec.encode(update)
+        val encoder = UpdateEncoderV2()
+        encoder.forceV2Envelope()
+        val itemsByClient = update.items
+            .groupBy { item -> item.id.client }
+            .mapValues { (_, items) -> items.sortedBy { item -> item.id.clock } }
+            .filterValues { items -> items.isNotEmpty() }
+        val parentItems = update.parentItemIds + update.items.mapNotNull { item ->
+            item.content.directTypeRef()?.name?.let { name -> name to item.id }
+        }.toMap()
+
+        encoder.restEncoder.writeVarUInt(itemsByClient.size.toLong())
+        itemsByClient.toSortedMap(compareByDescending { it }).forEach { (client, items) ->
+            val structs = items.withClockSkips()
+            encoder.restEncoder.writeVarUInt(structs.size.toLong())
+            encoder.writeClient(client)
+            encoder.restEncoder.writeVarUInt(structs.first().clock)
+            structs.forEach { struct ->
+                when (struct) {
+                    is EncodedStruct.Skip -> {
+                        encoder.writeInfo(structSkipRefNumber)
+                        encoder.restEncoder.writeVarUInt(struct.length)
+                    }
+                    is EncodedStruct.Item -> writeItemV2(encoder, struct.item, parentItems)
+                }
+            }
+        }
+        writeDeleteSetV2(encoder, update.deleteSet)
+        return encoder.toByteArray()
+    }
+
     fun write(encoder: BinaryEncoder, update: DocumentUpdate): BinaryEncoder {
         if (!update.allowV1 || !update.isSupportedV1Update()) {
             return LegacyUpdateCodec.write(encoder, update)
@@ -201,6 +233,28 @@ internal object UpdateCodec {
         writeContent(encoder, item.content)
     }
 
+    private fun writeItemV2(
+        encoder: UpdateEncoderV2,
+        item: StoreItem,
+        parentItems: Map<String, Id>,
+    ) {
+        val ref = item.content.yjsContentRef()
+        val info = ref or
+            (if (item.origin != null) INFO_HAS_ORIGIN else 0) or
+            (if (item.rightOrigin != null) INFO_HAS_RIGHT_ORIGIN else 0) or
+            (if (item.parentSub != null) INFO_HAS_PARENT_SUB else 0)
+        encoder.writeInfo(info)
+        item.origin?.let(encoder::writeLeftID)
+        item.rightOrigin?.let(encoder::writeRightID)
+        if (item.origin == null && item.rightOrigin == null) {
+            val parentItem = parentItems[item.parent]
+            encoder.writeParentInfo(parentItem == null)
+            if (parentItem == null) encoder.writeString(item.parent) else encoder.writeLeftID(parentItem)
+            item.parentSub?.let(encoder::writeString)
+        }
+        writeContentV2(encoder, item.content)
+    }
+
     private fun writeContent(encoder: BinaryEncoder, content: ItemContent) {
         when (content) {
             is ItemContent.Text -> encoder.writeString(content.value)
@@ -222,6 +276,53 @@ internal object UpdateCodec {
             is ItemContent.XmlType -> writeTypeContent(encoder, content.ref.kind, content.nodeName)
             is ItemContent.Deleted -> encoder.writeVarUInt(1)
         }
+    }
+
+    private fun writeContentV2(encoder: UpdateEncoderV2, content: ItemContent) {
+        when (content) {
+            is ItemContent.Text -> encoder.writeString(content.value)
+            is ItemContent.TextEmbed -> encoder.writeJSON(content.value.toAny())
+            is ItemContent.TextFormat -> {
+                encoder.writeKey("__yks_text_format")
+                encoder.writeJSON(content.toWireValue())
+            }
+            is ItemContent.NativeTextFormat -> {
+                encoder.writeKey(content.key)
+                encoder.writeJSON(content.value.toAny())
+            }
+            is ItemContent.Value -> writeValueContentV2(encoder, content.value)
+            is ItemContent.MapEntry -> writeValueContentV2(encoder, content.value)
+            is ItemContent.XmlNode -> {
+                encoder.writeLen(1)
+                encoder.writeAny(content.value.toEventJson())
+            }
+            is ItemContent.XmlType -> writeTypeContentV2(encoder, content.ref.kind, content.nodeName)
+            is ItemContent.Deleted -> encoder.writeLen(1)
+        }
+    }
+
+    private fun writeValueContentV2(encoder: UpdateEncoderV2, value: YValue) {
+        when (value) {
+            is YValue.BinaryValue -> encoder.writeBuf(value.bytes())
+            is YValue.TypeRef -> writeTypeContentV2(encoder, value.kind, value.name)
+            is YValue.SubdocRef -> {
+                encoder.writeString(value.guid)
+                val options = linkedMapOf<String, Any?>()
+                if (!value.gc) options["gc"] = false
+                if (value.autoLoad) options["autoLoad"] = true
+                if (value.meta != YValue.Null) options["meta"] = value.meta.toAny()
+                encoder.writeAny(options)
+            }
+            else -> {
+                encoder.writeLen(1)
+                encoder.writeAny(value.toAny())
+            }
+        }
+    }
+
+    private fun writeTypeContentV2(encoder: UpdateEncoderV2, kind: RootKind, nodeName: String = "") {
+        encoder.writeTypeRef(kind.typeRefId())
+        if (kind == RootKind.XmlElement || kind == RootKind.XmlHook) encoder.writeString(nodeName)
     }
 
     private fun writeValueContent(encoder: BinaryEncoder, value: YValue) {
@@ -333,6 +434,20 @@ internal object UpdateCodec {
             }
         }
         return deleteSet
+    }
+
+    private fun writeDeleteSetV2(encoder: UpdateEncoderV2, deleteSet: DeleteSet) {
+        val clients = deleteSet.clients.filterValues { ranges -> ranges.isNotEmpty() }
+        encoder.restEncoder.writeVarUInt(clients.size.toLong())
+        clients.toSortedMap(compareByDescending { it }).forEach { (client, ranges) ->
+            encoder.resetIdSetCurVal()
+            encoder.restEncoder.writeVarUInt(client)
+            encoder.restEncoder.writeVarUInt(ranges.size.toLong())
+            ranges.sortedBy { range -> range.clock }.forEach { range ->
+                encoder.writeIdSetClock(range.clock)
+                encoder.writeIdSetLen(range.length)
+            }
+        }
     }
 }
 
