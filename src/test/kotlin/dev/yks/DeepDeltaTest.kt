@@ -425,7 +425,7 @@ class DeepDeltaTest {
 
         assertTrue(targetText is YXmlTextType)
         assertEquals("<p class=\"intro\">hello</p>", sourceXml.toString())
-        assertEquals("<p class=\"intro\">hello!</p>", targetXml.toString())
+        assertEquals("<p class=\"intro\"><bold>hello</bold>!</p>", targetXml.toString())
         assertEquals(
             YTextDelta().insert("hello", mapOf("bold" to true)).insert("!"),
             targetText.toDelta(),
@@ -456,7 +456,7 @@ class DeepDeltaTest {
 
         val text = element.getType(0) as YText
 
-        assertEquals("<p class=\"intro\">hello<br /></p>", element.toString())
+        assertEquals("<p class=\"intro\"><bold>hello</bold><br></br></p>", element.toString())
         assertEquals(YTextDelta().insert("hello", mapOf("bold" to true)), text.toDelta())
         assertTrue(element.getType(1) is YXmlElementType)
         assertFalse(element.hasAttr("stale"))

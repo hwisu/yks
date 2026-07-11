@@ -865,7 +865,7 @@ class UndoManagerTest {
 
         assertTrue(undoManager.canUndo)
         undoManager.undo()
-        assertEquals("<p />", fragment.toString())
+        assertEquals("<p></p>", fragment.toString())
         assertFalse(element.hasAttr("class"))
     }
 
@@ -893,7 +893,7 @@ class UndoManagerTest {
         undoManager.undo()
 
         val restoredElement = fragment.getType(0) as YXmlElementType
-        assertEquals("<test a=\"1\" b=\"2\" />", fragment.toString())
+        assertEquals("<test a=\"1\" b=\"2\"></test>", fragment.toString())
         assertEquals("2", restoredElement.getAttr("b"))
 
         undoManager.redo()

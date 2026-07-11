@@ -27,7 +27,7 @@ class YXmlText(
 
     fun toDeltaDeep(): String = text
 
-    override fun toString(): String = escapeText(text)
+    override fun toString(): String = renderXmlText(text, attributes)
 }
 
 class YXmlElementType internal constructor(
@@ -333,7 +333,7 @@ class YXmlElementType internal constructor(
     fun toString(forceTag: Boolean): String {
         val attrs = xmlAttrsToString(getAttrs())
         val body = toNodeList().joinToString(separator = "") { it.toString() }
-        if (body.isEmpty()) return "<$nodeName$attrs />"
+        if (body.isEmpty()) return "<$nodeName$attrs></$nodeName>"
         return "<$nodeName$attrs>$body</$nodeName>"
     }
 
@@ -390,6 +390,14 @@ class YXmlTextType internal constructor(
             cloned.applyDelta(toDelta().cloneInto(targetDoc))
             cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
         }
+
+    override fun toString(): String = toDelta().ops.joinToString(separator = "") { op ->
+        when (val insert = op.insert) {
+            is String -> renderXmlText(insert, op.attributes)
+            null -> ""
+            else -> "\uFFFC"
+        }
+    }
 }
 
 class YXmlElement(val nodeName: String) : YXmlNode(), Iterable<YXmlNode> {
@@ -615,7 +623,7 @@ class YXmlElement(val nodeName: String) : YXmlNode(), Iterable<YXmlNode> {
         val attrs = xmlAttrsToString(getAttrs())
         val body = children.joinToString(separator = "") { it.toString() }
         if (body.isEmpty()) {
-            return "<$nodeName$attrs />"
+            return "<$nodeName$attrs></$nodeName>"
         }
         return "<$nodeName$attrs>$body</$nodeName>"
     }
@@ -1185,7 +1193,21 @@ internal fun xmlAttrValueToString(value: Any?): String = when (value) {
     else -> toJsonLiteral(value)
 }
 
-private fun escapeText(value: String): String = value
-    .replace("&", "&amp;")
-    .replace("<", "&lt;")
-    .replace(">", "&gt;")
+private fun renderXmlText(text: String, attributes: Map<String, Any?>): String {
+    val formats = attributes.toSortedMap().filterValues { it != null }
+    if (formats.isEmpty()) return text
+    val opening = formats.entries.joinToString(separator = "") { (name, value) ->
+        "<$name${xmlFormatAttrsToString(value)}>"
+    }
+    val closing = formats.keys.toList().asReversed().joinToString(separator = "") { name -> "</$name>" }
+    return opening + text + closing
+}
+
+private fun xmlFormatAttrsToString(value: Any?): String = when (value) {
+    is Map<*, *> -> value.entries
+        .filter { (key, _) -> key is String }
+        .sortedBy { (key, _) -> key as String }
+        .joinToString(separator = "") { (key, attrValue) -> " $key=\"$attrValue\"" }
+    is String -> value.mapIndexed { index, char -> " $index=\"$char\"" }.joinToString(separator = "")
+    else -> ""
+}

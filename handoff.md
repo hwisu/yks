@@ -7,14 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 14개 커밋 앞서 있음
+- 현재 `origin/main`보다 15개 커밋 앞서 있음
 - 아직 push하지 않음
-- 네이티브 XML/subdocument V1 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
+- XML 문자열 surface parity 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
-HEAD feat: complete Yjs update V2 operations
+HEAD feat: match upstream Yjs XML rendering
+ffd46dd feat: complete Yjs update V2 operations
 1d3d219 feat: write genuine Yjs update V2
 4c826bf feat: decode genuine Yjs update V2
 d454f42 feat: add lib0 update V2 stream codecs
@@ -209,6 +210,16 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - `updateV2` listener와 event channel이 genuine V2 transaction payload 방출
 - upstream `Y.applyUpdateV2`로 merged full update, baseline+diff sequence, updateV2 event 검증
 
+### 12. XML 문자열 surface parity
+
+- `YXmlText`와 live `YXmlTextType.toString()`이 text delta의 format attribute를 upstream처럼 tag로 렌더링
+- format key는 안정적인 순서로 중첩하고 map-valued format은 tag attribute로 출력
+- static, live, remote sync, deep delta, snapshot 문자열 경로에서 같은 결과를 검증
+- 빈 `YXmlElement`와 `YXmlElementType`을 upstream처럼 `<p></p>`로 렌더링
+- upstream `Y.XmlText`와 동일하게 XML text content를 escape하지 않음
+- Kotlin V1 fixture decode 결과가 `<p class="intro"><strong level="1">hi</strong></p>`인지 직접 검증
+- Kotlin의 별도 extension인 forced empty fragment 표기는 기존 `<xml />` 계약 유지
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -290,7 +301,7 @@ subdoc-duplicate-guid-v1.bin
 BUILD SUCCESSFUL
 ```
 
-- 일반 Kotlin tests: 512 passed
+- 일반 Kotlin tests: 513 passed
 - Kotlin Yjs V1/V2 interop tests: 65 passed
 - JavaScript/Yjs oracle tests: 74 passed
 - `git diff --check`: passed
@@ -311,9 +322,7 @@ git diff --check
 
 우선순위가 높은 잔여 작업:
 
-1. XML surface parity
-   - upstream `Y.XmlText.toString()`은 format을 tag로 렌더링하지만 Kotlin은 plain text로 렌더링함
-   - empty element 문자열 표현도 upstream과 다름
+1. XML root surface parity
    - root `XmlElement` node name은 wire에 없으므로 schema/pre-materialization이 필요함
 2. subdocument 확장
    - deletion event cancellation/ordering

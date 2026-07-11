@@ -130,13 +130,13 @@ class PublicApiParityTest {
 
         assertEquals("p", paragraph.nodeName)
         assertSame(paragraph, source.get("paragraph", RootKind.XmlElement))
-        assertEquals("<p id=\"intro\">hello<br /></p>", paragraph.toString())
+        assertEquals("<p id=\"intro\">hello<br></br></p>", paragraph.toString())
         assertTrue(source.share["paragraph"] is YXmlElementType)
 
         val target = createDocFromUpdate(source.encodeStateAsUpdate())
         val synced = target.getXmlElement("paragraph", "p")
 
-        assertEquals("<p id=\"intro\">hello<br /></p>", synced.toString())
+        assertEquals("<p id=\"intro\">hello<br></br></p>", synced.toString())
         assertEquals(
             mapOf(
                 "nodeName" to "p",

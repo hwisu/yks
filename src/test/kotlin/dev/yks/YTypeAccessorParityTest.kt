@@ -176,9 +176,9 @@ class YTypeAccessorParityTest {
         typeListInsertGenerics(xml, 1, listOf(YXmlElement("b")))
 
         assertEquals(3, typeListLength(xml))
-        assertEquals("<b />", typeListGet(xml, 1).toString())
+        assertEquals("<b></b>", typeListGet(xml, 1).toString())
         assertNull(typeListGet(xml, 3))
-        assertEquals("<b />tail", typeListSlice(xml, 1, xml.length).joinToString(separator = ""))
+        assertEquals("<b></b>tail", typeListSlice(xml, 1, xml.length).joinToString(separator = ""))
         assertEquals(emptyList(), typeListSlice(xml, xml.length, 1))
     }
 
@@ -224,7 +224,7 @@ class YTypeAccessorParityTest {
         assertEquals(emptyList(), array.toArray())
         assertEquals("", text.toString())
         assertEquals("", xml.toString())
-        assertEquals("<p />", element.toString())
+        assertEquals("<p></p>", element.toString())
 
         assertFailsWith<IllegalArgumentException> { typeListInsertGenerics(array, 1, emptyList()) }
         assertFailsWith<IllegalArgumentException> { typeListInsertGenerics(text, 1, emptyList()) }

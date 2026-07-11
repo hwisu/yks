@@ -119,7 +119,7 @@ class NestedTypeTest {
         assertEquals(emptyMap(), map.toMap())
         assertEquals(emptyList(), array.toArray())
         assertEquals("", text.toString())
-        assertEquals("<p />", xml.toString())
+        assertEquals("<p></p>", xml.toString())
     }
 
     @Test

@@ -18,7 +18,7 @@ class YXmlTest {
         fragment.push(listOf(paragraph, YXmlText("tail")))
 
         assertEquals(2, fragment.length)
-        assertEquals("<p class=\"intro\">Hello &lt;world&gt; &amp; friends</p>tail", fragment.toString())
+        assertEquals("<p class=\"intro\">Hello <world> & friends</p>tail", fragment.toString())
         assertEquals(
             listOf(
                 mapOf(
@@ -42,20 +42,31 @@ class YXmlTest {
     }
 
     @Test
+    fun xmlTextStringRenderingMatchesUpstreamFormattingTags() {
+        val text = YXmlText(
+            "abc",
+            mapOf("strong" to mapOf("level" to "1"), "em" to true),
+        )
+
+        assertEquals("<em><strong level=\"1\">abc</strong></em>", text.toString())
+        assertEquals("<p></p>", YXmlElement("p").toString())
+    }
+
+    @Test
     fun xmlStringRenderingSupportsForceTagAndFragmentAttributes() {
         val doc = YDoc(clientId = 1)
         val fragment = doc.getXmlFragment("xml")
         val paragraph = YXmlElement("p")
         fragment.push(paragraph)
 
-        assertEquals("<p />", paragraph.toString(forceTag = true))
-        assertEquals("<p />", fragment.toString())
-        assertEquals("<xml><p /></xml>", fragment.toString(forceTag = true))
+        assertEquals("<p></p>", paragraph.toString(forceTag = true))
+        assertEquals("<p></p>", fragment.toString())
+        assertEquals("<xml><p></p></xml>", fragment.toString(forceTag = true))
 
         fragment.setAttrs(mapOf("title" to "A&B\"", "lang" to "en", "count" to 2, "enabled" to true))
 
-        assertEquals("<xml count=2 enabled=true lang=\"en\" title=\"A&B\\\"\"><p /></xml>", fragment.toString())
-        assertEquals("<xml count=2 enabled=true lang=\"en\" title=\"A&B\\\"\"><p /></xml>", fragment.toString(forceTag = true))
+        assertEquals("<xml count=2 enabled=true lang=\"en\" title=\"A&B\\\"\"><p></p></xml>", fragment.toString())
+        assertEquals("<xml count=2 enabled=true lang=\"en\" title=\"A&B\\\"\"><p></p></xml>", fragment.toString(forceTag = true))
     }
 
     @Test
@@ -130,9 +141,9 @@ class YXmlTest {
         val sliced = element.slice(1)
         (sliced[0] as YXmlElement).setAttr("changed", true)
 
-        assertEquals("<b changed=true /><c />", sliced.joinToString(separator = ""))
-        assertEquals("<div><a /><b /><c /></div>", element.toString())
-        assertEquals("<a /><b />", element.slice(0, -1).joinToString(separator = ""))
+        assertEquals("<b changed=true></b><c></c>", sliced.joinToString(separator = ""))
+        assertEquals("<div><a></a><b></b><c></c></div>", element.toString())
+        assertEquals("<a></a><b></b>", element.slice(0, -1).joinToString(separator = ""))
     }
 
     @Test
@@ -142,10 +153,10 @@ class YXmlTest {
         element.push(YXmlElement("b"), YXmlElement("c"))
         element.unshift(listOf(YXmlElement("a")))
 
-        assertEquals("<div><a /><b /><c /></div>", element.toString())
+        assertEquals("<div><a></a><b></b><c></c></div>", element.toString())
 
         element.clear()
-        assertEquals("<div />", element.toString())
+        assertEquals("<div></div>", element.toString())
     }
 
     @Test
@@ -164,7 +175,7 @@ class YXmlTest {
         left.getXmlFragment("xml").push(listOf(YXmlElement("br")))
         right.applyUpdate(left.encodeStateAsUpdate(right.encodeStateVector()))
 
-        assertEquals("<p id=\"one\">hello</p><br />", right.getXmlFragment("xml").toString())
+        assertEquals("<p id=\"one\">hello</p><br></br>", right.getXmlFragment("xml").toString())
         assertEquals(left.toJson(), right.toJson())
     }
 
@@ -176,13 +187,13 @@ class YXmlTest {
         val undoManager = UndoManager(fragment, UndoManagerOptions(captureTimeoutMillis = 0))
 
         fragment.delete(1)
-        assertEquals("<a /><c />", fragment.toString())
+        assertEquals("<a></a><c></c>", fragment.toString())
 
         undoManager.undo()
-        assertEquals("<a /><b /><c />", fragment.toString())
+        assertEquals("<a></a><b></b><c></c>", fragment.toString())
 
         undoManager.redo()
-        assertEquals("<a /><c />", fragment.toString())
+        assertEquals("<a></a><c></c>", fragment.toString())
     }
 
     @Test
@@ -195,8 +206,8 @@ class YXmlTest {
         fragment.deleteAttribute("lang")
 
         assertFalse(fragment.hasAttr("lang"))
-        assertEquals("<b /><c />", fragment.slice(1).joinToString(separator = ""))
-        assertEquals("<a /><b />", fragment.slice(0, -1).joinToString(separator = ""))
+        assertEquals("<b></b><c></c>", fragment.slice(1).joinToString(separator = ""))
+        assertEquals("<a></a><b></b>", fragment.slice(0, -1).joinToString(separator = ""))
         fragment.setAttrs(mapOf("kind" to "doc", "version" to 1))
         assertEquals(
             listOf("kind:doc", "version:1"),
@@ -221,8 +232,8 @@ class YXmlTest {
             ),
         )
 
-        assertEquals("<a /><B />c<d />", fragment.toString())
-        assertEquals("<a /><B />c<d />", fragment.toDelta().single().insert!!.joinToString(separator = ""))
+        assertEquals("<a></a><B></B>c<d></d>", fragment.toString())
+        assertEquals("<a></a><B></B>c<d></d>", fragment.toDelta().single().insert!!.joinToString(separator = ""))
     }
 
     @Test
@@ -243,7 +254,7 @@ class YXmlTest {
         fragment.applyDelta(delta)
         val remote = createDocFromUpdate(doc.encodeStateAsUpdate())
 
-        assertEquals("ABC", fragment.toString())
+        assertEquals("<em><strong>A</strong></em><em>B</em><em><strong>C</strong></em>", fragment.toString())
         assertEquals(delta, fragment.toDelta())
         assertEquals(delta, remote.getXmlFragment("xml").toDelta())
     }
@@ -267,7 +278,7 @@ class YXmlTest {
             YArrayDeltaOp(delete = 1),
         ))
 
-        assertEquals("<a /><b /><x />", fragment.toString())
+        assertEquals("<a></a><b></b><x></x>", fragment.toString())
     }
 
     @Test
@@ -288,7 +299,7 @@ class YXmlTest {
             renderer = baseRenderer,
         )
 
-        assertEquals("<a /><x /><b />", fragment.toString())
+        assertEquals("<a></a><x></x><b></b>", fragment.toString())
     }
 
     @Test
@@ -301,7 +312,7 @@ class YXmlTest {
         fragment.unshift(listOf(YXmlElement("a")))
         right.applyUpdate(left.encodeStateAsUpdate())
 
-        assertEquals("<a /><b /><c />", fragment.toString())
+        assertEquals("<a></a><b></b><c></c>", fragment.toString())
         assertEquals(fragment.toString(), right.getXmlFragment("xml").toString())
     }
 
@@ -332,13 +343,13 @@ class YXmlTest {
         fragment.applyDelta(listOf(YArrayDeltaOp(retain = 1), YArrayDeltaOp(insert = listOf("tail"))))
         right.applyUpdate(left.encodeStateAsUpdate())
 
-        assertEquals("<a />tail<b />", right.getXmlFragment("xml").toString())
+        assertEquals("<a></a>tail<b></b>", right.getXmlFragment("xml").toString())
 
         undoManager.undo()
-        assertEquals("<a /><b />", fragment.toString())
+        assertEquals("<a></a><b></b>", fragment.toString())
 
         undoManager.redo()
-        assertEquals("<a />tail<b />", fragment.toString())
+        assertEquals("<a></a>tail<b></b>", fragment.toString())
     }
 
     @Test
@@ -353,9 +364,9 @@ class YXmlTest {
         val mapped = element.map { it.toJson() }
         (element.toArray()[1] as YXmlElement).setAttr("changed", true)
 
-        assertEquals(listOf("0:hello", "1:<br />", "2:world"), seen)
+        assertEquals(listOf("0:hello", "1:<br></br>", "2:world"), seen)
         assertEquals(listOf("hello", mapOf("nodeName" to "br", "attributes" to emptyMap<String, Any?>(), "children" to emptyList<Any?>()), "world"), mapped)
-        assertEquals("<section>hello<br />world</section>", element.toString())
+        assertEquals("<section>hello<br></br>world</section>", element.toString())
     }
 
     @Test
@@ -373,12 +384,12 @@ class YXmlTest {
         fragment.setAttrs(mapOf("lang" to "en"))
         fragment.push(element, YXmlText("tail"))
 
-        assertEquals(listOf("<section role=\"main\">hello<br /></section>@0", "tail@1"), fragment.map { node, index -> "$node@$index" })
-        assertEquals(listOf("hello@0", "<br />@1"), element.map { node, index -> "$node@$index" })
-        assertEquals(listOf("<section role=\"main\">hello<br /></section>@0:true", "tail@1:true"), fragment.map { node, index, type ->
+        assertEquals(listOf("<section role=\"main\">hello<br></br></section>@0", "tail@1"), fragment.map { node, index -> "$node@$index" })
+        assertEquals(listOf("hello@0", "<br></br>@1"), element.map { node, index -> "$node@$index" })
+        assertEquals(listOf("<section role=\"main\">hello<br></br></section>@0:true", "tail@1:true"), fragment.map { node, index, type ->
             "$node@$index:${type === fragment}"
         })
-        assertEquals(listOf("hello@0:true", "<br />@1:true"), element.map { node, index, type ->
+        assertEquals(listOf("hello@0:true", "<br></br>@1:true"), element.map { node, index, type ->
             "$node@$index:${type === element}"
         })
 
@@ -395,10 +406,10 @@ class YXmlTest {
             attrSeen.add("element:$key=$value")
         }
 
-        assertEquals(listOf("<section role=\"main\">hello<br /></section>@0", "tail@1"), fragmentSeen)
-        assertEquals(listOf("hello@0", "<br />@1"), elementSeen)
-        assertEquals(listOf("<section role=\"main\">hello<br /></section>@0:true", "tail@1:true"), fragmentSeenWithType)
-        assertEquals(listOf("hello@0:true", "<br />@1:true"), elementSeenWithType)
+        assertEquals(listOf("<section role=\"main\">hello<br></br></section>@0", "tail@1"), fragmentSeen)
+        assertEquals(listOf("hello@0", "<br></br>@1"), elementSeen)
+        assertEquals(listOf("<section role=\"main\">hello<br></br></section>@0:true", "tail@1:true"), fragmentSeenWithType)
+        assertEquals(listOf("hello@0:true", "<br></br>@1:true"), elementSeenWithType)
         assertEquals(listOf("fragment:lang=en", "element:role=main"), attrSeen)
         assertEquals(listOf("fragment:lang=en"), fragment.mapAttrs { value, key, type -> "fragment:$key=$value:${type === fragment}" }.map { it.removeSuffix(":true") })
         assertEquals(listOf("element:role=main"), element.mapAttrs { value, key, type -> "element:$key=$value:${type === element}" }.map { it.removeSuffix(":true") })
@@ -432,7 +443,7 @@ class YXmlTest {
         val remoteSecond = remoteFragment.getType(1) as YXmlElementType
 
         assertTrue(fragment.getType(0) === first)
-        assertEquals("<p id=\"one\" /><p id=\"two\" />", remoteFragment.toString())
+        assertEquals("<p id=\"one\"></p><p id=\"two\"></p>", remoteFragment.toString())
         assertEquals("p", remoteFirst.nodeName)
         assertEquals("p", remoteSecond.nodeName)
         assertFalse(remoteFirst.name == remoteSecond.name)
@@ -440,7 +451,7 @@ class YXmlTest {
         remoteSecond.setAttr("id", "remote-two")
         left.applyUpdate(right.encodeStateAsUpdate(left.encodeStateVector()))
 
-        assertEquals("<p id=\"one\" /><p id=\"remote-two\" />", fragment.toString())
+        assertEquals("<p id=\"one\"></p><p id=\"remote-two\"></p>", fragment.toString())
     }
 
     @Test
@@ -457,17 +468,17 @@ class YXmlTest {
         fragment.push(paragraph)
 
         assertTrue(paragraph.getType(0) === text)
-        assertEquals("<p>hello<span class=\"mark\" /></p>", fragment.toString())
+        assertEquals("<p>hello<span class=\"mark\"></span></p>", fragment.toString())
 
         right.applyUpdate(left.encodeStateAsUpdate())
         val remoteParagraph = right.getXmlFragment("xml").getType(0) as YXmlElementType
         val remoteText = remoteParagraph.getType(0) as YText
 
-        assertEquals("<p>hello<span class=\"mark\" /></p>", right.getXmlFragment("xml").toString())
+        assertEquals("<p>hello<span class=\"mark\"></span></p>", right.getXmlFragment("xml").toString())
         remoteText.insert(remoteText.length, "!")
         left.applyUpdate(right.encodeStateAsUpdate(left.encodeStateVector()))
 
-        assertEquals("<p>hello!<span class=\"mark\" /></p>", fragment.toString())
+        assertEquals("<p>hello!<span class=\"mark\"></span></p>", fragment.toString())
     }
 
     @Test
@@ -483,14 +494,14 @@ class YXmlTest {
         val remoteText = right.getXmlFragment("xml").getType(0) as YXmlTextType
 
         assertTrue(fragment.getType(0) === text)
-        assertEquals("hello", fragment.toString())
-        assertEquals("hello", right.getXmlFragment("xml").toString())
+        assertEquals("<bold>hello</bold>", fragment.toString())
+        assertEquals("<bold>hello</bold>", right.getXmlFragment("xml").toString())
         assertEquals(YTextDelta().insert("hello", mapOf("bold" to true)), remoteText.toDelta())
 
         remoteText.insert(remoteText.length, "!")
         left.applyUpdate(right.encodeStateAsUpdate(left.encodeStateVector()))
 
-        assertEquals("hello!", fragment.toString())
+        assertEquals("<bold>hello</bold>!", fragment.toString())
         assertEquals(YTextDelta().insert("hello", mapOf("bold" to true)).insert("!"), text.toDelta())
     }
 

@@ -744,6 +744,7 @@ class YjsV1InteropTest {
             YTextDelta().insert("hi", mapOf("strong" to mapOf("level" to "1"))),
             text.toDelta(),
         )
+        assertEquals("<p class=\"intro\"><strong level=\"1\">hi</strong></p>", doc.getXmlFragment("xml").toString())
         val update = encodeStateAsUpdate(doc)
         assertStandardV1(update)
         assertUpstreamAppliesUpdate(update, "xml-formatted")

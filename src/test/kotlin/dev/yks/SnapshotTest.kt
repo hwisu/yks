@@ -357,7 +357,7 @@ class SnapshotTest {
         val updated = snapshot(doc)
 
         assertEquals("<p class=\"initial\">old</p>", typeXmlFragmentToStringSnapshot(xml, initial))
-        assertEquals("<p class=\"updated\">new<br /></p>", typeXmlFragmentToStringSnapshot(xml, updated))
+        assertEquals("<p class=\"updated\">new<br></br></p>", typeXmlFragmentToStringSnapshot(xml, updated))
         assertEquals(
             listOf(mapOf(
                 "nodeName" to "p",
@@ -366,7 +366,7 @@ class SnapshotTest {
             )),
             typeXmlFragmentToJsonSnapshot(xml, initial),
         )
-        assertEquals("<p class=\"updated\">new<br /></p>", xml.toString())
+        assertEquals("<p class=\"updated\">new<br></br></p>", xml.toString())
     }
 
     @Test
@@ -416,7 +416,10 @@ class SnapshotTest {
 
         assertEquals(initialDelta, typeXmlFragmentToDeltaSnapshot(xml, initial))
         assertEquals(listOf("A", "B", "C"), typeXmlFragmentToJsonSnapshot(xml, initial))
-        assertEquals("ABC", typeXmlFragmentToStringSnapshot(xml, initial))
+        assertEquals(
+            "<em><strong>A</strong></em><em>B</em><em><strong>C</strong></em>",
+            typeXmlFragmentToStringSnapshot(xml, initial),
+        )
         assertEquals(listOf(YArrayDeltaOp(insert = listOf("Z"))), xml.toDelta())
     }
 
