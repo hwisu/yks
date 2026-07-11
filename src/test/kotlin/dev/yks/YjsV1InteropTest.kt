@@ -28,6 +28,81 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun appliesHelloUpdateV2ProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 2)
+
+        applyUpdateV2(doc, fixture("hello-text-v2"))
+
+        assertEquals("hello", doc.getText("body").toString())
+        assertEquals(mapOf(1L to 5L), decodeStateVector(encodeStateVector(doc)))
+    }
+
+    @Test
+    fun appliesPackedArrayUpdateV2ProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 2)
+
+        applyUpdateV2(doc, fixture("array-v2"))
+
+        val values = doc.getArray("items").toList()
+        assertEquals(listOf("a", 42L, true, null), values.take(4))
+        assertTrue((values[4] as ByteArray).contentEquals(byteArrayOf(1, 2)))
+    }
+
+    @Test
+    fun appliesFormattedTextUpdateV2ProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 2, gc = false)
+        applyUpdateV2(doc, fixture("formatted-text-v2"))
+
+        assertEquals(YTextDelta().insert("ab", mapOf("bold" to true)), doc.getText("body").toDelta())
+    }
+
+    @Test
+    fun appliesDeleteSetUpdateV2ProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 2, gc = false)
+        applyUpdateV2(doc, fixture("text-delete-v2"))
+
+        assertEquals("ho", doc.getText("body").toString())
+        assertTrue(!doc.deleteSet().isEmpty)
+    }
+
+    @Test
+    fun appliesFormattedXmlUpdateV2ProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 2, gc = false)
+        applyUpdateV2(doc, fixture("xml-formatted-v2"))
+
+        val paragraph = doc.getXmlFragment("xml").getType(0) as YXmlElementType
+        assertEquals(
+            YTextDelta().insert("hi", mapOf("strong" to mapOf("level" to "1"))),
+            (paragraph.getType(0) as YXmlTextType).toDelta(),
+        )
+    }
+
+    @Test
+    fun appliesSubdocumentUpdateV2ProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 2, gc = false)
+        applyUpdateV2(doc, fixture("subdoc-array-v2"))
+
+        val child = doc.getArray("subs").get(0) as YDoc
+        assertEquals("child-guid", child.guid)
+        assertEquals(mapOf("role" to "child"), child.meta)
+    }
+
+    @Test
+    fun appliesMultiClientUpdateV2ProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 4, gc = false)
+        applyUpdateV2(doc, fixture("concurrent-format-v2"))
+
+        assertEquals(
+            YTextDelta()
+                .insert("a", mapOf("bold" to true))
+                .insert("b", mapOf("bold" to true, "italic" to true))
+                .insert("c", mapOf("italic" to true))
+                .insert("d"),
+            doc.getText("body").toDelta(),
+        )
+    }
+
+    @Test
     fun appliesPackedArrayAndBinaryProducedByUpstreamYjs() {
         val doc = YDoc(clientId = 2)
 

@@ -23,7 +23,12 @@ const expected = {
 
 fs.mkdirSync(fixtureDirectory, { recursive: true })
 fs.writeFileSync(helloFixturePath, update)
+writeFileV2Placeholder()
 fs.writeFileSync(helloExpectedPath, `${JSON.stringify(expected, null, 2)}\n`)
+
+function writeFileV2Placeholder () {
+  fs.writeFileSync(`${fixtureDirectory}/hello-text-v2.bin`, Y.encodeStateAsUpdateV2(doc))
+}
 
 const writeFixture = (name, value) => {
   fs.writeFileSync(`${fixtureDirectory}/${name}.bin`, value)
@@ -107,6 +112,7 @@ writeFixture(
   'array-v1',
   Y.encodeStateAsUpdate(createScenarioDocument('array')),
 )
+writeFixture('array-v2', Y.encodeStateAsUpdateV2(createScenarioDocument('array')))
 
 const array = new Y.Doc({ gc: false })
 array.clientID = 1
@@ -302,3 +308,13 @@ duplicateSubdocs.getArray('subs').insert(0, [
   new Y.Doc({ guid: 'same-guid' }),
 ])
 writeFixture('subdoc-duplicate-guid-v1', Y.encodeStateAsUpdate(duplicateSubdocs))
+
+for (const scenario of [
+  'formatted-text',
+  'text-delete',
+  'xml-formatted',
+  'subdoc-array',
+  'concurrent-format',
+]) {
+  writeFixture(`${scenario}-v2`, Y.encodeStateAsUpdateV2(createScenarioDocument(scenario)))
+}

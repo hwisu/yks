@@ -7,14 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 11개 커밋 앞서 있음
+- 현재 `origin/main`보다 12개 커밋 앞서 있음
 - 아직 push하지 않음
 - 네이티브 XML/subdocument V1 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
-HEAD feat: add lib0 update V2 stream codecs
+HEAD feat: decode genuine Yjs update V2
+d454f42 feat: add lib0 update V2 stream codecs
 fbc214f test: add multi-client Yjs convergence oracle
 a46acf5 feat: author native Yjs attributed inserts
 2a03ad7 feat: author native Yjs text formatting
@@ -166,6 +167,20 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - upstream `Y.UpdateEncoderV2` primitive fixture와 전체 byte sequence 일치
 - 아직 document update API는 V1 compatibility path를 유지하며 다음 단계에서 V2 struct codec에 연결할 예정
 
+### 9. genuine update V2 decoder
+
+- V2 client struct header/count/clock을 rest stream과 optimized client/info stream에서 decode
+- origin/right-origin, parent info, parentSub를 V2 stream 규칙으로 복원
+- content ref 1~9를 각 V2 stream에서 decode
+  - deleted, JSON, binary, string, embed, format, type, any, subdocument
+- V2 delta-compressed delete set decode
+- 기존 `DocumentUpdate` integration/pending/delete machinery에 연결
+- `applyUpdateV2`, `readUpdateV2`, `createDocFromUpdateV2`, `decodeUpdateV2`를 genuine decoder로 전환
+- upstream V2 fixture 검증:
+  - hello text, packed any/binary array, formatted text, delete set
+  - formatted XML, subdocument options, merged multi-client formatting
+- 기존 V1-shaped V2 aliases를 사용하는 API에는 migration 기간 compatibility decode 유지
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -248,7 +263,7 @@ BUILD SUCCESSFUL
 ```
 
 - 일반 Kotlin tests: 512 passed
-- Kotlin Yjs V1 interop tests: 55 passed
+- Kotlin Yjs V1/V2 interop tests: 62 passed
 - JavaScript/Yjs oracle tests: 74 passed
 - `git diff --check`: passed
 

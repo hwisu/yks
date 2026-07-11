@@ -88,6 +88,7 @@ open class UpdateDecoderV1(
 }
 
 private data class V2DecoderStreams(
+    val legacy: Boolean,
     val rest: BinaryDecoder,
     val keyClocks: Lib0IntDiffOptRleDecoder,
     val clients: Lib0UintOptRleDecoder,
@@ -106,6 +107,7 @@ private fun readV2DecoderStreams(bytes: ByteArray): V2DecoderStreams {
     if (feature != 0L) {
         val empty = ByteArray(0)
         return V2DecoderStreams(
+            legacy = true,
             rest = BinaryDecoder(bytes),
             keyClocks = Lib0IntDiffOptRleDecoder(empty),
             clients = Lib0UintOptRleDecoder(empty),
@@ -120,6 +122,7 @@ private fun readV2DecoderStreams(bytes: ByteArray): V2DecoderStreams {
     }
     val encoded = List(9) { decoder.readBytes() }
     return V2DecoderStreams(
+        legacy = false,
         rest = BinaryDecoder(decoder.readRemainingBytes()),
         keyClocks = Lib0IntDiffOptRleDecoder(encoded[0]),
         clients = Lib0UintOptRleDecoder(encoded[1]),
@@ -136,6 +139,7 @@ private fun readV2DecoderStreams(bytes: ByteArray): V2DecoderStreams {
 open class UpdateDecoderV2 private constructor(
     private val streams: V2DecoderStreams,
 ) : IdSetDecoderV2(streams.rest), UpdateContentDecoder {
+    internal val usesLegacyRest: Boolean get() = streams.legacy
     private val keys = mutableListOf<String>()
     constructor(bytes: ByteArray) : this(readV2DecoderStreams(bytes))
 

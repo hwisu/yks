@@ -54,6 +54,70 @@ internal object UpdateCodec {
 
     fun decode(decoder: BinaryDecoder): DocumentUpdate = decode(decoder.readRemainingBytes())
 
+    fun decodeV2(bytes: ByteArray): DocumentUpdate =
+        if (bytes.isNotEmpty() && bytes[0] != 0.toByte()) decode(bytes) else decodeV2(UpdateDecoderV2(bytes))
+
+    fun decodeV2(decoder: UpdateDecoderV2): DocumentUpdate {
+        if (decoder.usesLegacyRest) return decode(decoder.restDecoder)
+        val structs = mutableListOf<DecodedWireItem>()
+        repeat(decoder.restDecoder.readVarUInt().toInt()) {
+            val numberOfStructs = decoder.restDecoder.readVarUInt().toInt()
+            val client = decoder.readClient()
+            var clock = decoder.restDecoder.readVarUInt()
+            repeat(numberOfStructs) {
+                val info = decoder.readInfo()
+                when (info and INFO_CONTENT_MASK) {
+                    structGCRefNumber -> {
+                        val length = decoder.readLen()
+                        structs.add(
+                            DecodedWireItem(
+                                Id(client, clock),
+                                null,
+                                null,
+                                ParentReference.Root(gcParentName(client)),
+                                null,
+                                WireContent.Deleted(length),
+                                isGc = true,
+                            ),
+                        )
+                        clock += length
+                    }
+                    structSkipRefNumber -> clock += decoder.restDecoder.readVarUInt()
+                    else -> {
+                        val id = Id(client, clock)
+                        val origin = if ((info and INFO_HAS_ORIGIN) != 0) decoder.readLeftID() else null
+                        val rightOrigin = if ((info and INFO_HAS_RIGHT_ORIGIN) != 0) decoder.readRightID() else null
+                        val parent = if (origin == null && rightOrigin == null) {
+                            if (decoder.readParentInfo()) {
+                                ParentReference.Root(decoder.readString())
+                            } else {
+                                ParentReference.Nested(decoder.readLeftID())
+                            }
+                        } else {
+                            ParentReference.Inherit(origin ?: checkNotNull(rightOrigin))
+                        }
+                        val parentSub = if (
+                            origin == null && rightOrigin == null && (info and INFO_HAS_PARENT_SUB) != 0
+                        ) decoder.readString() else null
+                        val content = readWireContentV2(decoder, info and INFO_CONTENT_MASK, id)
+                        structs.add(DecodedWireItem(id, origin, rightOrigin, parent, parentSub, content))
+                        clock += content.length
+                    }
+                }
+            }
+        }
+        val deleteSet = DeleteSet.empty()
+        repeat(decoder.restDecoder.readVarUInt().toInt()) {
+            decoder.resetDsCurVal()
+            val client = decoder.restDecoder.readVarUInt()
+            repeat(decoder.restDecoder.readVarUInt().toInt()) {
+                deleteSet.add(Id(client, decoder.readDsClock()), decoder.readDsLen())
+            }
+        }
+        check(!decoder.hasRemaining()) { "V2 update has trailing rest-stream bytes" }
+        return DocumentUpdate(structs.toStoreItems(), deleteSet)
+    }
+
     private fun decodeV1(decoder: BinaryDecoder): DocumentUpdate {
         val structs = mutableListOf<DecodedWireItem>()
         repeat(decoder.readVarUInt().toInt()) {
@@ -217,6 +281,34 @@ internal object UpdateCodec {
             )
         }
         else -> error("unknown Yjs item content ref: $ref")
+    }
+
+    private fun readWireContentV2(decoder: UpdateDecoderV2, ref: Int, id: Id): WireContent = when (ref) {
+        contentDeletedRefNumber -> WireContent.Deleted(decoder.readLen())
+        contentJSONRefNumber -> WireContent.Json(
+            List(decoder.readLen().toInt()) {
+                when (val json = decoder.readString()) {
+                    "undefined" -> null
+                    else -> parseJsonLiteral(json)
+                }
+            },
+        )
+        contentBinaryRefNumber -> WireContent.Binary(decoder.readBuf())
+        contentStringRefNumber -> WireContent.StringContent(decoder.readString())
+        contentEmbedRefNumber -> WireContent.Embed(decoder.readJSON())
+        contentFormatRefNumber -> WireContent.Format(decoder.readKey(), decoder.readJSON())
+        contentTypeRefNumber -> {
+            val kind = rootKindFromTypeRefId(decoder.readTypeRef())
+            val nodeName = if (kind == RootKind.XmlElement || kind == RootKind.XmlHook) decoder.readString() else ""
+            WireContent.Type(kind, nestedTypeName(id), nodeName)
+        }
+        contentAnyRefNumber -> WireContent.AnyContent(List(decoder.readLen().toInt()) { decoder.readAny() })
+        contentDocRefNumber -> WireContent.Doc(
+            decoder.readString(),
+            decoder.readAny(),
+            "__yjs_subdoc__:" + id.client + ":" + id.clock,
+        )
+        else -> error("unknown Yjs V2 item content ref: $ref")
     }
 
     private fun writeDeleteSet(encoder: BinaryEncoder, deleteSet: DeleteSet) {

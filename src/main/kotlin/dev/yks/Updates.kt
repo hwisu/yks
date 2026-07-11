@@ -31,7 +31,7 @@ fun applyUpdate(doc: YDoc, update: ByteArray, origin: Any? = null) {
 }
 
 fun applyUpdateV2(doc: YDoc, update: ByteArray, origin: Any? = null) {
-    applyUpdate(doc, update, origin)
+    doc.applyUpdate(UpdateCodec.decodeV2(update), origin)
 }
 
 fun readUpdate(doc: YDoc, update: ByteArray, origin: Any? = null) {
@@ -51,11 +51,11 @@ fun readUpdateV2(doc: YDoc, update: ByteArray, origin: Any? = null) {
 }
 
 fun readUpdateV2(decoder: BinaryDecoder, doc: YDoc, origin: Any? = null) {
-    readUpdate(decoder, doc, origin)
+    doc.applyUpdate(UpdateCodec.decodeV2(decoder.readRemainingBytes()), origin)
 }
 
 fun readUpdateV2(decoder: UpdateDecoderV2, doc: YDoc, origin: Any? = null) {
-    readUpdateV2(decoder.restDecoder, doc, origin)
+    doc.applyUpdate(UpdateCodec.decodeV2(decoder), origin)
 }
 
 fun encodeStateAsUpdate(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
@@ -131,7 +131,7 @@ fun createDocFromUpdate(update: ByteArray, doc: YDoc = YDoc()): YDoc {
 fun createDocFromUpdate(update: ByteArray, options: YDocOptions): YDoc =
     createDocFromUpdate(update, options.toDoc())
 
-fun createDocFromUpdateV2(update: ByteArray, doc: YDoc = YDoc()): YDoc = createDocFromUpdate(update, doc)
+fun createDocFromUpdateV2(update: ByteArray, doc: YDoc = YDoc()): YDoc = doc.also { applyUpdateV2(it, update) }
 
 fun createDocFromUpdateV2(update: ByteArray, options: YDocOptions): YDoc =
     createDocFromUpdateV2(update, options.toDoc())
@@ -335,7 +335,13 @@ fun decodeUpdate(update: ByteArray): DecodedUpdate {
     )
 }
 
-fun decodeUpdateV2(update: ByteArray): DecodedUpdate = decodeUpdate(update)
+fun decodeUpdateV2(update: ByteArray): DecodedUpdate {
+    val decoded = UpdateCodec.decodeV2(update)
+    return DecodedUpdate(
+        structs = decoded.itemsWithDeleteState().map { it.toDecodedStruct() },
+        deleteSet = decoded.deleteSet.copy(),
+    )
+}
 
 fun logUpdate(update: ByteArray): String = logUpdateV2(update)
 
