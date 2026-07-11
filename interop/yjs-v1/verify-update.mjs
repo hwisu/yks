@@ -31,6 +31,7 @@ if (scenario === 'hello') {
   if (
     scenario === 'formatted-text' ||
     scenario === 'formatted-embed' ||
+    scenario === 'concurrent-format' ||
     scenario === 'partial-formatted-text'
   ) {
     assert.deepEqual(actual.getText('body').toDelta(), expected.getText('body').toDelta())

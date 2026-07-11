@@ -70,6 +70,26 @@ writeFixture('text-format-base-v1', partialFormatUpdates[0])
 writeFixture('text-format-partial-v1', partialFormatUpdates[1])
 writeFixture('text-format-partial-full-v1', Y.encodeStateAsUpdate(partialFormat))
 
+const concurrentFormatBase = new Y.Doc({ gc: false })
+concurrentFormatBase.clientID = 1
+concurrentFormatBase.getText('body').insert(0, 'abcd')
+const concurrentFormatBaseUpdate = Y.encodeStateAsUpdate(concurrentFormatBase)
+const concurrentBold = new Y.Doc({ gc: false })
+concurrentBold.clientID = 2
+Y.applyUpdate(concurrentBold, concurrentFormatBaseUpdate)
+const concurrentBoldUpdates = []
+concurrentBold.on('update', value => concurrentBoldUpdates.push(value))
+concurrentBold.getText('body').format(0, 2, { bold: true })
+const concurrentItalic = new Y.Doc({ gc: false })
+concurrentItalic.clientID = 3
+Y.applyUpdate(concurrentItalic, concurrentFormatBaseUpdate)
+const concurrentItalicUpdates = []
+concurrentItalic.on('update', value => concurrentItalicUpdates.push(value))
+concurrentItalic.getText('body').format(1, 2, { italic: true })
+writeFixture('concurrent-format-base-v1', concurrentFormatBaseUpdate)
+writeFixture('concurrent-format-bold-v1', concurrentBoldUpdates[0])
+writeFixture('concurrent-format-italic-v1', concurrentItalicUpdates[0])
+
 const formattedEmbed = new Y.Doc({ gc: false })
 formattedEmbed.clientID = 1
 formattedEmbed.getText('body').insertEmbed(0, { image: 'x' }, { bold: true })
@@ -96,6 +116,26 @@ array.getArray('numbers').insert(0, [1, 2, 3])
 array.getArray('numbers').insert(3, [4])
 writeFixture('array-base-v1', arrayUpdates[0])
 writeFixture('array-append-v1', arrayUpdates[1])
+
+const concurrentArrayBase = new Y.Doc({ gc: false })
+concurrentArrayBase.clientID = 1
+concurrentArrayBase.getArray('letters').insert(0, ['a', 'b'])
+const concurrentArrayBaseUpdate = Y.encodeStateAsUpdate(concurrentArrayBase)
+const concurrentArrayX = new Y.Doc({ gc: false })
+concurrentArrayX.clientID = 2
+Y.applyUpdate(concurrentArrayX, concurrentArrayBaseUpdate)
+const concurrentArrayXUpdates = []
+concurrentArrayX.on('update', value => concurrentArrayXUpdates.push(value))
+concurrentArrayX.getArray('letters').insert(1, ['X'])
+const concurrentArrayY = new Y.Doc({ gc: false })
+concurrentArrayY.clientID = 3
+Y.applyUpdate(concurrentArrayY, concurrentArrayBaseUpdate)
+const concurrentArrayYUpdates = []
+concurrentArrayY.on('update', value => concurrentArrayYUpdates.push(value))
+concurrentArrayY.getArray('letters').insert(1, ['Y'])
+writeFixture('concurrent-array-base-v1', concurrentArrayBaseUpdate)
+writeFixture('concurrent-array-x-v1', concurrentArrayXUpdates[0])
+writeFixture('concurrent-array-y-v1', concurrentArrayYUpdates[0])
 
 const front = new Y.Doc({ gc: false })
 front.clientID = 1

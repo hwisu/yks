@@ -27,6 +27,7 @@ assert.deepEqual(Y.encodeStateVector(actual), Y.encodeStateVector(expected))
 if (
   scenario === 'formatted-text' ||
   scenario === 'formatted-embed' ||
+  scenario === 'concurrent-format' ||
   scenario === 'partial-formatted-text'
 ) {
   assert.deepEqual(actual.getText('body').toDelta(), expected.getText('body').toDelta())

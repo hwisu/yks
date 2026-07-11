@@ -19,6 +19,13 @@ const apply = (names, scenario) => {
   return doc
 }
 
+const permutations = values =>
+  values.length <= 1
+    ? [values]
+    : values.flatMap((value, index) =>
+        permutations(values.toSpliced(index, 1)).map(rest => [value, ...rest]),
+      )
+
 test('packed array decoder fixture contains binary content', () => {
   const doc = apply(['array-v1'], 'array')
   const values = doc.getArray('items').toArray()
@@ -33,6 +40,18 @@ for (const names of [
 ]) {
   test(`array fixtures converge in order ${names.join(', ')}`, () => {
     assert.deepEqual(apply(names, 'array').getArray('numbers').toArray(), [1, 2, 3, 4])
+  })
+}
+
+for (const names of permutations([
+  'concurrent-array-base-v1',
+  'concurrent-array-x-v1',
+  'concurrent-array-y-v1',
+])) {
+  test(`concurrent array fixtures converge in order ${names.join(', ')}`, () => {
+    const doc = apply(names, 'array')
+    assert.deepEqual(doc.getArray('letters').toArray(), ['a', 'X', 'Y', 'b'])
+    assert.equal(doc.store.pendingStructs, null)
   })
 }
 
@@ -157,6 +176,24 @@ test('native format markers restore a previous non-null value', () => {
     { insert: 'c', attributes: { url: 'outer' } },
   ])
 })
+
+for (const names of permutations([
+  'concurrent-format-base-v1',
+  'concurrent-format-bold-v1',
+  'concurrent-format-italic-v1',
+])) {
+  test(`concurrent format fixtures converge in order ${names.join(', ')}`, () => {
+    const doc = new Y.Doc({ gc: false })
+    for (const name of names) Y.applyUpdate(doc, fixture(name))
+    assert.deepEqual(doc.getText('body').toDelta(), [
+      { insert: 'a', attributes: { bold: true } },
+      { insert: 'b', attributes: { bold: true, italic: true } },
+      { insert: 'c', attributes: { italic: true } },
+      { insert: 'd' },
+    ])
+    assert.equal(doc.store.pendingStructs, null)
+  })
+}
 
 const assertXml = (doc, expected = '<p class="intro">hi</p>') => {
   const fragment = doc.getXmlFragment('xml')

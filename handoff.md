@@ -7,14 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 9개 커밋 앞서 있음
+- 현재 `origin/main`보다 10개 커밋 앞서 있음
 - 아직 push하지 않음
 - 네이티브 XML/subdocument V1 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
-HEAD feat: author native Yjs attributed inserts
+HEAD test: add multi-client Yjs convergence oracle
+a46acf5 feat: author native Yjs attributed inserts
 2a03ad7 feat: author native Yjs text formatting
 5436954 feat: emit standard Yjs V1 delete sets
 65ed0f8 feat: add Yjs V1 XML and subdocument parity
@@ -141,6 +142,17 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - standard update 수신 시 XML observer delete metadata와 subdocument removal event 검증
 - `decodeUpdate`, `LazyStructReader`, content-ID helper가 delete set을 public struct의 `deleted` metadata에 반영
 
+### 7. multi-client convergence와 표준 V1 relay
+
+- upstream Yjs로 생성한 3-update/3-client deterministic fixture 추가
+  - 같은 array 위치의 concurrent `X`/`Y` insert
+  - 겹치는 `bold`/`italic` text formatting
+- base보다 concurrent update가 먼저 오는 경우를 포함한 6개 delivery permutation 전부 검증
+- JavaScript oracle과 Kotlin이 동일한 sequence/attribute 결과로 수렴
+- Kotlin에서 합친 multi-client document를 표준 V1으로 relay하고 upstream Yjs가 적용
+- 표준 writer eligibility를 single-client 제한에서 client별 clock-continuity 검증으로 확장
+- multi-client anchor, nested parent kind, inherited metadata를 전체 update ID 집합에 대해 검증
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -223,8 +235,8 @@ BUILD SUCCESSFUL
 ```
 
 - 일반 Kotlin tests: 508 passed
-- Kotlin Yjs V1 interop tests: 53 passed
-- JavaScript/Yjs oracle tests: 60 passed
+- Kotlin Yjs V1 interop tests: 55 passed
+- JavaScript/Yjs oracle tests: 74 passed
 - `git diff --check`: passed
 
 검증 명령:
@@ -251,27 +263,23 @@ git diff --check
    - deletion event cancellation/ordering
    - text/XML 내부 ContentDoc
    - upstream에 없는 local options 처리 정책
-3. 더 넓은 multi-client concurrency fixture
-   - sequence conflict ordering
-   - overlapping format/XML edits
-   - randomized convergence oracle
-4. 실제 update V2 codec
+3. 실제 update V2 codec
    - 현재 여러 V2 API는 V1/legacy 구현에 alias되어 있음
-5. codec hardening
+4. codec hardening
    - decoded count/length allocation limit
    - Long overflow/Long-to-Int guard
    - large update에서 anchor lookup indexing
-6. GC/pending serialization 완성
+5. GC/pending serialization 완성
    - GC를 unit `StoreItem`으로 근사 중
    - 일부 legacy pending serialization은 `isGc`/clock-continuity metadata를 완전히 표현하지 못함
-7. transaction-event update
+6. transaction-event update
    - 현재 event update는 로컬 동작 보존을 위해 강제로 legacy envelope를 사용함
 
 ## 다음 권장 작업 순서
 
-1. multi-client randomized convergence fixture 추가
-2. 실제 update V2 codec 분리
-3. XML/subdocument surface parity 확장
+1. 실제 update V2 codec 분리
+2. XML/subdocument surface parity 확장
+3. codec hardening과 GC/pending serialization 완성
 
 ## 주의 사항
 

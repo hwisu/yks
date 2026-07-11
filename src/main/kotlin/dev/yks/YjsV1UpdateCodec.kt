@@ -247,25 +247,32 @@ internal object UpdateCodec {
 private fun DocumentUpdate.isSupportedV1Update(): Boolean {
     if (items.isEmpty()) return true
     val clients = items.groupBy { item -> item.id.client }
-    if (clients.size != 1) return false
-    val sorted = clients.values.single().sortedBy { item -> item.id.clock }
-    if (sorted.first().id.client !in 0..9_007_199_254_740_992L) return false
-    val startClock = sorted.first().id.clock
-    if (sorted.map { item -> item.id.clock } != sorted.indices.map { index -> startClock + index }) return false
-    val ids = sorted.mapTo(hashSetOf()) { item -> item.id }
-    val parentItems = parentItemIds + sorted.mapNotNull { item ->
+    if (clients.keys.any { client -> client !in 0..9_007_199_254_740_992L }) return false
+    val ids = items.mapTo(hashSetOf()) { item -> item.id }
+    val parentItems = parentItemIds + items.mapNotNull { item ->
         item.content.directTypeRef()?.name?.let { name -> name to item.id }
     }.toMap()
-    val parentKinds = this.parentKinds + sorted.mapNotNull { item ->
+    val parentKinds = this.parentKinds + items.mapNotNull { item ->
         item.content.directTypeRef()?.let { ref -> ref.name to ref.kind }
     }.toMap()
-    return sorted.all { item ->
-        item.content.isSupportedV1Content() &&
-            item.hasCompatibleV1ParentKind(sorted, parentKinds) &&
-            (startClock > 0 || item.origin == null || item.origin in ids) &&
-            (startClock > 0 || item.rightOrigin == null || item.rightOrigin in ids) &&
-            item.hasResolvableV1Parent(parentItems) &&
-            item.hasConsistentInheritedMetadata(sorted)
+    return clients.values.all { clientItems ->
+        val sorted = clientItems.sortedBy { item -> item.id.clock }
+        val startClock = sorted.first().id.clock
+        var expectedClock = startClock
+        if (sorted.any { item ->
+                val contiguous = item.id.clock == expectedClock
+                expectedClock = item.id.clock + item.length
+                !contiguous
+            }
+        ) return@all false
+        sorted.all { item ->
+            item.content.isSupportedV1Content() &&
+                item.hasCompatibleV1ParentKind(items, parentKinds) &&
+                (startClock > 0 || item.origin == null || item.origin in ids) &&
+                (startClock > 0 || item.rightOrigin == null || item.rightOrigin in ids) &&
+                item.hasResolvableV1Parent(parentItems) &&
+                item.hasConsistentInheritedMetadata(items)
+        }
     }
 }
 

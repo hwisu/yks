@@ -17,6 +17,8 @@ export const scenarioNames = [
   'text-delete',
   'xml-delete',
   'subdoc-delete',
+  'concurrent-array',
+  'concurrent-format',
 ]
 
 export const createScenarioDocument = name => {
@@ -123,6 +125,44 @@ export const createScenarioDocument = name => {
       subs.delete('child')
       break
     }
+    case 'concurrent-array': {
+      const base = new Y.Doc({ gc: false })
+      base.clientID = 1
+      base.getArray('letters').insert(0, ['a', 'b'])
+      const baseUpdate = Y.encodeStateAsUpdate(base)
+      const x = new Y.Doc({ gc: false })
+      x.clientID = 2
+      Y.applyUpdate(x, baseUpdate)
+      x.getArray('letters').insert(1, ['X'])
+      const y = new Y.Doc({ gc: false })
+      y.clientID = 3
+      Y.applyUpdate(y, baseUpdate)
+      y.getArray('letters').insert(1, ['Y'])
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(base))
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(x, Y.encodeStateVector(base)))
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(y, Y.encodeStateVector(base)))
+      doc.getArray('letters')
+      break
+    }
+    case 'concurrent-format': {
+      const base = new Y.Doc({ gc: false })
+      base.clientID = 1
+      base.getText('body').insert(0, 'abcd')
+      const baseUpdate = Y.encodeStateAsUpdate(base)
+      const bold = new Y.Doc({ gc: false })
+      bold.clientID = 2
+      Y.applyUpdate(bold, baseUpdate)
+      bold.getText('body').format(0, 2, { bold: true })
+      const italic = new Y.Doc({ gc: false })
+      italic.clientID = 3
+      Y.applyUpdate(italic, baseUpdate)
+      italic.getText('body').format(1, 2, { italic: true })
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(base))
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(bold, Y.encodeStateVector(base)))
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(italic, Y.encodeStateVector(base)))
+      doc.getText('body')
+      break
+    }
     default:
       throw new Error(`unknown interoperability scenario: ${name}`)
   }
@@ -160,6 +200,10 @@ export const materializeScenario = (doc, name) => {
       return doc.getXmlFragment('xml')
     case 'subdoc-delete':
       return doc.getMap('subs')
+    case 'concurrent-array':
+      return doc.getArray('letters')
+    case 'concurrent-format':
+      return doc.getText('body')
     default:
       throw new Error(`unknown interoperability scenario: ${name}`)
   }

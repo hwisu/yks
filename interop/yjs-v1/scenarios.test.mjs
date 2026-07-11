@@ -19,7 +19,12 @@ for (const name of scenarioNames) {
     if (name !== 'subdoc-map' && name !== 'subdoc-array') {
       assert.deepEqual(target.toJSON(), source.toJSON())
     }
-    if (name === 'formatted-text' || name === 'partial-formatted-text') {
+    if (
+      name === 'formatted-text' ||
+      name === 'formatted-embed' ||
+      name === 'partial-formatted-text' ||
+      name === 'concurrent-format'
+    ) {
       assert.deepEqual(target.getText('body').toDelta(), source.getText('body').toDelta())
     }
     if (name === 'subdoc-map') {

@@ -83,6 +83,23 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun concurrentArrayInsertionsConvergeAcrossEveryDeliveryOrder() {
+        permutations(
+            listOf("concurrent-array-base-v1", "concurrent-array-x-v1", "concurrent-array-y-v1"),
+        ).forEach { order ->
+            val doc = YDoc(clientId = 4, gc = false)
+            order.forEach { name -> applyUpdate(doc, fixture(name)) }
+
+            assertEquals(listOf("a", "X", "Y", "b"), doc.getArray("letters").toList())
+            assertEquals(null, doc.store.pendingStructs)
+        }
+        val relay = YDoc(clientId = 4, gc = false)
+        listOf("concurrent-array-base-v1", "concurrent-array-x-v1", "concurrent-array-y-v1")
+            .forEach { name -> applyUpdate(relay, fixture(name)) }
+        assertUpstreamAppliesUpdate(encodeStateAsUpdate(relay), "concurrent-array")
+    }
+
+    @Test
     fun duplicatePendingUpdateIsIdempotent() {
         val doc = YDoc(clientId = 2, gc = false)
         doc.getArray("numbers")
@@ -380,6 +397,28 @@ class YjsV1InteropTest {
                 .insert("c", mapOf("url" to "outer")),
             doc.getText("body").toDelta(),
         )
+    }
+
+    @Test
+    fun overlappingConcurrentFormattingConvergesAcrossEveryDeliveryOrder() {
+        val expected = YTextDelta()
+            .insert("a", mapOf("bold" to true))
+            .insert("b", mapOf("bold" to true, "italic" to true))
+            .insert("c", mapOf("italic" to true))
+            .insert("d")
+        permutations(
+            listOf("concurrent-format-base-v1", "concurrent-format-bold-v1", "concurrent-format-italic-v1"),
+        ).forEach { order ->
+            val doc = YDoc(clientId = 4, gc = false)
+            order.forEach { name -> applyUpdate(doc, fixture(name)) }
+
+            assertEquals(expected, doc.getText("body").toDelta())
+            assertEquals(null, doc.store.pendingStructs)
+        }
+        val relay = YDoc(clientId = 4, gc = false)
+        listOf("concurrent-format-base-v1", "concurrent-format-bold-v1", "concurrent-format-italic-v1")
+            .forEach { name -> applyUpdate(relay, fixture(name)) }
+        assertUpstreamAppliesUpdate(encodeStateAsUpdate(relay), "concurrent-format")
     }
 
     @Test
@@ -870,6 +909,14 @@ class YjsV1InteropTest {
             assertTrue(exitCode == 0, "upstream Yjs rejected the Kotlin update sequence:\n$output")
         } finally {
             paths.forEach(Files::deleteIfExists)
+        }
+    }
+
+    private fun <T> permutations(values: List<T>): List<List<T>> = when {
+        values.size <= 1 -> listOf(values)
+        else -> values.flatMapIndexed { index, value ->
+            permutations(values.filterIndexed { candidateIndex, _ -> candidateIndex != index })
+                .map { rest -> listOf(value) + rest }
         }
     }
 }
