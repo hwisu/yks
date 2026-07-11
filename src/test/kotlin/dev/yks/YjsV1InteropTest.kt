@@ -616,6 +616,39 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun upstreamYjsAppliesMergedAndDiffedV2Updates() {
+        val source = YDoc(clientId = 1, gc = false)
+        val text = source.getText("body")
+        text.insert(0, "hello")
+        val baselineState = encodeStateVector(source)
+        val baseline = encodeStateAsUpdateV2(source)
+        text.delete(1, 3)
+        val incremental = encodeStateAsUpdateV2(source, baselineState)
+
+        val merged = mergeUpdatesV2(listOf(baseline, incremental))
+        val diffed = diffUpdateV2(merged, baselineState)
+
+        assertUpstreamAppliesUpdateV2(merged, "text-delete", "merged")
+        assertUpstreamAppliesSequenceV2("text-delete", baseline, diffed)
+        assertEquals(
+            decodeStateVector(encodeStateVector(source)),
+            decodeStateVector(encodeStateVectorFromUpdateV2(merged)),
+        )
+    }
+
+    @Test
+    fun updateV2EventEmitsGenuineUpstreamCompatiblePayload() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val updates = mutableListOf<ByteArray>()
+        doc.onUpdateV2 { update, _, _, _ -> updates.add(update) }
+
+        doc.getText("body").insert(0, "ab", mapOf("bold" to true))
+
+        assertEquals(1, updates.size)
+        assertUpstreamAppliesUpdateV2(updates.single(), "formatted-text", "event")
+    }
+
+    @Test
     fun upstreamYjsAppliesNativeXmlTextFormattingAuthoredByKotlin() {
         val doc = YDoc(clientId = 1, gc = false)
         val fragment = doc.getXmlFragment("xml")
@@ -1032,6 +1065,25 @@ class YjsV1InteropTest {
             assertTrue(process.waitFor() == 0, "upstream Yjs rejected the Kotlin V2 update:\n$output")
         } finally {
             Files.deleteIfExists(update)
+        }
+    }
+
+    private fun assertUpstreamAppliesSequenceV2(scenario: String, vararg updates: ByteArray) {
+        val paths = updates.mapIndexed { index, update ->
+            Files.createTempFile("yks-$scenario-v2-$index-", ".bin").also { Files.write(it, update) }
+        }
+        try {
+            val process = ProcessBuilder(
+                listOf("node", "interop/yjs-v1/verify-update-sequence-v2.mjs", scenario) +
+                    paths.map(Path::absolutePathString),
+            )
+                .directory(projectDirectory.toFile())
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().readText()
+            assertTrue(process.waitFor() == 0, "upstream Yjs rejected the Kotlin V2 sequence:\n$output")
+        } finally {
+            paths.forEach(Files::deleteIfExists)
         }
     }
 

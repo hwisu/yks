@@ -131,12 +131,18 @@ open class UpdateEncoderV2(
     private val lengths = Lib0UintOptRleEncoder()
     private var keyClock = 0L
     private var hasOptimizedContent = false
+    private var encodedUpdate: ByteArray? = null
 
     internal fun forceV2Envelope() {
         hasOptimizedContent = true
     }
 
+    internal fun setEncodedUpdate(bytes: ByteArray) {
+        encodedUpdate = bytes.copyOf()
+    }
+
     override fun toByteArray(): ByteArray {
+        encodedUpdate?.let { return it.copyOf() }
         if (!hasOptimizedContent) return restEncoder.toByteArray()
         return BinaryEncoder().also { encoder ->
         encoder.writeVarUInt(0)

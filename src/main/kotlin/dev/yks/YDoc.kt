@@ -580,18 +580,27 @@ class YDoc(
     }
 
     internal fun encodeStateAsUpdateV2(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
-        if (pendingDeleteSetUpdate() != null || pendingStructsView() != null) {
-            return encodeStateAsUpdate(encodedStateVector)
-        }
         val stateVector = decodeStateVector(encodedStateVector)
-        return UpdateCodec.encodeV2(
-            DocumentUpdate(
-                store.itemsSince(stateVector),
-                store.deleteSet(),
-                store.parentItemIds(),
-                store.parentKinds(),
+        val updates = mutableListOf(
+            UpdateCodec.encodeV2(
+                DocumentUpdate(
+                    store.itemsSince(stateVector),
+                    store.deleteSet(),
+                    store.parentItemIds(),
+                    store.parentKinds(),
+                ),
             ),
         )
+        pendingDeleteSetUpdate()
+            ?.let(UpdateCodec::decode)
+            ?.let(UpdateCodec::encodeV2)
+            ?.let(updates::add)
+        pendingStructsView()?.update
+            ?.let { pendingUpdate -> diffUpdate(pendingUpdate, encodedStateVector) }
+            ?.let(UpdateCodec::decode)
+            ?.let(UpdateCodec::encodeV2)
+            ?.let(updates::add)
+        return if (updates.size == 1) updates.single() else mergeUpdatesV2(updates)
     }
 
     fun applyUpdate(update: ByteArray, origin: Any? = null) {
@@ -1597,6 +1606,16 @@ class YDoc(
 
     private fun emit(transaction: Transaction, event: YTransactionEvent) {
         val callbacks = mutableListOf<() -> Unit>()
+        val updateV2 by lazy {
+            UpdateCodec.encodeV2(
+                DocumentUpdate(
+                    transaction.addedItems,
+                    transaction.deleteSet,
+                    store.parentItemIds(),
+                    store.parentKinds(),
+                ),
+            )
+        }
         beforeObserverCallsListeners.toList().forEach { listener ->
             callbacks.add { listener(event) }
         }
@@ -1645,12 +1664,12 @@ class YDoc(
             ),
         )
         updateV2EventListeners.toList().forEach { listener ->
-            callbacks.add { listener(event.update, transaction.origin, this, event) }
+            callbacks.add { listener(updateV2, transaction.origin, this, event) }
         }
         callbacks.addAll(
             docEventCallbacks(
                 "updateV2",
-                YDocEvent(name = "updateV2", update = event.update, origin = transaction.origin, transaction = event),
+                YDocEvent(name = "updateV2", update = updateV2, origin = transaction.origin, transaction = event),
             ),
         )
         callAllYksCallbacks(callbacks)

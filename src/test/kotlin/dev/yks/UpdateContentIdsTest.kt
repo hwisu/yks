@@ -323,7 +323,7 @@ class UpdateContentIdsTest {
         left.getArray("items").push(listOf("left"))
         right.getArray("items").push(listOf("right"))
 
-        val merged = mergeUpdates(listOf(left.encodeStateAsUpdate(), right.encodeStateAsUpdate()))
+        val merged = mergeUpdatesV2(listOf(encodeStateAsUpdateV2(left), encodeStateAsUpdateV2(right)))
         val ids = createContentIdsFromUpdateV2(merged)
 
         assertTrue(ids.inserts.has(1, 0))
@@ -333,7 +333,7 @@ class UpdateContentIdsTest {
             merged,
             ContentIds(inserts = createIdSet().also { it.add(2, 0, 1) }, deletes = createIdSet()),
         )
-        val target = createDocFromUpdate(filtered)
+        val target = createDocFromUpdateV2(filtered)
 
         assertEquals(mapOf("items" to listOf("right")), target.toJson())
     }

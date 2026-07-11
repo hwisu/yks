@@ -94,8 +94,17 @@ fun writeStateAsUpdateV2(
     encoder: BinaryEncoder,
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
-): BinaryEncoder =
-    writeStateAsUpdate(encoder, doc, targetStateVector)
+): BinaryEncoder = encoder.also {
+    it.writeRawBytes(doc.encodeStateAsUpdateV2(encodeStateVector(targetStateVector)))
+}
+
+fun writeStateAsUpdateV2(
+    encoder: UpdateEncoderV2,
+    doc: YDoc,
+    targetStateVector: StateVector = emptyMap(),
+): UpdateEncoderV2 = encoder.also {
+    it.setEncodedUpdate(doc.encodeStateAsUpdateV2(encodeStateVector(targetStateVector)))
+}
 
 fun writeStateAsUpdateV2(
     encoder: IdSetEncoderV1,
@@ -123,6 +132,23 @@ fun writeClientsStructs(
     return encoder
 }
 
+fun writeClientsStructs(
+    encoder: UpdateEncoderV2,
+    store: StructStore,
+    stateVector: StateVector = emptyMap(),
+): UpdateEncoderV2 = encoder.also {
+    it.setEncodedUpdate(
+        UpdateCodec.encodeV2(
+            DocumentUpdate(
+                store.itemsSince(stateVector),
+                DeleteSet.empty(),
+                store.parentItemIds(),
+                store.parentKinds(),
+            ),
+        ),
+    )
+}
+
 fun createDocFromUpdate(update: ByteArray, doc: YDoc = YDoc()): YDoc {
     doc.applyUpdate(update)
     return doc
@@ -148,13 +174,14 @@ fun writeStructs(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray {
 }
 
 fun writeStructsV2(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray =
-    writeStructs(doc, client, idRanges)
+    createIdSet().also { ids -> idRanges.forEach { ids.add(client, it.clock, it.len) } }
+        .let { writeStructsFromIdSetV2(doc, it) }
 
 fun writeStructsFromIdSet(doc: YDoc, idSet: IdSet): ByteArray =
     encodeStructsFromIdSet(doc, idSet)
 
 fun writeStructsFromIdSetV2(doc: YDoc, idSet: IdSet): ByteArray =
-    writeStructsFromIdSet(doc, idSet)
+    encodeStructsFromIdSetV2(doc, idSet)
 
 fun encodeStructsFromIdSet(doc: YDoc, idSet: IdSet): ByteArray =
     UpdateCodec.encode(
@@ -167,13 +194,20 @@ fun encodeStructsFromIdSet(doc: YDoc, idSet: IdSet): ByteArray =
     )
 
 fun encodeStructsFromIdSetV2(doc: YDoc, idSet: IdSet): ByteArray =
-    encodeStructsFromIdSet(doc, idSet)
+    UpdateCodec.encodeV2(
+        DocumentUpdate(
+            doc.itemsForIdSet(idSet),
+            DeleteSet.empty(),
+            doc.store.parentItemIds(),
+            doc.store.parentKinds(),
+        ),
+    )
 
 fun writeStructsFromTransaction(transaction: YTransactionEvent): ByteArray =
     encodeStructsFromTransaction(transaction)
 
 fun writeStructsFromTransactionV2(transaction: YTransactionEvent): ByteArray =
-    writeStructsFromTransaction(transaction)
+    encodeStructsFromTransactionV2(transaction)
 
 fun encodeStructsFromTransaction(transaction: YTransactionEvent): ByteArray =
     UpdateCodec.encode(
@@ -186,13 +220,20 @@ fun encodeStructsFromTransaction(transaction: YTransactionEvent): ByteArray =
     )
 
 fun encodeStructsFromTransactionV2(transaction: YTransactionEvent): ByteArray =
-    encodeStructsFromTransaction(transaction)
+    UpdateCodec.encodeV2(
+        DocumentUpdate(
+            transaction.addedItems.map { it.copy() },
+            DeleteSet.empty(),
+            transaction.doc.store.parentItemIds(),
+            transaction.doc.store.parentKinds(),
+        ),
+    )
 
 fun writeUpdateMessageFromTransaction(transaction: YTransactionEvent): ByteArray? =
     encodeUpdateMessageFromTransaction(transaction)
 
 fun writeUpdateMessageFromTransactionV2(transaction: YTransactionEvent): ByteArray? =
-    writeUpdateMessageFromTransaction(transaction)
+    encodeUpdateMessageFromTransactionV2(transaction)
 
 fun encodeUpdateMessageFromTransaction(transaction: YTransactionEvent): ByteArray? {
     if (transaction.insertSet.isEmpty() && transaction.deleteSet.isEmpty) return null
@@ -200,7 +241,14 @@ fun encodeUpdateMessageFromTransaction(transaction: YTransactionEvent): ByteArra
 }
 
 fun encodeUpdateMessageFromTransactionV2(transaction: YTransactionEvent): ByteArray? =
-    encodeUpdateMessageFromTransaction(transaction)
+    if (transaction.insertSet.isEmpty() && transaction.deleteSet.isEmpty) null else UpdateCodec.encodeV2(
+        DocumentUpdate(
+            transaction.addedItems.map { it.copy() },
+            transaction.deleteSet.copy(),
+            transaction.doc.store.parentItemIds(),
+            transaction.doc.store.parentKinds(),
+        ),
+    )
 
 data class DecodedUpdateStruct(
     val id: Id,
@@ -395,7 +443,15 @@ fun obfuscateUpdate(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOp
 }
 
 fun obfuscateUpdateV2(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray =
-    obfuscateUpdate(update, options)
+    UpdateCodec.decodeV2(update).let { decoded ->
+        val obfuscator = UpdateObfuscator(options)
+        UpdateCodec.encodeV2(
+            DocumentUpdate(
+                decoded.items.map { item -> item.copy(content = obfuscator.obfuscate(item.content)) },
+                decoded.deleteSet.copy(),
+            ),
+        )
+    }
 
 data class ContentIds(
     val inserts: IdSet,
@@ -597,7 +653,13 @@ private fun DocumentUpdate.itemsWithDeleteState(): List<StoreItem> = items.map {
     if (item.deleted || !deleteSet.contains(item.id)) item else item.copy(deleted = true)
 }
 
-fun createContentIdsFromUpdateV2(update: ByteArray): ContentIds = createContentIdsFromUpdate(update)
+fun createContentIdsFromUpdateV2(update: ByteArray): ContentIds {
+    val decoded = UpdateCodec.decodeV2(update)
+    return createContentIds(
+        inserts = createInsertIdSet(decoded.itemsWithDeleteState()),
+        deletes = decoded.deleteSet.toIdSet(),
+    )
+}
 
 fun intersectUpdateWithContentIds(update: ByteArray, contentIds: ContentIds): ByteArray {
     val decoded = UpdateCodec.decode(update)
@@ -612,7 +674,12 @@ fun intersectUpdateWithContentIds(update: ByteArray, contentIds: ContentIds): By
 }
 
 fun intersectUpdateWithContentIdsV2(update: ByteArray, contentIds: ContentIds): ByteArray =
-    intersectUpdateWithContentIds(update, contentIds)
+    UpdateCodec.decodeV2(update).let { decoded ->
+        val filteredItems = decoded.items.filter { contentIds.inserts.hasId(it.id) }
+        val filteredDeletes = intersectSets(decoded.deleteSet.toIdSet(), contentIds.deletes).toDeleteSet()
+        if (filteredItems.size == decoded.items.size && filteredDeletes.structurallyEquals(decoded.deleteSet)) update
+        else UpdateCodec.encodeV2(DocumentUpdate(filteredItems, filteredDeletes))
+    }
 
 fun mergeUpdates(updates: List<ByteArray>): ByteArray {
     if (updates.size == 1) return updates.single()
@@ -640,7 +707,10 @@ fun mergeUpdates(updates: List<ByteArray>): ByteArray {
     return UpdateCodec.encode(DocumentUpdate(items.values.toList(), deleteSet))
 }
 
-fun mergeUpdatesV2(updates: List<ByteArray>): ByteArray = mergeUpdates(updates)
+fun mergeUpdatesV2(updates: List<ByteArray>): ByteArray {
+    if (updates.size == 1) return updates.single()
+    return mergeDecodedUpdates(updates.map(UpdateCodec::decodeV2), UpdateCodec::encodeV2)
+}
 
 fun diffUpdate(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
     val stateVector = decodeStateVector(encodedStateVector)
@@ -649,7 +719,12 @@ fun diffUpdate(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
     return UpdateCodec.encode(DocumentUpdate(filtered, decoded.deleteSet))
 }
 
-fun diffUpdateV2(update: ByteArray, encodedStateVector: ByteArray): ByteArray = diffUpdate(update, encodedStateVector)
+fun diffUpdateV2(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
+    val stateVector = decodeStateVector(encodedStateVector)
+    val decoded = UpdateCodec.decodeV2(update)
+    val filtered = decoded.items.filter { it.id.clock >= (stateVector[it.id.client] ?: 0) }
+    return UpdateCodec.encodeV2(DocumentUpdate(filtered, decoded.deleteSet))
+}
 
 fun encodeStateVectorFromUpdate(update: ByteArray): ByteArray {
     val decoded = UpdateCodec.decode(update)
@@ -660,7 +735,36 @@ fun encodeStateVectorFromUpdate(update: ByteArray): ByteArray {
     return dev.yks.encodeStateVector(stateVector)
 }
 
-fun encodeStateVectorFromUpdateV2(update: ByteArray): ByteArray = encodeStateVectorFromUpdate(update)
+fun encodeStateVectorFromUpdateV2(update: ByteArray): ByteArray {
+    val decoded = UpdateCodec.decodeV2(update)
+    val stateVector = decoded.items
+        .groupBy { it.id.client }
+        .mapValues { (_, items) -> items.contiguousClockFromZero() }
+        .filterValues { it > 0 }
+    return dev.yks.encodeStateVector(stateVector)
+}
+
+private fun mergeDecodedUpdates(
+    updates: List<DocumentUpdate>,
+    encode: (DocumentUpdate) -> ByteArray,
+): ByteArray {
+    val items = linkedMapOf<Id, StoreItem>()
+    val deleteSet = DeleteSet.empty()
+    updates.forEach { decoded ->
+        decoded.items.forEach { item ->
+            val existing = items[item.id]
+            if (existing == null) items[item.id] = item else if (item.deleted) existing.deleted = true
+        }
+        deleteSet.addAll(decoded.deleteSet)
+    }
+    deleteSet.clients.forEach { (client, ranges) ->
+        ranges.forEach { range ->
+            items.values.filter { it.id.client == client && range.contains(it.id.clock) }
+                .forEach { it.deleted = true }
+        }
+    }
+    return encode(DocumentUpdate(items.values.toList(), deleteSet))
+}
 
 private fun StoreItem.toDecodedStruct(): DecodedUpdateStruct = DecodedUpdateStruct(
     id = id,

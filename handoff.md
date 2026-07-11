@@ -7,14 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 13개 커밋 앞서 있음
+- 현재 `origin/main`보다 14개 커밋 앞서 있음
 - 아직 push하지 않음
 - 네이티브 XML/subdocument V1 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
-HEAD feat: write genuine Yjs update V2
+HEAD feat: complete Yjs update V2 operations
+1d3d219 feat: write genuine Yjs update V2
 4c826bf feat: decode genuine Yjs update V2
 d454f42 feat: add lib0 update V2 stream codecs
 fbc214f test: add multi-client Yjs convergence oracle
@@ -196,6 +197,18 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
   - text, formatting, any/binary array, XML, subdocument, delete set, multi-client state
 - pending struct/delete가 있는 문서는 아직 migration compatibility path를 유지
 
+### 11. genuine V2 operational APIs와 events
+
+- `mergeUpdatesV2`, `diffUpdateV2`, `encodeStateVectorFromUpdateV2` genuine decode/encode
+- `createContentIdsFromUpdateV2`, `intersectUpdateWithContentIdsV2` genuine V2 처리
+- `obfuscateUpdateV2` genuine V2 output
+- selected range/id-set와 transaction struct V2 writer 전환
+- transaction update-message V2 writer 전환
+- `writeStateAsUpdateV2` / `writeClientsStructs(UpdateEncoderV2)` genuine payload 반환
+- pending delete/struct update를 V2로 변환하고 `mergeUpdatesV2`로 직렬화
+- `updateV2` listener와 event channel이 genuine V2 transaction payload 방출
+- upstream `Y.applyUpdateV2`로 merged full update, baseline+diff sequence, updateV2 event 검증
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -278,7 +291,7 @@ BUILD SUCCESSFUL
 ```
 
 - 일반 Kotlin tests: 512 passed
-- Kotlin Yjs V1/V2 interop tests: 63 passed
+- Kotlin Yjs V1/V2 interop tests: 65 passed
 - JavaScript/Yjs oracle tests: 74 passed
 - `git diff --check`: passed
 
@@ -306,23 +319,22 @@ git diff --check
    - deletion event cancellation/ordering
    - text/XML 내부 ContentDoc
    - upstream에 없는 local options 처리 정책
-3. 실제 update V2 codec
-   - 현재 여러 V2 API는 V1/legacy 구현에 alias되어 있음
-4. codec hardening
+3. codec hardening
    - decoded count/length allocation limit
    - Long overflow/Long-to-Int guard
    - large update에서 anchor lookup indexing
-5. GC/pending serialization 완성
+4. GC/pending serialization 완성
    - GC를 unit `StoreItem`으로 근사 중
    - 일부 legacy pending serialization은 `isGc`/clock-continuity metadata를 완전히 표현하지 못함
-6. transaction-event update
-   - 현재 event update는 로컬 동작 보존을 위해 강제로 legacy envelope를 사용함
+5. transaction-event V1 update
+   - `updateV2`는 genuine V2로 전환 완료
+   - 기존 `update` event는 로컬 legacy compatibility envelope를 유지
 
 ## 다음 권장 작업 순서
 
-1. 실제 update V2 codec 분리
-2. XML/subdocument surface parity 확장
-3. codec hardening과 GC/pending serialization 완성
+1. XML/subdocument surface parity 확장
+2. codec hardening과 GC/pending serialization 완성
+3. transaction-event V1 표준화
 
 ## 주의 사항
 

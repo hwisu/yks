@@ -246,9 +246,10 @@ class UpdateApiTest {
             source.encodeStateAsUpdate(encodeStateVector(stateAfterFirst)),
             diffEncoder.toByteArray(),
         )
-        assertContentEquals(
-            diffEncoder.toByteArray(),
-            writeStateAsUpdateV2(UpdateEncoderV2(), source, stateAfterFirst).toByteArray(),
+        val genuineV2 = writeStateAsUpdateV2(UpdateEncoderV2(), source, stateAfterFirst).toByteArray()
+        assertEquals(
+            decodeUpdate(diffEncoder.toByteArray()).structs.map { it.id },
+            decodeUpdateV2(genuineV2).structs.map { it.id },
         )
     }
 
@@ -283,9 +284,9 @@ class UpdateApiTest {
 
         assertSame(encoder, writeClientsStructs(encoder, source.store))
 
-        val target = createDocFromUpdate(encoder.toUint8Array())
+        val target = createDocFromUpdateV2(encoder.toUint8Array())
         assertEquals("xy", target.getText("body").toString())
-        assertTrue(decodeUpdate(encoder.toByteArray()).deleteSet.isEmpty)
+        assertTrue(decodeUpdateV2(encoder.toByteArray()).deleteSet.isEmpty)
     }
 
     @Test
@@ -581,12 +582,14 @@ class UpdateApiTest {
     }
 
     @Test
-    fun obfuscateUpdateV2UsesTheSameLocalUnifiedCodec() {
+    fun obfuscateUpdateV2UsesTheGenuineV2Codec() {
         val source = YDoc(clientId = 1)
         source.getText("body").insert(0, "secret")
-        val update = source.encodeStateAsUpdate()
+        val update = encodeStateAsUpdateV2(source)
+        val obfuscated = obfuscateUpdateV2(update)
 
-        assertContentEquals(obfuscateUpdate(update), obfuscateUpdateV2(update))
+        assertEquals("000000", createDocFromUpdateV2(obfuscated).getText("body").toString())
+        assertFalse(update.contentEquals(obfuscated))
     }
 
     @Test
@@ -696,8 +699,14 @@ class UpdateApiTest {
         assertEquals(listOf(Id(1, 1)), decoded.structs.map { it.id })
         assertEquals("b", (decoded.structs.single().content as ContentString).str)
         assertTrue(decoded.deleteSet.isEmpty)
-        assertContentEquals(byRange, writeStructsV2(source, 1, listOf(IdRange(1, 1))))
-        assertContentEquals(byIdSet, writeStructsFromIdSetV2(source, selected))
+        assertEquals(
+            decoded.structs,
+            decodeUpdateV2(writeStructsV2(source, 1, listOf(IdRange(1, 1)))).structs,
+        )
+        assertEquals(
+            decoded.structs,
+            decodeUpdateV2(writeStructsFromIdSetV2(source, selected)).structs,
+        )
     }
 
     @Test
@@ -713,8 +722,8 @@ class UpdateApiTest {
         assertEquals(listOf(Id(1, 0), Id(1, 1)), decoded.structs.map { it.id })
         assertTrue(decoded.deleteSet.isEmpty)
         assertContentEquals(structsOnly, encodeStructsFromTransaction(insertEvent))
-        assertContentEquals(structsOnly, writeStructsFromTransactionV2(insertEvent))
-        assertContentEquals(structsOnly, encodeStructsFromTransactionV2(insertEvent))
+        assertEquals(decoded.structs, decodeUpdateV2(writeStructsFromTransactionV2(insertEvent)).structs)
+        assertEquals(decoded.structs, decodeUpdateV2(encodeStructsFromTransactionV2(insertEvent)).structs)
     }
 
     @Test
@@ -736,8 +745,10 @@ class UpdateApiTest {
 
         assertEquals("y", target.getText("body").toString())
         assertContentEquals(insertEvent.update, encodeUpdateMessageFromTransaction(insertEvent)!!)
-        assertContentEquals(deleteEvent.update, writeUpdateMessageFromTransactionV2(deleteEvent)!!)
-        assertContentEquals(deleteEvent.update, encodeUpdateMessageFromTransactionV2(deleteEvent)!!)
+        val targetV2 = YDoc(clientId = 3)
+        applyUpdateV2(targetV2, encodeUpdateMessageFromTransactionV2(insertEvent)!!)
+        applyUpdateV2(targetV2, writeUpdateMessageFromTransactionV2(deleteEvent)!!)
+        assertEquals("y", targetV2.getText("body").toString())
     }
 
     @Test
