@@ -7,14 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 10개 커밋 앞서 있음
+- 현재 `origin/main`보다 11개 커밋 앞서 있음
 - 아직 push하지 않음
 - 네이티브 XML/subdocument V1 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
-HEAD test: add multi-client Yjs convergence oracle
+HEAD feat: add lib0 update V2 stream codecs
+fbc214f test: add multi-client Yjs convergence oracle
 a46acf5 feat: author native Yjs attributed inserts
 2a03ad7 feat: author native Yjs text formatting
 5436954 feat: emit standard Yjs V1 delete sets
@@ -153,6 +154,18 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - 표준 writer eligibility를 single-client 제한에서 client별 clock-continuity 검증으로 확장
 - multi-client anchor, nested parent kind, inherited metadata를 전체 update ID 집합에 대해 검증
 
+### 8. update V2 stream foundation
+
+- lib0 signed-magnitude varint의 negative zero 지원
+- byte RLE, `UintOptRle`, `IntDiffOptRle`, concatenated string stream Kotlin 구현
+- upstream lib0가 만든 golden bytes와 byte-exact test 추가
+- `UpdateEncoderV2`의 실제 9-stream envelope 구현
+  - key clock, client, left/right clock, info, string, parent info, type ref, length
+  - non-optimized rest stream append
+- `UpdateDecoderV2`가 동일 envelope를 분리하고 primitive field를 decode
+- upstream `Y.UpdateEncoderV2` primitive fixture와 전체 byte sequence 일치
+- 아직 document update API는 V1 compatibility path를 유지하며 다음 단계에서 V2 struct codec에 연결할 예정
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -234,7 +247,7 @@ subdoc-duplicate-guid-v1.bin
 BUILD SUCCESSFUL
 ```
 
-- 일반 Kotlin tests: 508 passed
+- 일반 Kotlin tests: 512 passed
 - Kotlin Yjs V1 interop tests: 55 passed
 - JavaScript/Yjs oracle tests: 74 passed
 - `git diff --check`: passed

@@ -87,34 +87,85 @@ open class UpdateDecoderV1(
     private fun readId(): Id = Id(restDecoder.readVarUInt(), restDecoder.readVarUInt())
 }
 
-open class UpdateDecoderV2(
-    restDecoder: BinaryDecoder,
-) : IdSetDecoderV2(restDecoder), UpdateContentDecoder {
-    constructor(bytes: ByteArray) : this(BinaryDecoder(bytes))
+private data class V2DecoderStreams(
+    val rest: BinaryDecoder,
+    val keyClocks: Lib0IntDiffOptRleDecoder,
+    val clients: Lib0UintOptRleDecoder,
+    val leftClocks: Lib0IntDiffOptRleDecoder,
+    val rightClocks: Lib0IntDiffOptRleDecoder,
+    val infos: Lib0ByteRleDecoder,
+    val strings: Lib0StringDecoder,
+    val parentInfos: Lib0ByteRleDecoder,
+    val typeRefs: Lib0UintOptRleDecoder,
+    val lengths: Lib0UintOptRleDecoder,
+)
 
-    fun readLeftID(): Id = readId()
+private fun readV2DecoderStreams(bytes: ByteArray): V2DecoderStreams {
+    val decoder = BinaryDecoder(bytes)
+    val feature = decoder.readVarUInt()
+    if (feature != 0L) {
+        val empty = ByteArray(0)
+        return V2DecoderStreams(
+            rest = BinaryDecoder(bytes),
+            keyClocks = Lib0IntDiffOptRleDecoder(empty),
+            clients = Lib0UintOptRleDecoder(empty),
+            leftClocks = Lib0IntDiffOptRleDecoder(empty),
+            rightClocks = Lib0IntDiffOptRleDecoder(empty),
+            infos = Lib0ByteRleDecoder(empty),
+            strings = Lib0StringDecoder(byteArrayOf(0)),
+            parentInfos = Lib0ByteRleDecoder(empty),
+            typeRefs = Lib0UintOptRleDecoder(empty),
+            lengths = Lib0UintOptRleDecoder(empty),
+        )
+    }
+    val encoded = List(9) { decoder.readBytes() }
+    return V2DecoderStreams(
+        rest = BinaryDecoder(decoder.readRemainingBytes()),
+        keyClocks = Lib0IntDiffOptRleDecoder(encoded[0]),
+        clients = Lib0UintOptRleDecoder(encoded[1]),
+        leftClocks = Lib0IntDiffOptRleDecoder(encoded[2]),
+        rightClocks = Lib0IntDiffOptRleDecoder(encoded[3]),
+        infos = Lib0ByteRleDecoder(encoded[4]),
+        strings = Lib0StringDecoder(encoded[5]),
+        parentInfos = Lib0ByteRleDecoder(encoded[6]),
+        typeRefs = Lib0UintOptRleDecoder(encoded[7]),
+        lengths = Lib0UintOptRleDecoder(encoded[8]),
+    )
+}
 
-    fun readRightID(): Id = readId()
+open class UpdateDecoderV2 private constructor(
+    private val streams: V2DecoderStreams,
+) : IdSetDecoderV2(streams.rest), UpdateContentDecoder {
+    private val keys = mutableListOf<String>()
+    constructor(bytes: ByteArray) : this(readV2DecoderStreams(bytes))
 
-    fun readClient(): Long = restDecoder.readVarUInt()
+    constructor(decoder: BinaryDecoder) : this(decoder.readRemainingBytes())
 
-    fun readInfo(): Int = restDecoder.readByte()
+    fun readLeftID(): Id = Id(streams.clients.read(), streams.leftClocks.read())
 
-    override fun readString(): String = restDecoder.readString()
+    fun readRightID(): Id = Id(streams.clients.read(), streams.rightClocks.read())
 
-    fun readParentInfo(): Boolean = restDecoder.readVarUInt() == 1L
+    fun readClient(): Long = streams.clients.read()
 
-    override fun readTypeRef(): Int = restDecoder.readVarUInt().toInt()
+    fun readInfo(): Int = streams.infos.read()
 
-    override fun readLen(): Long = restDecoder.readVarUInt()
+    override fun readString(): String = streams.strings.read()
 
-    override fun readAny(): Any? = readYValue(restDecoder).toAny()
+    fun readParentInfo(): Boolean = streams.parentInfos.read() == 1
+
+    override fun readTypeRef(): Int = streams.typeRefs.read().toInt()
+
+    override fun readLen(): Long = streams.lengths.read()
+
+    override fun readAny(): Any? = readLib0Any(restDecoder)
 
     override fun readBuf(): ByteArray = restDecoder.readBytes()
 
     override fun readJSON(): Any? = readAny()
 
-    override fun readKey(): String = restDecoder.readString()
-
-    private fun readId(): Id = Id(restDecoder.readVarUInt(), restDecoder.readVarUInt())
+    override fun readKey(): String {
+        val clock = streams.keyClocks.read().toInt()
+        if (clock < keys.size) return keys[clock]
+        return streams.strings.read().also(keys::add)
+    }
 }

@@ -72,6 +72,11 @@ class UpdateEncoderDecoderTest {
         encoder.writeJSON(mapOf("kind" to "json"))
         encoder.writeKey("italic")
 
+        assertContentEquals(
+            hex("00010003080a0c01120116010d0e0b76616c75656974616c696305060100010e010f75027703616e797d030204057601046b696e6477046a736f6e"),
+            encoder.toUint8Array(),
+        )
+
         val decoder = UpdateDecoderV2(encoder.toUint8Array())
 
         assertEquals(Id(8, 9), decoder.readLeftID())
@@ -128,6 +133,8 @@ class UpdateEncoderDecoderTest {
         triples.asList().chunked(3).forEach { (client, clock, len) -> idSet.add(client, clock, len) }
         return idSet
     }
+
+    private fun hex(value: String): ByteArray = value.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 
     private fun assertIdSetEquals(expected: IdSet, actual: IdSet) {
         assertTrue(equalIdSets(expected, actual), "expected ${expected.ranges()} but was ${actual.ranges()}")

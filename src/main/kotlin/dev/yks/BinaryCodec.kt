@@ -29,9 +29,9 @@ class BinaryEncoder {
         writeVarUInt((value shl 1) xor (value shr 63))
     }
 
-    fun writeLib0VarInt(value: Long) {
-        val negative = value < 0
-        var current = if (negative) -value else value
+    fun writeLib0VarInt(value: Long, forceNegative: Boolean = false) {
+        val negative = value < 0 || forceNegative
+        var current = if (value < 0) -value else value
         writeByte(
             (if (current > 0x3f) 0x80 else 0) or
                 (if (negative) 0x40 else 0) or
@@ -122,7 +122,9 @@ class BinaryDecoder(private val bytes: ByteArray) {
         return (value ushr 1) xor -(value and 1)
     }
 
-    fun readLib0VarInt(): Long {
+    fun readLib0VarInt(): Long = readLib0VarIntWithSign().first
+
+    internal fun readLib0VarIntWithSign(): Pair<Long, Boolean> {
         var byte = readByte()
         var result = (byte and 0x3f).toLong()
         var multiplier = 64L
@@ -133,7 +135,7 @@ class BinaryDecoder(private val bytes: ByteArray) {
             check(multiplier <= Long.MAX_VALUE / 128) { "varint is too large" }
             multiplier *= 128
         }
-        return sign * result
+        return sign * result to (sign < 0)
     }
 
     fun readString(): String {

@@ -19,9 +19,9 @@ interface UpdateContentEncoder {
 open class IdSetEncoderV1(
     val restEncoder: BinaryEncoder = BinaryEncoder(),
 ) {
-    fun toByteArray(): ByteArray = restEncoder.toByteArray()
+    open fun toByteArray(): ByteArray = restEncoder.toByteArray()
 
-    fun toUint8Array(): ByteArray = toByteArray()
+    open fun toUint8Array(): ByteArray = toByteArray()
 
     open fun resetIdSetCurVal() {
         // V1 stores absolute clocks.
@@ -120,42 +120,83 @@ open class UpdateEncoderV1(
 open class UpdateEncoderV2(
     restEncoder: BinaryEncoder = BinaryEncoder(),
 ) : IdSetEncoderV2(restEncoder), UpdateContentEncoder {
+    private val keyClocks = Lib0IntDiffOptRleEncoder()
+    private val clients = Lib0UintOptRleEncoder()
+    private val leftClocks = Lib0IntDiffOptRleEncoder()
+    private val rightClocks = Lib0IntDiffOptRleEncoder()
+    private val infos = Lib0ByteRleEncoder()
+    private val strings = Lib0StringEncoder()
+    private val parentInfos = Lib0ByteRleEncoder()
+    private val typeRefs = Lib0UintOptRleEncoder()
+    private val lengths = Lib0UintOptRleEncoder()
+    private var keyClock = 0L
+    private var hasOptimizedContent = false
+
+    override fun toByteArray(): ByteArray {
+        if (!hasOptimizedContent) return restEncoder.toByteArray()
+        return BinaryEncoder().also { encoder ->
+        encoder.writeVarUInt(0)
+        encoder.writeBytes(keyClocks.toByteArray())
+        encoder.writeBytes(clients.toByteArray())
+        encoder.writeBytes(leftClocks.toByteArray())
+        encoder.writeBytes(rightClocks.toByteArray())
+        encoder.writeBytes(infos.toByteArray())
+        encoder.writeBytes(strings.toByteArray())
+        encoder.writeBytes(parentInfos.toByteArray())
+        encoder.writeBytes(typeRefs.toByteArray())
+        encoder.writeBytes(lengths.toByteArray())
+        encoder.writeRawBytes(restEncoder.toByteArray())
+        }.toByteArray()
+    }
+
+    override fun toUint8Array(): ByteArray = toByteArray()
+
     fun writeLeftID(id: Id) {
-        writeId(id)
+        hasOptimizedContent = true
+        clients.write(id.client)
+        leftClocks.write(id.clock)
     }
 
     fun writeRightID(id: Id) {
-        writeId(id)
+        hasOptimizedContent = true
+        clients.write(id.client)
+        rightClocks.write(id.clock)
     }
 
     fun writeClient(client: Long) {
-        restEncoder.writeVarUInt(client)
+        hasOptimizedContent = true
+        clients.write(client)
     }
 
     fun writeInfo(info: Int) {
         require(info in 0..255) { "info must be an unsigned byte" }
-        restEncoder.writeByte(info)
+        hasOptimizedContent = true
+        infos.write(info)
     }
 
     override fun writeString(value: String) {
-        restEncoder.writeString(value)
+        hasOptimizedContent = true
+        strings.write(value)
     }
 
     fun writeParentInfo(isYKey: Boolean) {
-        restEncoder.writeVarUInt(if (isYKey) 1 else 0)
+        hasOptimizedContent = true
+        parentInfos.write(if (isYKey) 1 else 0)
     }
 
     override fun writeTypeRef(info: Int) {
         require(info >= 0) { "type ref must be non-negative" }
-        restEncoder.writeVarUInt(info.toLong())
+        hasOptimizedContent = true
+        typeRefs.write(info.toLong())
     }
 
     override fun writeLen(len: Long) {
-        restEncoder.writeVarUInt(len)
+        hasOptimizedContent = true
+        lengths.write(len)
     }
 
     override fun writeAny(value: Any?) {
-        writeYValue(restEncoder, YValue.from(value))
+        writeLib0Any(restEncoder, value)
     }
 
     override fun writeBuf(value: ByteArray) {
@@ -167,11 +208,8 @@ open class UpdateEncoderV2(
     }
 
     override fun writeKey(key: String) {
-        restEncoder.writeString(key)
-    }
-
-    private fun writeId(id: Id) {
-        restEncoder.writeVarUInt(id.client)
-        restEncoder.writeVarUInt(id.clock)
+        hasOptimizedContent = true
+        keyClocks.write(keyClock++)
+        strings.write(key)
     }
 }
