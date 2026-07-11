@@ -7,14 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 20개 커밋 앞서 있음
+- 현재 `origin/main`보다 21개 커밋 앞서 있음
 - 아직 push하지 않음
 - XML 문자열 surface parity 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
-HEAD feat: emit standard delete transaction updates
+HEAD docs: finalize Yjs Kotlin implementation handoff
+befbff7 feat: emit standard delete transaction updates
 50b2b2e feat: preserve pending GC update metadata
 828c39d feat: emit standard root transaction updates
 a1e550e feat: harden Yjs update decoding
@@ -361,27 +362,24 @@ git diff --check
 
 이 머신의 Codex shell에서는 위 명령 앞에 `rtk`를 붙여 실행해야 함.
 
-## 아직 남은 주요 Yjs parity
+## 구현 완료 상태와 의도적인 compatibility constraints
 
-우선순위가 높은 잔여 작업:
+현재 검증 범위에서 남은 semantic/convergence blocker는 없음. 다음 항목은 Yjs wire 제약 또는 성능 최적화이며 lossless fallback/pre-materialization 정책으로 확정함:
 
-1. XML root surface parity
-   - root `XmlElement` node name은 wire에 없으므로 schema/pre-materialization이 필요함
-2. subdocument 확장
-   - upstream에 없는 local options 처리 정책
+1. root XML schema
+   - root shared type kind와 root `XmlElement` node name은 Yjs update wire에 없음
+   - receiver는 apply 전에 예상 root XML kind/node name을 pre-materialize해야 함
+2. Kotlin-only subdocument options
+   - `collectionId`, suggestion-doc 등 upstream wire에 없는 option은 `YKS\x02` lossless envelope 사용
+   - 표준 V1/V2로 조용히 option을 유실시키지 않음
 3. GC storage compactness
-   - wire/pending metadata와 clock semantics는 보존함
-   - GC range를 내부에서 unit `StoreItem`으로 펼치므로 큰 GC range의 메모리 최적화는 남아 있음
-4. transaction-event V1 update
-   - `updateV2`는 genuine V2로 전환 완료
-   - root insert/update/delete의 safe `update` event는 표준 V1로 전환 완료
-   - pre-populated detached nested owner/child transaction은 preliminary-content 이름 통합까지 legacy compatibility envelope 유지
+   - wire/pending metadata와 clock semantics는 완전히 보존함
+   - GC range를 내부에서 unit `StoreItem`으로 펼치는 구현은 향후 메모리 최적화 대상으로만 남김
+4. detached preliminary nested content
+   - Kotlin에서 owner보다 먼저 clock을 할당받은 pre-populated detached child는 표준 Yjs owner-before-child wire로 무손실 변환할 수 없음
+   - 해당 transaction만 `YKS\x02`를 사용하며 owner-first nested content와 root insert/update/delete events는 표준 V1/V2 사용
 
-## 다음 권장 작업 순서
-
-1. XML/subdocument surface parity 확장
-2. GC/pending serialization 완성
-3. transaction-event V1 표준화
+새 기능을 추가할 때는 이 constraint를 깨뜨리기보다 fixture/oracle을 먼저 추가하고 lossless standard eligibility를 넓힐 것.
 
 ## 주의 사항
 
