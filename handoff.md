@@ -7,14 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 7개 커밋 앞서 있음
+- 현재 `origin/main`보다 8개 커밋 앞서 있음
 - 아직 push하지 않음
 - 네이티브 XML/subdocument V1 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
-HEAD feat: emit standard Yjs V1 delete sets
+HEAD feat: author native Yjs text formatting
+5436954 feat: emit standard Yjs V1 delete sets
 65ed0f8 feat: add Yjs V1 XML and subdocument parity
 68198d8 feat: support native Yjs V1 text formatting
 a19f4ac feat: decode and integrate Yjs V1 updates
@@ -109,7 +110,19 @@ ItemContent.NativeTextFormat(key, value, kind)
 - upstream fixture를 Kotlin이 표준 V1으로 다시 relay
 - formatted `Y.XmlText` marker relay
 
-Kotlin이 직접 생성하는 range formatting은 아직 native marker pair로 마이그레이션하지 않았으므로 legacy codec을 사용함.
+Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이그레이션함.
+
+추가 구현:
+
+- `Y.Text.format` / `formatText`와 `Y.XmlText.format`이 native `ContentFormat` marker를 생성
+- 겹치는 formatting은 현재 visible attributes를 기준으로 canonical marker sequence로 재작성
+- marker 시작/종료 상태와 명시적 embed attributes 사이의 formatting leakage 방지
+- native marker cleanup equivalence와 transaction observer retain delta 지원
+- undo/redo 시 marker origin/right-origin을 복원된 content ID로 재연결
+- deep-delta format attribution이 native marker의 insert/delete attribution을 추적
+- Kotlin-authored partial text formatting과 formatted XML text를 upstream Yjs에서 검증
+
+명시적 attributes를 가진 신규 text/embed insert 자체는 아직 기존 base-attribute 모델을 유지하며, native marker가 이미 있는 위치에 삽입할 때만 marker shield를 생성함.
 
 ### 6. 표준 V1 delete-set writer와 삭제 parity
 
@@ -201,7 +214,7 @@ BUILD SUCCESSFUL
 ```
 
 - 일반 Kotlin tests: 508 passed
-- Kotlin Yjs V1 interop tests: 49 passed
+- Kotlin Yjs V1 interop tests: 51 passed
 - JavaScript/Yjs oracle tests: 59 passed
 - `git diff --check`: passed
 
@@ -221,8 +234,9 @@ git diff --check
 
 우선순위가 높은 잔여 작업:
 
-1. Kotlin-authored formatting을 native marker pair로 전환
-   - 현재 Kotlin range format 모델과 upstream marker 모델이 공존함
+1. attributed text/embed insert를 native marker 모델로 완전히 이전
+   - range formatting은 native marker로 이전 완료
+   - 신규 insert의 base-attribute 모델은 아직 legacy fallback을 사용할 수 있음
 2. XML surface parity
    - upstream `Y.XmlText.toString()`은 format을 tag로 렌더링하지만 Kotlin은 plain text로 렌더링함
    - empty element 문자열 표현도 upstream과 다름
@@ -249,7 +263,7 @@ git diff --check
 
 ## 다음 권장 작업 순서
 
-1. Kotlin local formatting을 native ContentFormat marker 모델로 이전
+1. attributed text/embed insert를 native ContentFormat marker 모델로 이전
 2. multi-client randomized convergence fixture 추가
 3. 실제 update V2 codec 분리
 

@@ -614,7 +614,7 @@ open class YText internal constructor(
         require(start <= length) { "insert index is out of bounds" }
         doc.transact {
             val normalized = normalizeTextAttributes(attributes)
-            insertTextEntries(start, text.map { ItemContent.Text(it.toString(), normalized, kind = kind) })
+            insertAttributedTextEntries(start, text.map { ItemContent.Text(it.toString(), normalized, kind = kind) }, normalized)
         }
     }
 
@@ -624,7 +624,7 @@ open class YText internal constructor(
         require(start <= length) { "insert index is out of bounds" }
         doc.transact(origin = origin) {
             val normalized = normalizeTextAttributes(attributes)
-            insertTextEntries(start, text.map { ItemContent.Text(it.toString(), normalized, kind = kind) })
+            insertAttributedTextEntries(start, text.map { ItemContent.Text(it.toString(), normalized, kind = kind) }, normalized)
         }
     }
 
@@ -642,7 +642,7 @@ open class YText internal constructor(
                     else -> listOf(ItemContent.TextEmbed(doc.storeValue(value, parent = name), normalized, kind = kind))
                 }
             }
-            insertTextEntries(start, entries)
+            insertAttributedTextEntries(start, entries, normalized)
         }
     }
 
@@ -651,9 +651,10 @@ open class YText internal constructor(
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
         doc.transact {
-            insertTextEntries(
+            insertAttributedTextEntries(
                 start,
                 listOf(ItemContent.TextEmbed(doc.storeValue(embed, parent = name), normalizeTextAttributes(attributes), kind = kind)),
+                normalizeTextAttributes(attributes),
             )
         }
     }
@@ -663,9 +664,10 @@ open class YText internal constructor(
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
         doc.transact(origin = origin) {
-            insertTextEntries(
+            insertAttributedTextEntries(
                 start,
                 listOf(ItemContent.TextEmbed(doc.storeValue(embed, parent = name), normalizeTextAttributes(attributes), kind = kind)),
+                normalizeTextAttributes(attributes),
             )
         }
     }
@@ -786,27 +788,7 @@ open class YText internal constructor(
         if (length <= 0 || attributes.isEmpty()) return
         require(start + length <= this.length) { "format range is out of bounds" }
         doc.transact {
-            val visible = textItems()
-            val formatAttributes = normalizeTextFormatAttributes(attributes)
-            val formatItem = StoreItem(
-                id = doc.nextId(),
-                origin = visible.getOrNull(start - 1)?.id,
-                rightOrigin = visible.getOrNull(start)?.id,
-                parent = name,
-                parentSub = null,
-                content = ItemContent.TextFormat(
-                    target = visible[start].id,
-                    length = length.toLong(),
-                    attributes = formatAttributes,
-                    afterAttributes = textFormatAfterAttributes(visible, start + length, formatAttributes.keys),
-                    beforeAttributes = textFormatBeforeAttributes(
-                        visible.subList(start, start + length),
-                        formatAttributes.keys,
-                    ),
-                    kind = kind,
-                ),
-            )
-            doc.integrateLocal(formatItem)
+            formatNativeRange(start, length, normalizeTextFormatAttributes(attributes))
         }
     }
 
@@ -816,27 +798,7 @@ open class YText internal constructor(
         if (length <= 0 || attributes.isEmpty()) return
         require(start + length <= this.length) { "format range is out of bounds" }
         doc.transact(origin = origin) {
-            val visible = textItems()
-            val formatAttributes = normalizeTextFormatAttributes(attributes)
-            val formatItem = StoreItem(
-                id = doc.nextId(),
-                origin = visible.getOrNull(start - 1)?.id,
-                rightOrigin = visible.getOrNull(start)?.id,
-                parent = name,
-                parentSub = null,
-                content = ItemContent.TextFormat(
-                    target = visible[start].id,
-                    length = length.toLong(),
-                    attributes = formatAttributes,
-                    afterAttributes = textFormatAfterAttributes(visible, start + length, formatAttributes.keys),
-                    beforeAttributes = textFormatBeforeAttributes(
-                        visible.subList(start, start + length),
-                        formatAttributes.keys,
-                    ),
-                    kind = kind,
-                ),
-            )
-            doc.integrateLocal(formatItem)
+            formatNativeRange(start, length, normalizeTextFormatAttributes(attributes))
         }
     }
 
@@ -1048,6 +1010,97 @@ open class YText internal constructor(
             origin = item.id
         }
     }
+
+    private fun insertAttributedTextEntries(
+        index: Int,
+        entries: List<ItemContent>,
+        attributes: Map<String, YValue>,
+    ) {
+        val hasNativeMarkers = doc.sequence(name).any { item ->
+            !item.deleted && item.content.kind == kind && item.content is ItemContent.NativeTextFormat
+        }
+        if (attributes.isEmpty() || !hasNativeMarkers) {
+            insertTextEntries(index, entries)
+            return
+        }
+        val visible = textItems()
+        val ambient = visible.getOrNull(index)?.content?.textAttributes() ?: run {
+            val active = linkedMapOf<String, YValue>()
+            doc.sequence(name).forEach { item ->
+                val marker = item.content as? ItemContent.NativeTextFormat
+                if (!item.deleted && marker?.kind == kind) active.applyTextFormatAttributes(mapOf(marker.key to marker.value))
+            }
+            active
+        }
+        val keys = (ambient.keys + attributes.keys).toSortedSet()
+        val desired = keys.associateWith { key -> attributes[key] ?: YValue.Null }
+        val restore = keys.associateWith { key -> ambient[key] ?: YValue.Null }
+        val anchors = doc.insertionAnchors(name, kind, index)
+        val markerOrigin = insertNativeFormatMarkers(index, desired)
+        insertTextEntries(
+            index,
+            entries.map { entry -> entry.withTextAttributes(emptyMap()) },
+            originOverride = markerOrigin ?: anchors.first,
+            rightOriginOverride = anchors.second,
+        )
+        insertNativeFormatMarkers(index + entries.size, restore)
+    }
+
+    private fun formatNativeRange(start: Int, length: Int, attributes: Map<String, YValue>) {
+        val visible = textItems()
+        val desired = visible.map { item -> item.content.textAttributes().toMutableMap() }
+        for (index in start until start + length) {
+            desired[index].applyTextFormatAttributes(attributes)
+        }
+        val nativeMarkers = doc.sequence(name)
+            .filter { item ->
+                !item.deleted && item.content.kind == kind && item.content is ItemContent.NativeTextFormat
+            }
+        doc.deleteItemsByIds(nativeMarkers.map { item -> item.id })
+
+        val active = linkedMapOf<String, YValue>()
+        visible.forEachIndexed { index, item ->
+            val base = item.content.baseTextAttributes()
+            val target = desired[index]
+            val effective = base.toMutableMap().also { attrs -> attrs.applyTextFormatAttributes(active) }
+            val keys = (effective.keys + target.keys + active.keys).toSortedSet()
+            val changes = linkedMapOf<String, YValue>()
+            keys.forEach { key ->
+                val current = effective[key]
+                val next = target[key]
+                if (current != next) {
+                    val markerValue = next ?: YValue.Null
+                    changes[key] = markerValue
+                    active[key] = markerValue
+                }
+            }
+            insertNativeFormatMarkers(index, changes)
+        }
+        val terminalChanges = active
+            .filterValues { value -> value != YValue.Null }
+            .keys
+            .associateWith { YValue.Null }
+        insertNativeFormatMarkers(visible.size, terminalChanges)
+    }
+
+    private fun insertNativeFormatMarkers(index: Int, attributes: Map<String, YValue>): Id? {
+        if (attributes.isEmpty()) return null
+        val anchors = doc.insertionAnchors(name, kind, index)
+        var origin = anchors.first
+        attributes.forEach { (key, value) ->
+            val item = StoreItem(
+                id = doc.nextId(),
+                origin = origin,
+                rightOrigin = anchors.second,
+                parent = name,
+                parentSub = null,
+                content = ItemContent.NativeTextFormat(key, value, kind),
+            )
+            doc.integrateLocal(item)
+            origin = item.id
+        }
+        return origin
+    }
 }
 
 private fun List<*>.textInsertLength(): Int =
@@ -1067,6 +1120,18 @@ private fun ItemContent.textAttributes(): Map<String, YValue> = when (this) {
     is ItemContent.Text -> attributes
     is ItemContent.TextEmbed -> attributes
     else -> error("content is not text-like")
+}
+
+private fun ItemContent.baseTextAttributes(): Map<String, YValue> = when (this) {
+    is ItemContent.Text -> baseAttributes
+    is ItemContent.TextEmbed -> baseAttributes
+    else -> error("content is not text-like")
+}
+
+private fun MutableMap<String, YValue>.applyTextFormatAttributes(attributes: Map<String, YValue>) {
+    attributes.forEach { (key, value) ->
+        if (value == YValue.Null) remove(key) else this[key] = value
+    }
 }
 
 private fun ItemContent.withTextAttributes(attributes: Map<String, YValue>): ItemContent = when (this) {

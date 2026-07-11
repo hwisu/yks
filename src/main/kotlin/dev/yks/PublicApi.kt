@@ -128,9 +128,6 @@ fun typeXmlFragmentToDeltaSnapshot(parent: YXmlFragment, snapshot: Snapshot): Li
 
 fun cleanupYTextFormatting(type: YText): Int {
     if (!type.doc.cleanupFormatting) return 0
-    // Native Yjs markers are order-sensitive. Keep the legacy range cleanup
-    // conservative until marker equivalence can be proven across both models.
-    if (type.hasNativeTextFormatMarkersForCleanup()) return 0
     var cleaned = 0
     type.doc.transact {
         var activeFormats = type.liveTextFormatItemsForCleanup()
@@ -218,24 +215,37 @@ private fun Id.logId(): String = "$client:$clock"
 private val textFormatCleanupOrder: Comparator<StoreItem> =
     compareByDescending<StoreItem> { it.id.client }.thenBy { it.id.clock }
 
-private fun YText.hasNativeTextFormatMarkersForCleanup(): Boolean =
-    doc.sequence(name).any { item ->
-        !item.deleted && item.content.kind == kind && item.content is ItemContent.NativeTextFormat
-    }
-
 private fun YText.liveTextFormatItemsForCleanup(): List<StoreItem> =
     doc.sequence(name)
-        .filter { item -> !item.deleted && item.content.kind == kind && item.content is ItemContent.TextFormat }
+        .filter { item ->
+            !item.deleted && item.content.kind == kind &&
+                (item.content is ItemContent.TextFormat || item.content is ItemContent.NativeTextFormat)
+        }
         .sortedWith(textFormatCleanupOrder)
 
 private fun YText.renderedTextAttributesForCleanup(
     formatItems: List<StoreItem>,
 ): List<Map<String, YValue>> {
-    val textItems = doc.sequence(name)
-        .filter { item -> !item.deleted && item.content.kind == kind && item.content.isTextCountableForCleanup() }
-    val attributes = textItems.map { item -> item.content.baseTextAttributesForCleanup().toMutableMap() }
+    val liveFormatIds = formatItems.mapTo(hashSetOf()) { item -> item.id }
+    val textItems = mutableListOf<StoreItem>()
+    val attributes = mutableListOf<MutableMap<String, YValue>>()
+    val activeNative = linkedMapOf<String, YValue>()
+    doc.sequence(name).forEach { item ->
+        if (item.deleted || item.content.kind != kind) return@forEach
+        when (val content = item.content) {
+            is ItemContent.NativeTextFormat -> if (item.id in liveFormatIds) {
+                activeNative[content.key] = content.value
+            }
+            else -> if (content.isTextCountableForCleanup()) {
+                textItems.add(item)
+                val attrs = content.baseTextAttributesForCleanup().toMutableMap()
+                attrs.applyTextFormatAttributesForCleanup(activeNative)
+                attributes.add(attrs)
+            }
+        }
+    }
 
-    formatItems.sortedWith(textFormatCleanupOrder).forEach { formatItem ->
+    formatItems.filter { it.content is ItemContent.TextFormat }.sortedWith(textFormatCleanupOrder).forEach { formatItem ->
         val format = formatItem.content as? ItemContent.TextFormat ?: return@forEach
         val start = textItems.indexOfFirst { textItem -> textItem.id == format.target }
         if (start < 0) return@forEach
@@ -248,7 +258,10 @@ private fun YText.renderedTextAttributesForCleanup(
         }
     }
 
-    return attributes.map { attrs -> attrs.toSortedMap() }
+    val terminal = activeNative
+        .filterValues { value -> value != YValue.Null }
+        .toSortedMap()
+    return attributes.map { attrs -> attrs.toSortedMap() } + terminal
 }
 
 private fun MutableMap<String, YValue>.applyTextFormatAttributesForCleanup(attributes: Map<String, YValue>) {

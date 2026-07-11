@@ -209,7 +209,52 @@ private fun textFormatAttributionsByTarget(
                     .mergeTextAttribution(renderedFormatAttribution)
             }
         }
+
+    val activeNativeAttributions = linkedMapOf<String, Map<String, Any?>>()
+    type.doc.sequence(type.name).forEach { item ->
+        if (item.content.kind != type.kind) return@forEach
+        when (val content = item.content) {
+            is ItemContent.NativeTextFormat -> {
+                val attribution = if (content.value == YValue.Null) {
+                    emptyMap()
+                } else {
+                    item.readRenderedContents(type.doc, options)
+                        .map { rendered -> nativeFormatAttribution(content.key, rendered.attrs, rendered.deleted) }
+                        .fold(emptyMap<String, Any?>()) { merged, value -> merged.mergeTextAttribution(value) }
+                }
+                activeNativeAttributions[content.key] = attribution
+            }
+            is ItemContent.Text,
+            is ItemContent.TextEmbed -> {
+                val attribution = activeNativeAttributions.values.fold(emptyMap<String, Any?>()) { merged, value ->
+                    merged.mergeTextAttribution(value)
+                }
+                if (attribution.isNotEmpty()) {
+                    attributionsByTarget[item.id] = attributionsByTarget[item.id]
+                        .orEmpty()
+                        .mergeTextAttribution(attribution)
+                }
+            }
+            else -> Unit
+        }
+    }
     return attributionsByTarget
+}
+
+private fun nativeFormatAttribution(
+    key: String,
+    attrs: List<ContentAttribute>?,
+    deleted: Boolean,
+): Map<String, Any?> {
+    if (attrs == null) return emptyMap()
+    val by = attrs.mapNotNull { attr ->
+        when (attr.name) {
+            "insert" -> if (!deleted) attr.`val` else null
+            "delete" -> if (deleted) attr.`val` else null
+            else -> null
+        }
+    }
+    return mapOf("format" to mapOf(key to by))
 }
 
 private fun ItemContent.TextFormat.formatAttribution(

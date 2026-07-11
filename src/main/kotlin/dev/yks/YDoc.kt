@@ -1135,6 +1135,8 @@ class YDoc(
                     id = nextId(),
                     origin = if (source.parentSub != null) {
                         mapOrigin
+                    } else if (source.content is ItemContent.NativeTextFormat) {
+                        source.origin?.let { restoredByOriginal[it] } ?: source.origin?.let(::followRedone)
                     } else if (original.anchorAfterOriginal) {
                         source.origin?.let { restoredByOriginal[it] } ?: source.id
                     } else {
@@ -1142,6 +1144,8 @@ class YDoc(
                     },
                     rightOrigin = if (source.parentSub != null) {
                         null
+                    } else if (source.content is ItemContent.NativeTextFormat) {
+                        source.rightOrigin?.let { restoredByOriginal[it] } ?: source.rightOrigin?.let(::followRedone)
                     } else if (original.anchorAfterOriginal) {
                         inferRightOrigin(source)
                     } else {

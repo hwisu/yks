@@ -817,7 +817,7 @@ class YTextDeltaTest {
     }
 
     @Test
-    fun cleanupYTextFormattingRemovesDuplicateFormatRanges() {
+    fun repeatedNativeFormattingStaysCanonicalWithoutCleanup() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("body")
         val cleanupTransactions = mutableListOf<YTransactionEvent>()
@@ -828,19 +828,16 @@ class YTextDeltaTest {
         doc.observeAfterTransactions { event -> cleanupTransactions.add(event) }
 
         assertEquals(2, text.liveFormatItemCountForTest())
-        assertEquals(1, cleanupYTextFormatting(text))
+        assertEquals(0, cleanupYTextFormatting(text))
 
         assertEquals(before, text.toDelta())
         assertEquals(YTextDelta().insert("abc", mapOf("bold" to true)), text.toDelta())
-        assertEquals(1, text.liveFormatItemCountForTest())
-        assertEquals(1, cleanupTransactions.size)
-        assertEquals(1, cleanupTransactions.single().deletedItemCount)
-        assertEquals(listOf(1L to IdRange(3, 1)), cleanupTransactions.single().cleanUps.ranges())
-        assertEquals(setOf(text), cleanupTransactions.single().changedTypes)
+        assertEquals(2, text.liveFormatItemCountForTest())
+        assertEquals(0, cleanupTransactions.size)
     }
 
     @Test
-    fun cleanupYTextFormattingRemovesFullyOverwrittenFormatRanges() {
+    fun overwrittenNativeFormattingStaysCanonicalWithoutCleanup() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("body")
         text.insert(0, "abc")
@@ -849,11 +846,11 @@ class YTextDeltaTest {
         val before = text.toDelta()
 
         assertEquals(2, text.liveFormatItemCountForTest())
-        assertEquals(1, cleanupYTextFormatting(text))
+        assertEquals(0, cleanupYTextFormatting(text))
 
         assertEquals(before, text.toDelta())
         assertEquals(YTextDelta().insert("abc", mapOf("bold" to false)), text.toDelta())
-        assertEquals(1, text.liveFormatItemCountForTest())
+        assertEquals(2, text.liveFormatItemCountForTest())
     }
 
     @Test

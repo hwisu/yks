@@ -411,6 +411,42 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun upstreamYjsAppliesNativeRangeFormattingAuthoredByKotlin() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val text = doc.getText("body")
+        text.insert(0, "abcd")
+        val baseline = encodeStateAsUpdate(doc)
+        val baselineState = encodeStateVector(doc)
+
+        text.format(1, 2, mapOf("bold" to true))
+        val full = encodeStateAsUpdate(doc)
+        val incremental = encodeStateAsUpdate(doc, baselineState)
+
+        assertStandardV1(full)
+        assertStandardV1(incremental)
+        assertUpstreamAppliesUpdate(full, "partial-formatted-text")
+        assertUpstreamAppliesSequence("partial-formatted-text", baseline, incremental)
+    }
+
+    @Test
+    fun upstreamYjsAppliesNativeXmlTextFormattingAuthoredByKotlin() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val fragment = doc.getXmlFragment("xml")
+        val paragraph = doc.createXmlElement("p")
+        fragment.push(paragraph)
+        paragraph.setAttr("class", "intro")
+        val text = doc.createXmlText()
+        paragraph.push(text)
+        text.insert(0, "hi")
+        text.format(0, 2, mapOf("strong" to mapOf("level" to "1")))
+
+        val update = encodeStateAsUpdate(doc)
+
+        assertStandardV1(update)
+        assertUpstreamAppliesUpdate(update, "xml-formatted")
+    }
+
+    @Test
     fun legacyTransactionUpdatePreservesNativeFormatMarkers() {
         val source = YDoc(clientId = 2, gc = false)
         val updates = mutableListOf<ByteArray>()
