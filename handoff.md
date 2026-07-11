@@ -7,14 +7,15 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 18개 커밋 앞서 있음
+- 현재 `origin/main`보다 19개 커밋 앞서 있음
 - 아직 push하지 않음
 - XML 문자열 surface parity 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
 
 현재 커밋 이력:
 
 ```text
-HEAD feat: emit standard root transaction updates
+HEAD feat: preserve pending GC update metadata
+828c39d feat: emit standard root transaction updates
 a1e550e feat: harden Yjs update decoding
 e6a9b59 feat: extend native Yjs subdocument parity
 50a6505 feat: match upstream Yjs XML rendering
@@ -54,9 +55,9 @@ a19f4ac feat: decode and integrate Yjs V1 updates
 
 ### 2. 표준 Yjs update V1 codec 기반
 
-- 기존 private `YKS\x01` codec은 `LegacyUpdateCodec`으로 유지
+- 기존 private `YKS\x01` decode compatibility를 유지하고 writer는 metadata-capable `YKS\x02` 사용
 - 새 `UpdateCodec`은 다음처럼 dispatch함:
-  - `YKS\x01` magic이면 legacy decode
+  - `YKS\x01`/`YKS\x02` magic이면 legacy decode
   - 그 외에는 표준 Yjs update V1 decode
   - V1로 손실 없이 표현 가능한 update만 표준 V1으로 encode
   - 아직 표현하지 못하는 update는 legacy envelope로 fallback
@@ -248,6 +249,14 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - pre-populated detached nested owner, nested child mutation, delete-set transaction은 이름/GC metadata 완성 전까지 legacy 유지
 - 이 제한으로 기존 bidirectional UndoManager 동기화 의미를 보존
 
+### 16. pending/GC private serialization metadata
+
+- private fallback writer를 `YKS\x02`로 올리고 `requiresClockContinuity`와 `isGc`를 item마다 직렬화
+- 기존 `YKS\x01` payload는 metadata 기본값으로 계속 decode
+- pending struct view를 decode/re-encode해도 GC와 clock-continuity metadata가 보존되는 regression test 추가
+- sparse content intersection은 의도적인 standalone chunk이므로 continuity requirement를 명시적으로 해제
+- V1/V2 native GC fixture의 clock ownership/convergence 검증과 함께 pending metadata 손실 제거
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -327,7 +336,7 @@ subdoc-duplicate-guid-v1.bin
 BUILD SUCCESSFUL
 ```
 
-- 일반 Kotlin tests: 518 passed
+- 일반 Kotlin tests: 521 passed
 - Kotlin Yjs V1/V2 interop tests: 68 passed
 - JavaScript/Yjs oracle tests: 74 passed
 - `git diff --check`: passed
@@ -352,9 +361,9 @@ git diff --check
    - root `XmlElement` node name은 wire에 없으므로 schema/pre-materialization이 필요함
 2. subdocument 확장
    - upstream에 없는 local options 처리 정책
-3. GC/pending serialization 완성
-   - GC를 unit `StoreItem`으로 근사 중
-   - 일부 legacy pending serialization은 `isGc`/clock-continuity metadata를 완전히 표현하지 못함
+3. GC storage compactness
+   - wire/pending metadata와 clock semantics는 보존함
+   - GC range를 내부에서 unit `StoreItem`으로 펼치므로 큰 GC range의 메모리 최적화는 남아 있음
 4. transaction-event V1 update
    - `updateV2`는 genuine V2로 전환 완료
    - root의 safe `update` event는 표준 V1로 전환 완료

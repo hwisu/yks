@@ -879,4 +879,4 @@ private fun gcParentName(client: Long): String = "__yjs_gc__:$client"
 
 private fun ByteArray.hasLegacyMagic(): Boolean =
     size >= 4 && this[0] == 'Y'.code.toByte() && this[1] == 'K'.code.toByte() &&
-        this[2] == 'S'.code.toByte() && this[3] == 1.toByte()
+        this[2] == 'S'.code.toByte() && (this[3] == 1.toByte() || this[3] == 2.toByte())

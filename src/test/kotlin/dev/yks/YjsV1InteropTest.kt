@@ -503,7 +503,7 @@ class YjsV1InteropTest {
 
         val update = encodeStateAsUpdate(doc)
 
-        assertTrue(!update.copyOfRange(0, 4).contentEquals(byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 1)))
+        assertStandardV1(update)
         assertUpstreamAppliesUpdate(update, "formatted-text")
     }
 
@@ -517,10 +517,7 @@ class YjsV1InteropTest {
 
         val incremental = encodeStateAsUpdate(doc, baselineState)
 
-        assertTrue(
-            !incremental.copyOfRange(0, 4)
-                .contentEquals(byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 1)),
-        )
+        assertStandardV1(incremental)
         assertUpstreamAppliesSequence("partial-formatted-text", baseline, incremental)
     }
 
@@ -1089,15 +1086,15 @@ class YjsV1InteropTest {
 
     private fun assertStandardV1(update: ByteArray) {
         assertTrue(
-            !update.copyOfRange(0, 4)
-                .contentEquals(byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 1)),
+            update.size < 4 || update[0] != 'Y'.code.toByte() || update[1] != 'K'.code.toByte() ||
+                update[2] != 'S'.code.toByte(),
         )
     }
 
     private fun assertLegacyYks(update: ByteArray) {
         assertTrue(
-            update.copyOfRange(0, 4)
-                .contentEquals(byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 1)),
+            update.size >= 4 && update[0] == 'Y'.code.toByte() && update[1] == 'K'.code.toByte() &&
+                update[2] == 'S'.code.toByte() && update[3] in setOf(1.toByte(), 2.toByte()),
         )
     }
 

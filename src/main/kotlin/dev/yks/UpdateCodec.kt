@@ -1,6 +1,6 @@
 package dev.yks
 
-private val updateMagic = byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 1)
+private val updateMagicV2 = byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 2)
 
 internal data class DocumentUpdate(
     val items: List<StoreItem>,
@@ -20,7 +20,7 @@ internal object LegacyUpdateCodec {
     }
 
     fun write(encoder: BinaryEncoder, update: DocumentUpdate): BinaryEncoder {
-        updateMagic.forEach { encoder.writeByte(it.toInt()) }
+        updateMagicV2.forEach { encoder.writeByte(it.toInt()) }
         encoder.writeVarUInt(update.items.size.toLong())
         update.items.sortedWith(compareBy<StoreItem> { it.id.client }.thenBy { it.id.clock }).forEach { item ->
             writeItem(encoder, item)
@@ -33,14 +33,15 @@ internal object LegacyUpdateCodec {
         decode(BinaryDecoder(bytes))
 
     fun decode(decoder: BinaryDecoder): DocumentUpdate {
-        updateMagic.forEach { expected ->
-            val actual = decoder.readByte().toByte()
-            check(actual == expected) { "unsupported update format" }
+        check(decoder.readByte() == 'Y'.code && decoder.readByte() == 'K'.code && decoder.readByte() == 'S'.code) {
+            "unsupported update format"
         }
+        val version = decoder.readByte()
+        check(version == 1 || version == 2) { "unsupported legacy update version: $version" }
         val itemCount = decoder.readVarUInt().toDecodedCount()
         val items = buildList {
             repeat(itemCount) {
-                add(readItem(decoder))
+                add(readItem(decoder, hasStructMetadata = version >= 2))
             }
         }
         val deleteSet = readDeleteSet(decoder)
@@ -57,6 +58,8 @@ internal object LegacyUpdateCodec {
         encoder.writeBoolean(item.parentSub != null)
         item.parentSub?.let(encoder::writeString)
         encoder.writeBoolean(item.deleted)
+        encoder.writeBoolean(item.requiresClockContinuity)
+        encoder.writeBoolean(item.isGc)
         when (val content = item.content) {
             is ItemContent.Value -> {
                 encoder.writeByte(0)
@@ -131,13 +134,15 @@ internal object LegacyUpdateCodec {
         }
     }
 
-    private fun readItem(decoder: BinaryDecoder): StoreItem {
+    private fun readItem(decoder: BinaryDecoder, hasStructMetadata: Boolean): StoreItem {
         val id = Id(decoder.readVarUInt(), decoder.readVarUInt())
         val origin = readNullableId(decoder)
         val rightOrigin = readNullableId(decoder)
         val parent = decoder.readString()
         val parentSub = if (decoder.readBoolean()) decoder.readString() else null
         val deleted = decoder.readBoolean()
+        val requiresClockContinuity = hasStructMetadata && decoder.readBoolean()
+        val isGc = hasStructMetadata && decoder.readBoolean()
         val content = when (val tag = decoder.readByte()) {
             0 -> ItemContent.Value(readYValue(decoder))
             1 -> {
@@ -202,7 +207,17 @@ internal object LegacyUpdateCodec {
             }
             else -> error("unknown item content tag: $tag")
         }
-        return StoreItem(id, origin, rightOrigin, parent, parentSub, content, deleted)
+        return StoreItem(
+            id,
+            origin,
+            rightOrigin,
+            parent,
+            parentSub,
+            content,
+            deleted,
+            requiresClockContinuity = requiresClockContinuity,
+            isGc = isGc,
+        )
     }
 
     private fun writeRootKind(encoder: BinaryEncoder, kind: RootKind) {

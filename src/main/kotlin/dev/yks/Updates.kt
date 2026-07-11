@@ -663,7 +663,9 @@ fun createContentIdsFromUpdateV2(update: ByteArray): ContentIds {
 
 fun intersectUpdateWithContentIds(update: ByteArray, contentIds: ContentIds): ByteArray {
     val decoded = UpdateCodec.decode(update)
-    val filteredItems = decoded.items.filter { contentIds.inserts.hasId(it.id) }
+    val filteredItems = decoded.items
+        .filter { contentIds.inserts.hasId(it.id) }
+        .map { item -> item.copy(requiresClockContinuity = false) }
     val filteredDeletes = decoded.deleteSet.toIdSet()
         .let { intersectSets(it, contentIds.deletes) }
         .toDeleteSet()
