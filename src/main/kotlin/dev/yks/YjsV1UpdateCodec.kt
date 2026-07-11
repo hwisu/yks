@@ -166,14 +166,11 @@ internal object UpdateCodec {
             is YValue.TypeRef -> writeTypeContent(encoder, value.kind, value.name)
             is YValue.SubdocRef -> {
                 encoder.writeString(value.guid)
-                writeLib0Any(
-                    encoder,
-                    mapOf(
-                        "gc" to value.gc,
-                        "autoLoad" to value.autoLoad,
-                        "meta" to value.meta.toAny(),
-                    ),
-                )
+                val options = linkedMapOf<String, Any?>()
+                if (!value.gc) options["gc"] = false
+                if (value.autoLoad) options["autoLoad"] = true
+                if (value.meta != YValue.Null) options["meta"] = value.meta.toAny()
+                writeLib0Any(encoder, options)
             }
             else -> {
                 encoder.writeVarUInt(1)
@@ -211,7 +208,14 @@ internal object UpdateCodec {
         contentAnyRefNumber -> WireContent.AnyContent(
             List(decoder.readVarUInt().toInt()) { readLib0Any(decoder) },
         )
-        contentDocRefNumber -> WireContent.Doc(decoder.readString(), readLib0Any(decoder))
+        contentDocRefNumber -> {
+            val guid = decoder.readString()
+            WireContent.Doc(
+                guid = guid,
+                options = readLib0Any(decoder),
+                instanceId = "__yjs_subdoc__:" + id.client + ":" + id.clock,
+            )
+        }
         else -> error("unknown Yjs item content ref: $ref")
     }
 
@@ -288,15 +292,29 @@ private fun StoreItem.hasCompatibleV1ParentKind(
 ): Boolean {
     val nestedKind = parentKinds[parent]
     return when (content) {
-        is ItemContent.MapEntry -> nestedKind?.let { kind -> kind == RootKind.Map }
-            ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.MapEntry }
+        is ItemContent.MapEntry -> when {
+            content.value is YValue.SubdocRef && nestedKind != null && nestedKind != RootKind.Map -> false
+            parentSub != null && nestedKind == RootKind.XmlFragment -> false
+            parentSub != null -> true
+            else -> nestedKind?.let { kind -> kind == RootKind.Map }
+                ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.MapEntry }
+        }
         is ItemContent.Value -> nestedKind?.let { kind -> kind == RootKind.Array }
             ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.Value }
         is ItemContent.Text,
-        is ItemContent.NativeTextFormat -> nestedKind?.let { kind -> kind == RootKind.Text }
-            ?: items.filter { item -> item.parent == parent }.all { item ->
-                item.content is ItemContent.Text || item.content is ItemContent.NativeTextFormat
+        is ItemContent.NativeTextFormat -> nestedKind?.let { kind -> kind == content.kind }
+            ?: items.filter { item -> item.parent == parent && item.parentSub == null }.all { item ->
+                item.content.kind == content.kind &&
+                    (item.content is ItemContent.Text || item.content is ItemContent.NativeTextFormat)
             }
+        is ItemContent.XmlType -> {
+            val xmlSequenceKinds = setOf(RootKind.XmlFragment, RootKind.XmlElement, RootKind.XmlHook)
+            content.kind in xmlSequenceKinds &&
+                (nestedKind?.let { kind -> kind == content.kind }
+                    ?: items.filter { item -> item.parent == parent && item.parentSub == null }.all { item ->
+                        item.content is ItemContent.XmlType && item.content.kind == content.kind
+                    })
+        }
         else -> false
     }
 }
@@ -305,14 +323,17 @@ private fun ItemContent.isSupportedV1Content(): Boolean = when (this) {
     is ItemContent.Value -> kind == RootKind.Array && value.isSupportedV1Value(topLevel = true)
     is ItemContent.MapEntry -> value.isSupportedV1Value(topLevel = true)
     is ItemContent.Text ->
-        kind == RootKind.Text &&
+        kind in setOf(RootKind.Text, RootKind.XmlText) &&
             !Character.isSurrogate(value.single()) &&
             baseAttributes.isEmpty()
     is ItemContent.TextEmbed -> false
     is ItemContent.TextFormat -> false
-    is ItemContent.NativeTextFormat -> kind == RootKind.Text && value.isSupportedV1Value(topLevel = false)
+    is ItemContent.NativeTextFormat ->
+        kind in setOf(RootKind.Text, RootKind.XmlText) && value.isSupportedV1Value(topLevel = false)
     is ItemContent.XmlNode -> false
-    is ItemContent.XmlType -> false
+    is ItemContent.XmlType ->
+        kind in setOf(RootKind.XmlFragment, RootKind.XmlElement, RootKind.XmlHook) &&
+            ref.kind in setOf(RootKind.XmlElement, RootKind.XmlHook, RootKind.XmlText)
     is ItemContent.Deleted -> false
 }
 
@@ -328,7 +349,12 @@ private fun YValue.isSupportedV1Value(topLevel: Boolean): Boolean = when (this) 
     is YValue.ListValue -> value.all { nested -> nested.isSupportedV1Value(topLevel = false) }
     is YValue.MapValue -> value.values.all { nested -> nested.isSupportedV1Value(topLevel = false) }
     is YValue.TypeRef -> topLevel && kind in setOf(RootKind.Array, RootKind.Map, RootKind.Text)
-    is YValue.SubdocRef -> false
+    is YValue.SubdocRef ->
+        topLevel &&
+            collectionId == null &&
+            !isSuggestionDoc &&
+            (!shouldLoad || autoLoad) &&
+            meta.isSupportedV1Value(topLevel = false)
 }
 
 private sealed interface EncodedStruct {
@@ -368,7 +394,9 @@ private sealed interface WireContent {
     data class Format(val key: String, val value: Any?) : WireContent { override val length: Long = 1 }
     data class Type(val kind: RootKind, val name: String, val nodeName: String) : WireContent { override val length: Long = 1 }
     data class AnyContent(val values: List<Any?>) : WireContent { override val length: Long get() = values.size.toLong() }
-    data class Doc(val guid: String, val options: Any?) : WireContent { override val length: Long = 1 }
+    data class Doc(val guid: String, val options: Any?, val instanceId: String) : WireContent {
+        override val length: Long = 1
+    }
 }
 
 private fun List<StoreItem>.withClockSkips(): List<EncodedStruct> {
@@ -427,13 +455,18 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
     fun resolveKind(item: DecodedWireItem, seen: Set<Id> = emptySet()): RootKind {
         resolvedKinds[item.id]?.let { return it }
         check(item.id !in seen) { "cyclic Yjs kind reference at ${item.id}" }
-        val kind = when (val reference = item.parent) {
-            is ParentReference.Nested -> (containing(reference.id)?.content as? WireContent.Type)?.kind
-            is ParentReference.Inherit -> containing(reference.id)
-                ?.takeUnless { anchor -> anchor.content is WireContent.Deleted }
-                ?.let { anchor -> resolveKind(anchor, seen + item.id) }
-            is ParentReference.Root -> null
-        } ?: item.content.inferRootKind(resolveParentSub(item))
+        val parentSub = resolveParentSub(item)
+        val kind = if (parentSub != null) {
+            RootKind.Map
+        } else {
+            when (val reference = item.parent) {
+                is ParentReference.Nested -> (containing(reference.id)?.content as? WireContent.Type)?.kind
+                is ParentReference.Inherit -> containing(reference.id)
+                    ?.takeUnless { anchor -> anchor.content is WireContent.Deleted }
+                    ?.let { anchor -> resolveKind(anchor, seen + item.id) }
+                is ParentReference.Root -> null
+            } ?: item.content.inferRootKind(parentSub)
+        }
         resolvedKinds[item.id] = kind
         return kind
     }
@@ -491,7 +524,7 @@ private fun WireContent.toItemContents(kind: RootKind): List<ItemContent> = when
             if (kind == RootKind.Map) ItemContent.MapEntry(value) else ItemContent.Value(value)
         },
     )
-    is WireContent.Doc -> listOf(options.toSubdocValue(guid).toSequenceContent(kind))
+    is WireContent.Doc -> listOf(options.toSubdocValue(guid, instanceId).toSequenceContent(kind))
 }
 
 private fun WireContent.Format.toItemContent(kind: RootKind): ItemContent {
@@ -531,16 +564,17 @@ private fun Any?.toSequenceContent(kind: RootKind): ItemContent {
     }
 }
 
-private fun Any?.toSubdocValue(guid: String): YValue.SubdocRef {
-    val options = this as? Map<*, *>
+private fun Any?.toSubdocValue(guid: String, instanceId: String): YValue.SubdocRef {
+    val options = this as? Map<*, *> ?: error("Yjs subdocument options must be an object")
+    val autoLoad = options["autoLoad"] as? Boolean ?: false
     return YValue.SubdocRef(
         guid = guid,
-        gc = options?.get("gc") as? Boolean ?: true,
-        shouldLoad = options?.get("autoLoad") as? Boolean ?: false,
-        autoLoad = options?.get("autoLoad") as? Boolean ?: false,
-        instanceId = guid,
-        collectionId = null,
-        meta = YValue.from(options?.get("meta")),
+        gc = options["gc"] as? Boolean ?: true,
+        shouldLoad = (options["shouldLoad"] as? Boolean ?: false) || autoLoad,
+        autoLoad = autoLoad,
+        instanceId = instanceId,
+        collectionId = options["collectionId"] as? String ?: options["collectionid"] as? String,
+        meta = YValue.from(options["meta"]),
         isSuggestionDoc = false,
     )
 }

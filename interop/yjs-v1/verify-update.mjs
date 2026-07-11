@@ -24,7 +24,9 @@ if (scenario === 'hello') {
   const actual = new Y.Doc()
   Y.applyUpdate(actual, fs.readFileSync(input))
   materializeScenario(actual, scenario)
-  assert.deepEqual(actual.toJSON(), expected.toJSON())
+  if (scenario !== 'subdoc-map' && scenario !== 'subdoc-array') {
+    assert.deepEqual(actual.toJSON(), expected.toJSON())
+  }
   assert.deepEqual(Y.encodeStateVector(actual), Y.encodeStateVector(expected))
   if (scenario === 'formatted-text' || scenario === 'partial-formatted-text') {
     assert.deepEqual(actual.getText('body').toDelta(), expected.getText('body').toDelta())
@@ -34,5 +36,19 @@ if (scenario === 'hello') {
   }
   if (scenario === 'nested-text') {
     assert.ok(actual.getArray('nodes').get(0) instanceof Y.Text)
+  }
+  if (scenario === 'subdoc-map') {
+    const child = actual.getMap('subs').get('child')
+    assert.ok(child instanceof Y.Doc)
+    assert.equal(child.guid, 'child')
+  }
+  if (scenario === 'subdoc-array') {
+    const child = actual.getArray('subs').get(0)
+    assert.ok(child instanceof Y.Doc)
+    assert.equal(child.guid, 'child-guid')
+    assert.equal(child.gc, false)
+    assert.equal(child.shouldLoad, true)
+    assert.equal(child.autoLoad, true)
+    assert.deepEqual(child.meta, { role: 'child' })
   }
 }

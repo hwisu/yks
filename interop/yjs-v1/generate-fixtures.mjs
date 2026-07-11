@@ -187,3 +187,78 @@ gcRoot.insert(0, [gcChild])
 gcChild.set('value', 1)
 gcRoot.delete(0)
 writeFixture('gc-nested-delete-v1', Y.encodeStateAsUpdate(gcNested))
+
+const xml = new Y.Doc({ gc: false })
+xml.clientID = 1
+const xmlUpdates = []
+xml.on('update', value => xmlUpdates.push(value))
+const xmlRoot = xml.getXmlFragment('xml')
+const paragraph = new Y.XmlElement('p')
+xmlRoot.insert(0, [paragraph])
+xml.transact(() => {
+  paragraph.setAttribute('class', 'intro')
+  const text = new Y.XmlText()
+  paragraph.insert(0, [text])
+  text.insert(0, 'hi')
+})
+writeFixture('xml-owner-v1', xmlUpdates[0])
+writeFixture('xml-content-v1', xmlUpdates[1])
+writeFixture('xml-basic-full-v1', Y.encodeStateAsUpdate(xml))
+
+const formattedXml = new Y.Doc({ gc: false })
+formattedXml.clientID = 1
+const formattedXmlParagraph = new Y.XmlElement('p')
+formattedXml.getXmlFragment('xml').insert(0, [formattedXmlParagraph])
+formattedXmlParagraph.setAttribute('class', 'intro')
+const formattedXmlText = new Y.XmlText()
+formattedXmlParagraph.insert(0, [formattedXmlText])
+formattedXmlText.insert(0, 'hi', { strong: { level: '1' } })
+writeFixture('xml-formatted-full-v1', Y.encodeStateAsUpdate(formattedXml))
+
+const crossXml = new Y.Doc({ gc: false })
+Y.applyUpdate(crossXml, xmlUpdates[0])
+crossXml.clientID = 2
+const crossXmlUpdates = []
+crossXml.on('update', value => crossXmlUpdates.push(value))
+crossXml.transact(() => {
+  const remoteParagraph = crossXml.getXmlFragment('xml').get(0)
+  remoteParagraph.setAttribute('class', 'remote')
+  const text = new Y.XmlText()
+  remoteParagraph.insert(0, [text])
+  text.insert(0, 'ok')
+})
+writeFixture('xml-cross-client-content-v1', crossXmlUpdates[0])
+
+const rootXmlElement = new Y.Doc({ gc: false })
+rootXmlElement.clientID = 1
+const article = rootXmlElement.getXmlElement('article')
+article.setAttribute('class', 'root')
+const articleText = new Y.XmlText()
+article.insert(0, [articleText])
+articleText.insert(0, 'hi')
+writeFixture('xml-root-element-v1', Y.encodeStateAsUpdate(rootXmlElement))
+
+const subdocMap = new Y.Doc({ gc: false })
+subdocMap.clientID = 1
+subdocMap.getMap('subs').set('child', new Y.Doc({ guid: 'child' }))
+writeFixture('subdoc-map-default-v1', Y.encodeStateAsUpdate(subdocMap))
+
+const subdocArray = new Y.Doc({ gc: false })
+subdocArray.clientID = 1
+subdocArray.getArray('subs').insert(0, [
+  new Y.Doc({
+    guid: 'child-guid',
+    gc: false,
+    autoLoad: true,
+    meta: { role: 'child' },
+  }),
+])
+writeFixture('subdoc-array-options-v1', Y.encodeStateAsUpdate(subdocArray))
+
+const duplicateSubdocs = new Y.Doc({ gc: false })
+duplicateSubdocs.clientID = 1
+duplicateSubdocs.getArray('subs').insert(0, [
+  new Y.Doc({ guid: 'same-guid' }),
+  new Y.Doc({ guid: 'same-guid' }),
+])
+writeFixture('subdoc-duplicate-guid-v1', Y.encodeStateAsUpdate(duplicateSubdocs))

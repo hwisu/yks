@@ -158,6 +158,101 @@ test('native format markers restore a previous non-null value', () => {
   ])
 })
 
+const assertXml = (doc, expected = '<p class="intro">hi</p>') => {
+  const fragment = doc.getXmlFragment('xml')
+  assert.equal(fragment.toString(), expected)
+  const paragraph = fragment.get(0)
+  assert.ok(paragraph instanceof Y.XmlElement)
+  assert.ok(paragraph.get(0) instanceof Y.XmlText)
+}
+
+test('native XML fixture preserves element attributes and text types', () => {
+  const doc = new Y.Doc({ gc: false })
+  Y.applyUpdate(doc, fixture('xml-basic-full-v1'))
+  assertXml(doc)
+  assert.deepEqual(Array.from(Y.decodeStateVector(Y.encodeStateVector(doc))), [[1, 5]])
+})
+
+test('root XML element fixture preserves attributes and nested text', () => {
+  const doc = new Y.Doc({ gc: false })
+  Y.applyUpdate(doc, fixture('xml-root-element-v1'))
+  const article = doc.getXmlElement('article')
+  assert.equal(article.toString(), '<undefined class="root">hi</undefined>')
+  assert.ok(article.get(0) instanceof Y.XmlText)
+})
+
+test('formatted XML text preserves native format markers', () => {
+  const doc = new Y.Doc({ gc: false })
+  Y.applyUpdate(doc, fixture('xml-formatted-full-v1'))
+  const paragraph = doc.getXmlFragment('xml').get(0)
+  const text = paragraph.get(0)
+  assert.deepEqual(text.toDelta(), [
+    { insert: 'hi', attributes: { strong: { level: '1' } } },
+  ])
+  assert.equal(doc.getXmlFragment('xml').toString(), '<p class="intro"><strong level="1">hi</strong></p>')
+})
+
+for (const names of [
+  ['xml-owner-v1', 'xml-content-v1'],
+  ['xml-content-v1', 'xml-owner-v1'],
+]) {
+  test(`XML fixtures converge in order ${names.join(', ')}`, () => {
+    const doc = new Y.Doc({ gc: false })
+    for (const name of names) Y.applyUpdate(doc, fixture(name))
+    assertXml(doc)
+    assert.equal(doc.store.pendingStructs, null)
+  })
+}
+
+for (const names of [
+  ['xml-owner-v1', 'xml-cross-client-content-v1'],
+  ['xml-cross-client-content-v1', 'xml-owner-v1'],
+]) {
+  test(`cross-client XML fixtures converge in order ${names.join(', ')}`, () => {
+    const doc = new Y.Doc({ gc: false })
+    for (const name of names) Y.applyUpdate(doc, fixture(name))
+    assertXml(doc, '<p class="remote">ok</p>')
+    assert.deepEqual(Array.from(Y.decodeStateVector(Y.encodeStateVector(doc))), [[2, 4], [1, 1]])
+    assert.equal(doc.store.pendingStructs, null)
+  })
+}
+
+test('subdocument map fixture preserves default options', () => {
+  const doc = new Y.Doc({ gc: false })
+  Y.applyUpdate(doc, fixture('subdoc-map-default-v1'))
+  const child = doc.getMap('subs').get('child')
+  assert.ok(child instanceof Y.Doc)
+  assert.equal(child.guid, 'child')
+  assert.equal(child.gc, true)
+  assert.equal(child.shouldLoad, false)
+  assert.equal(child.autoLoad, false)
+  assert.equal(child.meta, null)
+})
+
+test('subdocument array fixture preserves standard options', () => {
+  const doc = new Y.Doc({ gc: false })
+  Y.applyUpdate(doc, fixture('subdoc-array-options-v1'))
+  const child = doc.getArray('subs').get(0)
+  assert.ok(child instanceof Y.Doc)
+  assert.equal(child.guid, 'child-guid')
+  assert.equal(child.gc, false)
+  assert.equal(child.shouldLoad, true)
+  assert.equal(child.autoLoad, true)
+  assert.deepEqual(child.meta, { role: 'child' })
+})
+
+test('same-guid subdocuments remain distinct instances', () => {
+  const doc = new Y.Doc({ gc: false })
+  Y.applyUpdate(doc, fixture('subdoc-duplicate-guid-v1'))
+  const children = doc.getArray('subs').toArray()
+  assert.equal(children.length, 2)
+  assert.ok(children[0] instanceof Y.Doc)
+  assert.ok(children[1] instanceof Y.Doc)
+  assert.notEqual(children[0], children[1])
+  assert.equal(doc.subdocs.size, 2)
+  assert.deepEqual(new Set([...doc.subdocs].map(child => child.guid)), new Set(['same-guid']))
+})
+
 for (const names of [
   ['array-interior-base-v1', 'array-interior-insert-v1'],
   ['array-interior-insert-v1', 'array-interior-base-v1'],

@@ -426,6 +426,197 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun appliesNativeXmlTreeProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 3, gc = false)
+
+        applyUpdate(doc, fixture("xml-basic-full-v1"))
+
+        assertXml(doc, cssClass = "intro", text = "hi")
+        assertEquals(mapOf(1L to 5L), decodeStateVector(doc.encodeStateVector()))
+    }
+
+    @Test
+    fun appliesIncrementalNativeXmlInEitherOrder() {
+        listOf(
+            listOf("xml-owner-v1", "xml-content-v1"),
+            listOf("xml-content-v1", "xml-owner-v1"),
+        ).forEach { order ->
+            val doc = YDoc(clientId = 3, gc = false)
+            order.forEach { name -> applyUpdate(doc, fixture(name)) }
+
+            assertXml(doc, cssClass = "intro", text = "hi")
+            assertEquals(mapOf(1L to 5L), decodeStateVector(doc.encodeStateVector()))
+            assertEquals(null, doc.store.pendingStructs)
+        }
+    }
+
+    @Test
+    fun appliesCrossClientNativeXmlInEitherOrder() {
+        listOf(
+            listOf("xml-owner-v1", "xml-cross-client-content-v1"),
+            listOf("xml-cross-client-content-v1", "xml-owner-v1"),
+        ).forEach { order ->
+            val doc = YDoc(clientId = 3, gc = false)
+            order.forEach { name -> applyUpdate(doc, fixture(name)) }
+
+            assertXml(doc, cssClass = "remote", text = "ok")
+            assertEquals(mapOf(1L to 1L, 2L to 4L), decodeStateVector(doc.encodeStateVector()))
+            assertEquals(null, doc.store.pendingStructs)
+        }
+    }
+
+    @Test
+    fun upstreamYjsAppliesNativeXmlRelayedByKotlin() {
+        val doc = YDoc(clientId = 3, gc = false)
+        applyUpdate(doc, fixture("xml-basic-full-v1"))
+        doc.getXmlFragment("xml")
+
+        val update = encodeStateAsUpdate(doc)
+
+        assertStandardV1(update)
+        assertUpstreamAppliesUpdate(update, "xml")
+    }
+
+    @Test
+    fun appliesAndRelaysFormattedNativeXmlText() {
+        val doc = YDoc(clientId = 3, gc = false)
+        applyUpdate(doc, fixture("xml-formatted-full-v1"))
+        val paragraph = doc.getXmlFragment("xml").getType(0) as YXmlElementType
+        val text = paragraph.getType(0) as YXmlTextType
+
+        assertEquals(
+            YTextDelta().insert("hi", mapOf("strong" to mapOf("level" to "1"))),
+            text.toDelta(),
+        )
+        val update = encodeStateAsUpdate(doc)
+        assertStandardV1(update)
+        assertUpstreamAppliesUpdate(update, "xml-formatted")
+    }
+
+    @Test
+    fun preMaterializedRootXmlElementRetainsItsKnownKind() {
+        val doc = YDoc(clientId = 3, gc = false)
+        val article = doc.getXmlElement("article", "article")
+
+        applyUpdate(doc, fixture("xml-root-element-v1"))
+
+        assertEquals(mapOf("class" to "root"), article.getAttrs())
+        assertEquals(YTextDelta().insert("hi"), (article.getType(0) as YXmlTextType).toDelta())
+        assertEquals("<article class=\"root\">hi</article>", article.toString())
+        assertEquals(mapOf(1L to 4L), decodeStateVector(doc.encodeStateVector()))
+    }
+
+    @Test
+    fun upstreamYjsAppliesOwnerFirstXmlAuthoredByKotlin() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val fragment = doc.getXmlFragment("xml")
+        val paragraph = doc.createXmlElement("p")
+        fragment.push(paragraph)
+        paragraph.setAttr("class", "intro")
+        val text = doc.createXmlText()
+        paragraph.push(text)
+        text.insert(0, "hi")
+
+        val update = encodeStateAsUpdate(doc)
+
+        assertStandardV1(update)
+        assertUpstreamAppliesUpdate(update, "xml")
+    }
+
+    @Test
+    fun appliesDefaultMapSubdocumentProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 2, gc = false)
+        val events = mutableListOf<YSubdocEvent>()
+        doc.observeSubdocs(events::add)
+
+        applyUpdate(doc, fixture("subdoc-map-default-v1"))
+
+        val child = doc.getMap("subs").get("child") as YDoc
+        assertEquals("child", child.guid)
+        assertEquals(true, child.gc)
+        assertEquals(false, child.shouldLoad)
+        assertEquals(false, child.autoLoad)
+        assertEquals(null, child.meta)
+        assertEquals(listOf(child), events.single().added)
+        assertEquals(emptyList(), events.single().loaded)
+        assertEquals(setOf("child"), doc.getSubdocGuids())
+        assertStandardV1(encodeStateAsUpdate(doc))
+        assertUpstreamAppliesUpdate(encodeStateAsUpdate(doc), "subdoc-map")
+    }
+
+    @Test
+    fun appliesLoadedArraySubdocumentProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 2, gc = false)
+        val events = mutableListOf<YSubdocEvent>()
+        doc.observeSubdocs(events::add)
+
+        applyUpdate(doc, fixture("subdoc-array-options-v1"))
+
+        val child = doc.getArray("subs").get(0) as YDoc
+        assertEquals("child-guid", child.guid)
+        assertEquals(false, child.gc)
+        assertEquals(true, child.shouldLoad)
+        assertEquals(true, child.autoLoad)
+        assertEquals(mapOf("role" to "child"), child.meta)
+        assertEquals(listOf(child), events.single().added)
+        assertEquals(listOf(child), events.single().loaded)
+        val update = encodeStateAsUpdate(doc)
+        assertStandardV1(update)
+        assertUpstreamAppliesUpdate(update, "subdoc-array")
+    }
+
+    @Test
+    fun sameGuidSubdocumentsRemainDistinctInstances() {
+        val doc = YDoc(clientId = 2, gc = false)
+
+        applyUpdate(doc, fixture("subdoc-duplicate-guid-v1"))
+
+        val children = doc.getArray("subs").toList().map { value -> value as YDoc }
+        assertEquals(2, children.size)
+        assertTrue(children[0] !== children[1])
+        assertEquals(2, doc.getSubdocs().size)
+        assertEquals(setOf("same-guid"), doc.getSubdocGuids())
+        assertEquals(mapOf(1L to 2L), decodeStateVector(doc.encodeStateVector()))
+
+        applyUpdate(doc, fixture("subdoc-duplicate-guid-v1"))
+        val repeated = doc.getArray("subs").toList().map { value -> value as YDoc }
+        assertTrue(children[0] === repeated[0])
+        assertTrue(children[1] === repeated[1])
+    }
+
+    @Test
+    fun upstreamYjsAppliesSafeKotlinAuthoredSubdocument() {
+        val doc = YDoc(clientId = 1, gc = false)
+        doc.getMap("subs").set("child", YDoc(guid = "child", shouldLoad = false))
+
+        val update = encodeStateAsUpdate(doc)
+
+        assertStandardV1(update)
+        assertUpstreamAppliesUpdate(update, "subdoc-map")
+    }
+
+    @Test
+    fun unsupportedXmlAndSubdocumentShapesRemainLegacy() {
+        val staticXml = YDoc(clientId = 1)
+        staticXml.getXmlFragment("xml").push(YXmlElement("p"))
+        assertLegacyYks(encodeStateAsUpdate(staticXml))
+
+        val fragmentAttributes = YDoc(clientId = 1)
+        fragmentAttributes.getXmlFragment("xml").setAttr("class", "private")
+        assertLegacyYks(encodeStateAsUpdate(fragmentAttributes))
+
+        val nonstandardSubdoc = YDoc(clientId = 1)
+        nonstandardSubdoc.getArray("subs").push(
+            YDoc(guid = "child", collectionId = "private", shouldLoad = false),
+        )
+        assertLegacyYks(encodeStateAsUpdate(nonstandardSubdoc))
+
+        val loadOnlySubdoc = YDoc(clientId = 1)
+        loadOnlySubdoc.getArray("subs").push(YDoc(guid = "child"))
+        assertLegacyYks(encodeStateAsUpdate(loadOnlySubdoc))
+    }
+
+    @Test
     fun upstreamYjsAppliesHelloUpdateProducedByKotlin() {
         val doc = YDoc(clientId = 1)
         doc.getText("body").insert(0, "hello")
@@ -489,6 +680,30 @@ class YjsV1InteropTest {
 
     private fun assertUpstreamApplies(doc: YDoc, scenario: String) {
         assertUpstreamAppliesUpdate(encodeStateAsUpdate(doc), scenario)
+    }
+
+    private fun assertXml(doc: YDoc, cssClass: String, text: String) {
+        val fragment = doc.getXmlFragment("xml")
+        val paragraph = fragment.getType(0) as YXmlElementType
+        val xmlText = paragraph.getType(0) as YXmlTextType
+        assertEquals("p", paragraph.nodeName)
+        assertEquals(mapOf("class" to cssClass), paragraph.getAttrs())
+        assertEquals(YTextDelta().insert(text), xmlText.toDelta())
+        assertEquals("<p class=\"$cssClass\">$text</p>", fragment.toString())
+    }
+
+    private fun assertStandardV1(update: ByteArray) {
+        assertTrue(
+            !update.copyOfRange(0, 4)
+                .contentEquals(byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 1)),
+        )
+    }
+
+    private fun assertLegacyYks(update: ByteArray) {
+        assertTrue(
+            update.copyOfRange(0, 4)
+                .contentEquals(byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 1)),
+        )
     }
 
     private fun assertUpstreamAppliesUpdate(bytes: ByteArray, scenario: String) {

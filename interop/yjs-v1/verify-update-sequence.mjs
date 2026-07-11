@@ -20,8 +20,20 @@ for (const input of inputs) {
 }
 materializeScenario(actual, scenario)
 
-assert.deepEqual(actual.toJSON(), expected.toJSON())
+if (scenario !== 'subdoc-map' && scenario !== 'subdoc-array') {
+  assert.deepEqual(actual.toJSON(), expected.toJSON())
+}
 assert.deepEqual(Y.encodeStateVector(actual), Y.encodeStateVector(expected))
 if (scenario === 'formatted-text' || scenario === 'partial-formatted-text') {
   assert.deepEqual(actual.getText('body').toDelta(), expected.getText('body').toDelta())
+}
+if (scenario === 'subdoc-map') {
+  assert.equal(actual.getMap('subs').get('child').guid, 'child')
+}
+if (scenario === 'subdoc-array') {
+  const child = actual.getArray('subs').get(0)
+  assert.equal(child.guid, 'child-guid')
+  assert.equal(child.gc, false)
+  assert.equal(child.autoLoad, true)
+  assert.deepEqual(child.meta, { role: 'child' })
 }

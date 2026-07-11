@@ -1307,18 +1307,30 @@ class YDoc(
             val parentItem = store.getStoreItem(parentItemId) ?: return item
             if (parentItem.isGc) return item.asRemoteGc()
             val ref = parentItem.content.directTypeRef() ?: return item
+            val kind = if (item.parentSub != null) RootKind.Map else ref.kind
             return item.copy(
                 parent = ref.name,
-                content = item.content.withRemoteParentKind(ref.kind),
+                content = item.content.withRemoteParentKind(kind),
                 deleted = item.deleted || parentItem.deleted,
             )
         }
-        val anchorId = item.parent.yjsInheritedParentIdOrNull() ?: return item
+        val anchorId = item.parent.yjsInheritedParentIdOrNull()
+            ?: return knownParentKinds()[item.parent]?.let { kind ->
+                item.copy(
+                    content = item.content.withRemoteParentKind(
+                        if (item.parentSub != null) RootKind.Map else kind,
+                    ),
+                )
+            } ?: item
         val anchor = store.getStoreItem(anchorId) ?: return item
         if (anchor.isGc) {
             return item.asRemoteGc()
         }
-        val inheritedKind = if (anchor.content is ItemContent.Deleted) item.content.kind else anchor.content.kind
+        val inheritedKind = when {
+            item.parentSub != null -> RootKind.Map
+            anchor.content is ItemContent.Deleted -> item.content.kind
+            else -> anchor.content.kind
+        }
         return item.copy(
             parent = anchor.parent,
             parentSub = anchor.parentSub,

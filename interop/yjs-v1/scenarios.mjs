@@ -9,6 +9,10 @@ export const scenarioNames = [
   'nested-text',
   'formatted-text',
   'partial-formatted-text',
+  'xml',
+  'xml-formatted',
+  'subdoc-map',
+  'subdoc-array',
 ]
 
 export const createScenarioDocument = name => {
@@ -63,6 +67,37 @@ export const createScenarioDocument = name => {
       doc.getText('body').insert(0, 'abcd')
       doc.getText('body').format(1, 2, { bold: true })
       break
+    case 'xml': {
+      const paragraph = new Y.XmlElement('p')
+      doc.getXmlFragment('xml').insert(0, [paragraph])
+      paragraph.setAttribute('class', 'intro')
+      const text = new Y.XmlText()
+      paragraph.insert(0, [text])
+      text.insert(0, 'hi')
+      break
+    }
+    case 'xml-formatted': {
+      const paragraph = new Y.XmlElement('p')
+      doc.getXmlFragment('xml').insert(0, [paragraph])
+      paragraph.setAttribute('class', 'intro')
+      const text = new Y.XmlText()
+      paragraph.insert(0, [text])
+      text.insert(0, 'hi', { strong: { level: '1' } })
+      break
+    }
+    case 'subdoc-map':
+      doc.getMap('subs').set('child', new Y.Doc({ guid: 'child', shouldLoad: false }))
+      break
+    case 'subdoc-array':
+      doc.getArray('subs').insert(0, [
+        new Y.Doc({
+          guid: 'child-guid',
+          gc: false,
+          autoLoad: true,
+          meta: { role: 'child' },
+        }),
+      ])
+      break
     default:
       throw new Error(`unknown interoperability scenario: ${name}`)
   }
@@ -86,6 +121,13 @@ export const materializeScenario = (doc, name) => {
     case 'formatted-text':
     case 'partial-formatted-text':
       return doc.getText('body')
+    case 'xml':
+    case 'xml-formatted':
+      return doc.getXmlFragment('xml')
+    case 'subdoc-map':
+      return doc.getMap('subs')
+    case 'subdoc-array':
+      return doc.getArray('subs')
     default:
       throw new Error(`unknown interoperability scenario: ${name}`)
   }
