@@ -71,7 +71,15 @@ fun writeStateAsUpdate(
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
 ): BinaryEncoder =
-    UpdateCodec.write(encoder, DocumentUpdate(doc.store.itemsSince(targetStateVector), doc.store.deleteSet()))
+    UpdateCodec.write(
+        encoder,
+        DocumentUpdate(
+            doc.store.itemsSince(targetStateVector),
+            doc.store.deleteSet(),
+            doc.store.parentItemIds(),
+            doc.store.parentKinds(),
+        ),
+    )
 
 fun writeStateAsUpdate(
     encoder: IdSetEncoderV1,
@@ -101,7 +109,10 @@ fun writeClientsStructs(
     store: StructStore,
     stateVector: StateVector = emptyMap(),
 ): BinaryEncoder =
-    UpdateCodec.write(encoder, DocumentUpdate(store.itemsSince(stateVector), DeleteSet.empty()))
+    UpdateCodec.write(
+        encoder,
+        DocumentUpdate(store.itemsSince(stateVector), DeleteSet.empty(), store.parentItemIds(), store.parentKinds()),
+    )
 
 fun writeClientsStructs(
     encoder: IdSetEncoderV1,
@@ -146,7 +157,14 @@ fun writeStructsFromIdSetV2(doc: YDoc, idSet: IdSet): ByteArray =
     writeStructsFromIdSet(doc, idSet)
 
 fun encodeStructsFromIdSet(doc: YDoc, idSet: IdSet): ByteArray =
-    UpdateCodec.encode(DocumentUpdate(doc.itemsForIdSet(idSet), DeleteSet.empty()))
+    UpdateCodec.encode(
+        DocumentUpdate(
+            doc.itemsForIdSet(idSet),
+            DeleteSet.empty(),
+            doc.store.parentItemIds(),
+            doc.store.parentKinds(),
+        ),
+    )
 
 fun encodeStructsFromIdSetV2(doc: YDoc, idSet: IdSet): ByteArray =
     encodeStructsFromIdSet(doc, idSet)
@@ -158,7 +176,14 @@ fun writeStructsFromTransactionV2(transaction: YTransactionEvent): ByteArray =
     writeStructsFromTransaction(transaction)
 
 fun encodeStructsFromTransaction(transaction: YTransactionEvent): ByteArray =
-    UpdateCodec.encode(DocumentUpdate(transaction.addedItems.map { it.copy() }, DeleteSet.empty()))
+    UpdateCodec.encode(
+        DocumentUpdate(
+            transaction.addedItems.map { it.copy() },
+            DeleteSet.empty(),
+            transaction.doc.store.parentItemIds(),
+            transaction.doc.store.parentKinds(),
+        ),
+    )
 
 fun encodeStructsFromTransactionV2(transaction: YTransactionEvent): ByteArray =
     encodeStructsFromTransaction(transaction)

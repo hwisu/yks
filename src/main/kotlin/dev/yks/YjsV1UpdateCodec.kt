@@ -12,7 +12,7 @@ internal object UpdateCodec {
         .toByteArray()
 
     fun write(encoder: BinaryEncoder, update: DocumentUpdate): BinaryEncoder {
-        if (!update.isPlainRootTextV1Update()) {
+        if (!update.allowV1 || !update.isSupportedV1Update()) {
             return LegacyUpdateCodec.write(encoder, update)
         }
         return writeV1(encoder, update)
@@ -23,7 +23,7 @@ internal object UpdateCodec {
             .groupBy { item -> item.id.client }
             .mapValues { (_, items) -> items.sortedBy { item -> item.id.clock } }
             .filterValues { items -> items.isNotEmpty() }
-        val parentItems = update.items.mapNotNull { item ->
+        val parentItems = update.parentItemIds + update.items.mapNotNull { item ->
             item.content.directTypeRef()?.name?.let { name -> name to item.id }
         }.toMap()
 
@@ -222,29 +222,92 @@ internal object UpdateCodec {
     }
 }
 
-private fun DocumentUpdate.isPlainRootTextV1Update(): Boolean {
+private fun DocumentUpdate.isSupportedV1Update(): Boolean {
     if (!deleteSet.isEmpty) return false
     if (items.isEmpty()) return true
     val clients = items.groupBy { item -> item.id.client }
     if (clients.size != 1) return false
     val sorted = clients.values.single().sortedBy { item -> item.id.clock }
     if (sorted.first().id.client !in 0..9_007_199_254_740_992L) return false
-    if (sorted.first().id.clock != 0L) return false
-    if (sorted.map { item -> item.id.clock } != sorted.indices.map(Int::toLong)) return false
+    val startClock = sorted.first().id.clock
+    if (sorted.map { item -> item.id.clock } != sorted.indices.map { index -> startClock + index }) return false
     val ids = sorted.mapTo(hashSetOf()) { item -> item.id }
-    val parent = sorted.first().parent
+    val parentItems = parentItemIds + sorted.mapNotNull { item ->
+        item.content.directTypeRef()?.name?.let { name -> name to item.id }
+    }.toMap()
+    val parentKinds = this.parentKinds + sorted.mapNotNull { item ->
+        item.content.directTypeRef()?.let { ref -> ref.name to ref.kind }
+    }.toMap()
     return sorted.all { item ->
-        val content = item.content as? ItemContent.Text ?: return@all false
         !item.deleted &&
-            content.kind == RootKind.Text &&
-            !Character.isSurrogate(content.value.single()) &&
-            content.attributes.isEmpty() &&
-            content.baseAttributes.isEmpty() &&
-            item.parent == parent &&
-            item.parentSub == null &&
-            (item.origin == null || item.origin in ids) &&
-            (item.rightOrigin == null || item.rightOrigin in ids)
+            item.content.isSupportedV1Content() &&
+            item.hasCompatibleV1ParentKind(sorted, parentKinds) &&
+            (startClock > 0 || item.origin == null || item.origin in ids) &&
+            (startClock > 0 || item.rightOrigin == null || item.rightOrigin in ids) &&
+            item.hasResolvableV1Parent(parentItems) &&
+            item.hasConsistentInheritedMetadata(sorted)
     }
+}
+
+private fun StoreItem.hasResolvableV1Parent(parentItems: Map<String, Id>): Boolean {
+    val parentItemId = parentItems[parent]
+    if (parentItemId == null) {
+        return !parent.startsWith("__yks_nested__:") && !parent.startsWith("__yjs_nested__:")
+    }
+    // A nested type must be introduced before content can target it on Yjs wire.
+    return parentItemId.client != id.client || parentItemId.clock < id.clock
+}
+
+private fun StoreItem.hasConsistentInheritedMetadata(items: List<StoreItem>): Boolean {
+    val anchor = origin ?: rightOrigin ?: return true
+    val anchorItem = items.firstOrNull { candidate -> candidate.id == anchor } ?: return true
+    return anchorItem.parent == parent && anchorItem.parentSub == parentSub
+}
+
+private fun StoreItem.hasCompatibleV1ParentKind(
+    items: List<StoreItem>,
+    parentKinds: Map<String, RootKind>,
+): Boolean {
+    val nestedKind = parentKinds[parent]
+    return when (content) {
+        is ItemContent.MapEntry -> nestedKind?.let { kind -> kind == RootKind.Map }
+            ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.MapEntry }
+        is ItemContent.Value -> nestedKind?.let { kind -> kind == RootKind.Array }
+            ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.Value }
+        is ItemContent.Text -> nestedKind?.let { kind -> kind == RootKind.Text }
+            ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.Text }
+        else -> false
+    }
+}
+
+private fun ItemContent.isSupportedV1Content(): Boolean = when (this) {
+    is ItemContent.Value -> kind == RootKind.Array && value.isSupportedV1Value(topLevel = true)
+    is ItemContent.MapEntry -> value.isSupportedV1Value(topLevel = true)
+    is ItemContent.Text ->
+        kind == RootKind.Text &&
+            !Character.isSurrogate(value.single()) &&
+            attributes.isEmpty() &&
+            baseAttributes.isEmpty()
+    is ItemContent.TextEmbed -> false
+    is ItemContent.TextFormat -> false
+    is ItemContent.XmlNode -> false
+    is ItemContent.XmlType -> false
+    is ItemContent.Deleted -> false
+}
+
+private fun YValue.isSupportedV1Value(topLevel: Boolean): Boolean = when (this) {
+    YValue.Null,
+    is YValue.Bool,
+    is YValue.StringValue,
+    is YValue.BinaryValue -> true
+    is YValue.LongNumber -> value.toDouble().let { number ->
+        kotlin.math.abs(number) <= 9_007_199_254_740_992.0 && number.toLong() == value
+    }
+    is YValue.DoubleNumber -> value.isFinite() && value % 1.0 != 0.0
+    is YValue.ListValue -> value.all { nested -> nested.isSupportedV1Value(topLevel = false) }
+    is YValue.MapValue -> value.values.all { nested -> nested.isSupportedV1Value(topLevel = false) }
+    is YValue.TypeRef -> topLevel && kind in setOf(RootKind.Array, RootKind.Map, RootKind.Text)
+    is YValue.SubdocRef -> false
 }
 
 private sealed interface EncodedStruct {

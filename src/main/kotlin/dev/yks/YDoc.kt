@@ -555,13 +555,22 @@ class YDoc(
         val items = store.allItems()
             .filter { item -> item.id.clock < (snapshot.sv[item.id.client] ?: 0) }
             .map { item -> item.copy(deleted = snapshot.ds.hasId(item.id)) }
-        return UpdateCodec.encode(DocumentUpdate(items, snapshot.deleteSet))
+        return UpdateCodec.encode(
+            DocumentUpdate(items, snapshot.deleteSet, store.parentItemIds(), store.parentKinds()),
+        )
     }
 
     fun encodeStateAsUpdate(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
         val stateVector = decodeStateVector(encodedStateVector)
         val updates = mutableListOf(
-            UpdateCodec.encode(DocumentUpdate(store.itemsSince(stateVector), store.deleteSet())),
+            UpdateCodec.encode(
+                DocumentUpdate(
+                    store.itemsSince(stateVector),
+                    store.deleteSet(),
+                    store.parentItemIds(),
+                    store.parentKinds(),
+                ),
+            ),
         )
         pendingDeleteSetUpdate()?.let(updates::add)
         pendingStructsView()?.update
@@ -615,7 +624,14 @@ class YDoc(
         if (pendingItems.isEmpty()) return null
         return PendingStructs(
             missing = pendingItems.missingDependencies(),
-            update = UpdateCodec.encode(DocumentUpdate(pendingItems.toList(), DeleteSet.empty())),
+            update = UpdateCodec.encode(
+                DocumentUpdate(
+                    pendingItems.toList(),
+                    DeleteSet.empty(),
+                    store.parentItemIds(),
+                    store.parentKinds(),
+                ),
+            ),
         )
     }
 
@@ -709,6 +725,11 @@ class YDoc(
         return (rootTypes.keys + store.allItems().map { it.parent })
             .filterNot { it in nestedNames }
             .toSortedSet()
+    }
+
+    internal fun knownParentKinds(): Map<String, RootKind> = buildMap {
+        rootTypes.forEach { (name, type) -> put(name, type.kind) }
+        nestedTypes.forEach { (name, type) -> put(name, type.kind) }
     }
 
     internal fun storeValue(value: Any?, parent: String? = null): YValue {
@@ -1226,13 +1247,13 @@ class YDoc(
     }
 
     private fun integrateRemote(items: List<StoreItem>) {
-        pendingItems.addAll(items.filterNot { store.contains(it.id) })
+        pendingItems.addAll(items.filterNot { store.contains(it.id) }.map(::resolveRemoteParentAlias))
         var madeProgress: Boolean
         do {
             madeProgress = false
             val iterator = pendingItems.iterator()
             while (iterator.hasNext()) {
-                val item = iterator.next()
+                val item = resolveRemoteParentAlias(iterator.next())
                 if (canIntegrate(item)) {
                     iterator.remove()
                     if (pendingDeletes.contains(item.id)) {
@@ -1257,6 +1278,20 @@ class YDoc(
                 }
             }
         } while (madeProgress)
+    }
+
+    private fun resolveRemoteParentAlias(item: StoreItem): StoreItem {
+        item.parent.yjsNestedParentIdOrNull()?.let { parentItemId ->
+            val localName = store.getStoreItem(parentItemId)?.content?.directTypeRef()?.name ?: return item
+            return item.copy(parent = localName)
+        }
+        val anchorId = item.parent.yjsInheritedParentIdOrNull() ?: return item
+        val anchor = store.getStoreItem(anchorId) ?: return item
+        return item.copy(
+            parent = anchor.parent,
+            parentSub = anchor.parentSub,
+            content = item.content.withRemoteParentKind(anchor.content.kind),
+        )
     }
 
     private fun deletePreviousMapCurrentIfSuperseded(item: StoreItem, previousMapCurrent: StoreItem?) {
@@ -1432,7 +1467,15 @@ class YDoc(
     }
 
     private fun createTransactionEvent(transaction: Transaction): YTransactionEvent {
-        val update = UpdateCodec.encode(DocumentUpdate(transaction.addedItems, transaction.deleteSet))
+        val update = UpdateCodec.encode(
+            DocumentUpdate(
+                transaction.addedItems,
+                transaction.deleteSet,
+                store.parentItemIds(),
+                store.parentKinds(),
+                allowV1 = false,
+            ),
+        )
         val insertSet = transaction.addedItems.toIdSet()
         val deleteIdSet = transaction.deleteSet.toIdSet()
         val changedParents = changedParentsFor(transaction)
@@ -2462,6 +2505,39 @@ internal fun ItemContent.directTypeRef(): YValue.TypeRef? = when (this) {
     is ItemContent.TextFormat,
     is ItemContent.XmlNode,
     is ItemContent.Deleted -> null
+}
+
+private fun String.yjsNestedParentIdOrNull(): Id? {
+    val prefix = "__yjs_nested__:"
+    if (!startsWith(prefix)) return null
+    val parts = removePrefix(prefix).split(':')
+    if (parts.size != 2) return null
+    return Id(parts[0].toLongOrNull() ?: return null, parts[1].toLongOrNull() ?: return null)
+}
+
+private fun String.yjsInheritedParentIdOrNull(): Id? {
+    val prefix = "__yjs_inherit__:"
+    if (!startsWith(prefix)) return null
+    val parts = removePrefix(prefix).split(':')
+    if (parts.size != 2) return null
+    return Id(parts[0].toLongOrNull() ?: return null, parts[1].toLongOrNull() ?: return null)
+}
+
+private fun ItemContent.withRemoteParentKind(kind: RootKind): ItemContent = when (this) {
+    is ItemContent.Value -> when (kind) {
+        RootKind.Map -> ItemContent.MapEntry(value)
+        RootKind.Array -> this
+        RootKind.Text,
+        RootKind.XmlText -> ItemContent.TextEmbed(value, kind = kind)
+        else -> this
+    }
+    is ItemContent.MapEntry -> if (kind == RootKind.Map) this else ItemContent.Value(value)
+    is ItemContent.Text -> copy(kind = kind)
+    is ItemContent.TextEmbed -> copy(kind = kind)
+    is ItemContent.TextFormat -> copy(kind = kind)
+    is ItemContent.XmlNode -> copy(kind = kind)
+    is ItemContent.XmlType -> copy(kind = kind)
+    is ItemContent.Deleted -> ItemContent.Deleted(kind)
 }
 
 private val textFormatApplicationOrder: Comparator<StoreItem> =

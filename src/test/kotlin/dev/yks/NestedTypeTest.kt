@@ -146,6 +146,19 @@ class NestedTypeTest {
     }
 
     @Test
+    fun nestedArrayAttributesSurviveCodecFallback() {
+        val source = YDoc(clientId = 1)
+        val nested = source.createArray()
+        source.getArray("root").push(nested)
+        nested.setAttr("label", "child")
+
+        val target = cloneDoc(source)
+        val remoteNested = target.getArray("root").get(0) as YArray
+
+        assertEquals("child", remoteNested.getAttr("label"))
+    }
+
+    @Test
     fun deletingNestedTypeReferenceHidesItFromJsonWithoutPromotingNestedParent() {
         val doc = YDoc(clientId = 1)
         val root = doc.getMap("root")

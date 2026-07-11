@@ -116,6 +116,12 @@ class StructStore(private val owner: YDoc? = null) {
     internal fun allItems(): List<StoreItem> =
         clientItems.values.flatten().sortedWith(compareBy<StoreItem> { it.id.client }.thenBy { it.id.clock })
 
+    internal fun parentItemIds(): Map<String, Id> = allItems().mapNotNull { item ->
+        item.content.directTypeRef()?.name?.let { name -> name to item.id }
+    }.toMap()
+
+    internal fun parentKinds(): Map<String, RootKind> = owner?.knownParentKinds().orEmpty()
+
     internal fun itemsSince(stateVector: StateVector): List<StoreItem> = allItems().filter { item ->
         item.id.clock >= (stateVector[item.id.client] ?: 0)
     }

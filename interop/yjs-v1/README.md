@@ -27,8 +27,21 @@ Validate an update produced by Kotlin:
 npm run interop:verify -- build/interop/kotlin-hello-v1.bin
 ```
 
-Kotlin currently emits standard V1 bytes only for self-contained, unformatted
-root-text updates. Complex, nested, formatted, deleted, or incremental updates
-still use the legacy `YKS` envelope so existing behavior remains intact while
-the standard wire model is expanded. The verifier must be extended with a
-fixture before each additional content type is moved off that fallback.
+The verifier also accepts a named semantic scenario:
+
+```sh
+npm run interop:verify -- update.bin array
+npm run interop:verify -- update.bin map
+npm run interop:verify -- update.bin nested-map
+npm run interop:verify -- update.bin nested-text
+```
+
+Kotlin currently emits standard V1 bytes for compatible explicit state exports
+covering unformatted text, arrays, maps, binary values, and owner-first nested
+maps/text. The harness also covers an anchor-free incremental nested-map update.
+
+Live transaction-event updates and content that still needs a richer wire
+model—formatting, XML, subdocuments, deletes, unsafe numeric coercions, or
+pre-populated detached nested types—continue to use the legacy `YKS` envelope.
+This preserves existing Kotlin behavior while each remaining content family is
+moved behind a cross-language fixture.

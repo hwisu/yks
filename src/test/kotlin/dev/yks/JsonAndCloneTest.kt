@@ -88,6 +88,20 @@ class JsonAndCloneTest {
     }
 
     @Test
+    fun cloneDocPreservesIntegralDoubleAndNegativeZeroValues() {
+        val source = YDoc(clientId = 1)
+        source.getArray("numbers").push(listOf(-0.0, 1.0, 1.5))
+
+        val values = cloneDoc(source).getArray("numbers").toList()
+
+        assertEquals(listOf(-0.0, 1.0, 1.5), values)
+        assertEquals(
+            java.lang.Double.doubleToRawLongBits(-0.0),
+            java.lang.Double.doubleToRawLongBits(values[0] as Double),
+        )
+    }
+
+    @Test
     fun documentConstructionHelpersAcceptDocOptions() {
         val source = YDoc(clientId = 1)
         source.getText("body").insert(0, "hello")

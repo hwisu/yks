@@ -5,6 +5,9 @@ private val updateMagic = byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.
 internal data class DocumentUpdate(
     val items: List<StoreItem>,
     val deleteSet: DeleteSet,
+    val parentItemIds: Map<String, Id> = emptyMap(),
+    val parentKinds: Map<String, RootKind> = emptyMap(),
+    val allowV1: Boolean = true,
 ) {
     val isEmpty: Boolean get() = items.isEmpty() && deleteSet.isEmpty
 }
