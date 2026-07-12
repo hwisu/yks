@@ -13,6 +13,8 @@ data class PendingStructs(
 class StructStore(private val owner: YDoc? = null) {
     private val clientItems: MutableMap<Long, MutableList<StoreItem>> = linkedMapOf()
 
+    internal val ownerDoc: YDoc? get() = owner
+
     val clients: Map<Long, List<ItemStruct>>
         get() = clientItems.mapValues { (_, structs) ->
             structs.map { item -> item.toItemStruct(owner ?: YDoc()) }
@@ -74,6 +76,124 @@ class StructStore(private val owner: YDoc? = null) {
 
     internal fun getStoreItem(id: Id): StoreItem? =
         clientItems[id.client]?.firstOrNull { id.clock >= it.id.clock && id.clock < it.endClock() }
+
+    internal fun getStoreItemCleanStart(
+        id: Id,
+        onSplit: (StoreItem) -> Unit = {},
+    ): StoreItem {
+        val structs = clientItems[id.client] ?: error("struct not found: $id")
+        val index = structs.indexOfFirst { item -> id.clock >= item.id.clock && id.clock < item.endClock() }
+        if (index < 0) error("struct not found: $id")
+        val item = structs[index]
+        if (item.id.clock == id.clock || item.isGc) return item
+        return splitStoreItem(structs, index, id.clock - item.id.clock).also(onSplit)
+    }
+
+    internal fun getStoreItemCleanEnd(
+        id: Id,
+        onSplit: (StoreItem) -> Unit = {},
+    ): StoreItem {
+        val structs = clientItems[id.client] ?: error("struct not found: $id")
+        val index = structs.indexOfFirst { item -> id.clock >= item.id.clock && id.clock < item.endClock() }
+        if (index < 0) error("struct not found: $id")
+        val item = structs[index]
+        val splitOffset = id.clock - item.id.clock + 1
+        if (splitOffset == item.length || item.isGc) return item
+        splitStoreItem(structs, index, splitOffset).also(onSplit)
+        return structs[index]
+    }
+
+    private fun splitStoreItem(
+        structs: MutableList<StoreItem>,
+        index: Int,
+        diff: Long,
+    ): StoreItem {
+        val item = structs[index]
+        require(diff in 1 until item.length) { "diff must split the store item" }
+        val content = item.content as? ItemContent.Deleted
+            ?: error("only packed deleted store items can require splitting")
+        val left = item.copy(content = content.copy(length = diff))
+        val right = item.copy(
+            id = Id(item.id.client, checkedClockAdd(item.id.clock, diff, "split item clock")),
+            origin = Id(item.id.client, checkedClockAdd(item.id.clock, diff - 1, "split item origin")),
+            content = content.copy(length = item.length - diff),
+        )
+        structs[index] = left
+        structs.add(index + 1, right)
+        return right
+    }
+
+    /** Merge compatible deleted-item fragments touched by a delete-set, from right to left. */
+    internal fun mergeDeletedItems(deleteSet: DeleteSet): Int {
+        var merged = 0
+        deleteSet.clients.forEach { (client, ranges) ->
+            val structs = clientItems[client] ?: return@forEach
+            if (structs.size < 2 || ranges.isEmpty()) return@forEach
+            var index = structs.lastIndex
+            while (index > 0) {
+                val boundary = structs[index].id.clock
+                val touchesDeleteRange = ranges.any { range ->
+                    boundary >= range.clock && boundary <= range.end
+                }
+                if (touchesDeleteRange && mergeDeletedItemWithLeft(structs, index)) {
+                    merged++
+                }
+                index--
+            }
+        }
+        return merged
+    }
+
+    /** Re-merge temporary transaction splits in reverse split order, as upstream Yjs does. */
+    internal fun mergeSplitCandidates(candidates: List<Id>): Int {
+        var merged = 0
+        candidates.asReversed().forEach { candidate ->
+            val structs = clientItems[candidate.client] ?: return@forEach
+            val index = structs.indexOfFirst { item -> item.id == candidate }
+            if (index > 0 && mergeDeletedItemWithLeft(structs, index)) {
+                merged++
+            }
+        }
+        return merged
+    }
+
+    private fun mergeDeletedItemWithLeft(
+        structs: MutableList<StoreItem>,
+        rightIndex: Int,
+    ): Boolean {
+        if (rightIndex !in 1 until structs.size) return false
+        val left = structs[rightIndex - 1]
+        val right = structs[rightIndex]
+        val leftContent = left.content as? ItemContent.Deleted ?: return false
+        val rightContent = right.content as? ItemContent.Deleted ?: return false
+        val logicalOrder = if (left.parentSub == null) {
+            owner?.sequence(left.parent)
+        } else {
+            owner?.mapItemOrder(left.parent, left.parentSub)
+        } ?: return false
+        val logicalLeftIndex = logicalOrder.indexOfFirst { item -> item.id == left.id }
+        val logicallyAdjacent = logicalLeftIndex >= 0 && logicalOrder.getOrNull(logicalLeftIndex + 1)?.id == right.id
+        if (
+            left.id.client != right.id.client ||
+            left.endClock() != right.id.clock ||
+            !logicallyAdjacent ||
+            right.origin != Id(left.id.client, right.id.clock - 1) ||
+            left.rightOrigin != right.rightOrigin ||
+            left.deleted != right.deleted ||
+            left.isGc != right.isGc ||
+            leftContent.kind != rightContent.kind ||
+            left.parent != right.parent ||
+            left.parentSub != right.parentSub ||
+            left.requiresClockContinuity != right.requiresClockContinuity ||
+            left.unresolvedParent != right.unresolvedParent ||
+            left.countable != right.countable
+        ) return false
+
+        val mergedLength = checkedClockAdd(left.length, right.length, "merged deleted item length")
+        structs[rightIndex - 1] = left.copy(content = leftContent.copy(length = mergedLength))
+        structs.removeAt(rightIndex)
+        return true
+    }
 
     internal fun contains(id: Id): Boolean = getStoreItem(id) != null
 

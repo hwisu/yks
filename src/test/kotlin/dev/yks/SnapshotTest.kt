@@ -1,5 +1,7 @@
 package dev.yks
 
+import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -9,6 +11,8 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class SnapshotTest {
+    private val projectDirectory: Path = Path.of(System.getProperty("user.dir"))
+
     @Test
     fun snapshotEncodingRoundTripsAndComparesStructurally() {
         val doc = YDoc(clientId = 1)
@@ -59,6 +63,23 @@ class SnapshotTest {
     }
 
     @Test
+    fun createSnapshotRetainsSuppliedDeleteSetAndStateVectorReferences() {
+        val deleteSet = DeleteSet.empty()
+        val stateVector = linkedMapOf(1L to 1L)
+        val snap = createSnapshot(deleteSet, stateVector)
+
+        deleteSet.add(Id(1, 2), 1)
+        deleteSet.clients.getOrPut(2L) { mutableListOf() }.add(DeleteRange(clock = 4, length = 2))
+        stateVector[3L] = 5L
+
+        assertSame(deleteSet, snap.ds)
+        assertSame(stateVector, snap.sv)
+        assertTrue(snap.ds.hasId(Id(1, 2)))
+        assertTrue(snap.ds.hasId(Id(2, 5)))
+        assertEquals(5L, snap.sv[3L])
+    }
+
+    @Test
     fun snapshotContainsUpdateTracksStructAndDeleteCoverage() {
         val doc = YDoc(clientId = 1)
         val updates = mutableListOf<ByteArray>()
@@ -84,21 +105,79 @@ class SnapshotTest {
         val text = doc.getText("body")
         text.insert(0, "abc")
         text.delete(1)
-        val snap = snapshot(doc)
+        val mutableStateVector = snapshot(doc).sv.toMutableMap()
+        val snap = snapshot(doc).copy(sv = mutableStateVector)
         text.insert(text.length, "d")
 
         doc.transact({ transaction ->
             splitSnapshotAffectedStructs(transaction, snap)
+            mutableStateVector[99L] = 1L
             splitSnapshotAffectedStructs(transaction, snap)
 
-            val seen = transaction.meta[::splitSnapshotAffectedStructs] as Set<*>
+            val seen = transaction.meta.values.single() as Set<*>
             assertEquals(1, seen.size)
-            assertTrue(snap in seen)
+            assertSame(snap, seen.single())
 
             text.insert(text.length, "!")
         })
 
         assertEquals("acd!", text.toString())
+    }
+
+    @Test
+    fun splitSnapshotAffectedStructsSplitsPartialPackedDeletesButKeepsGcWhole() {
+        val doc = YDoc(clientId = 7, gc = false)
+        assertTrue(
+            doc.store.add(
+                StoreItem(
+                    id = Id(1, 0),
+                    origin = null,
+                    rightOrigin = null,
+                    parent = "body",
+                    parentSub = null,
+                    content = ItemContent.Deleted(RootKind.Text, length = 5),
+                    deleted = true,
+                ),
+            ),
+        )
+        assertTrue(
+            doc.store.add(
+                StoreItem(
+                    id = Id(2, 0),
+                    origin = null,
+                    rightOrigin = null,
+                    parent = "body",
+                    parentSub = null,
+                    content = ItemContent.Deleted(RootKind.Text, length = 5),
+                    deleted = true,
+                    isGc = true,
+                ),
+            ),
+        )
+        val deleteSet = DeleteSet.empty().also { deletes ->
+            deletes.add(Id(1, 1), 2)
+            deletes.add(Id(2, 1), 2)
+            deletes.add(Id(3, 1), 2)
+        }
+        var cleanupShape: List<Pair<Id, Long>> = emptyList()
+        doc.observeAfterTransactionCleanup {
+            cleanupShape = doc.store.clients.getValue(1).map { item -> item.id to item.length }
+        }
+
+        doc.transact({ transaction ->
+            splitSnapshotAffectedStructs(transaction, createSnapshot(deleteSet, emptyMap()))
+
+            assertEquals(listOf(Id(1, 0), Id(1, 1), Id(1, 3)), doc.store.clients.getValue(1).map { it.id })
+            assertEquals(listOf(1L, 2L, 2L), doc.store.clients.getValue(1).map { it.length })
+            assertEquals(listOf(Id(2, 0)), doc.store.clients.getValue(2).map { it.id })
+            assertEquals(listOf(5L), doc.store.clients.getValue(2).map { it.length })
+        })
+
+        assertEquals(listOf(Id(1, 0) to 5L), cleanupShape)
+        assertEquals(listOf(Id(1, 0)), doc.store.clients.getValue(1).map { it.id })
+        assertEquals(listOf(5L), doc.store.clients.getValue(1).map { it.length })
+        assertEquals(listOf(Id(2, 0)), doc.store.clients.getValue(2).map { it.id })
+        assertEquals(listOf(5L), doc.store.clients.getValue(2).map { it.length })
     }
 
     @Test
@@ -230,6 +309,21 @@ class SnapshotTest {
         val restored = createDocFromSnapshot(doc, snap)
 
         assertEquals(listOf("world"), restored.getArray("items").toList())
+    }
+
+    @Test
+    fun createDocFromSnapshotKeepsWholePackedGcAtSnapshotStateVectorLikeUpstream() {
+        val origin = YDoc(clientId = 9, gc = false)
+        val update = Files.readAllBytes(
+            projectDirectory.resolve("interop/yjs-v1/fixtures/gc-then-text-v1.bin"),
+        )
+        origin.applyUpdate(update)
+        val snap = createSnapshot(DeleteSet.empty(), mapOf(1L to 1L))
+
+        val restored = createDocFromSnapshot(origin, snap)
+
+        assertEquals(mapOf(1L to 2L), decodeStateVector(restored.encodeStateVector()))
+        assertEquals(2L, restored.store.getClock(1))
     }
 
     @Test

@@ -258,10 +258,10 @@ class UndoManager private constructor(
     }
 
     private fun capture(event: YTransactionEvent) {
-        if (captureDisabled || !event.local || event.addedItems.isEmpty() && event.deletedItems.isEmpty()) return
-        if (!isTrackedOrigin(event.origin)) return
-        if (!isInScope(event)) return
+        if (captureDisabled) return
         if (options.captureTransaction?.invoke(event) == false) return
+        if (!isInScope(event)) return
+        if (!isTrackedOrigin(event.origin)) return
 
         // Upstream marks deleted items as kept during afterTransaction so automatic GC, which
         // runs immediately afterwards, cannot discard content required by a future undo.
@@ -275,8 +275,6 @@ class UndoManager private constructor(
                 deletedItems = event.deletedItems.map { RestoreItem(it.copy(deleted = false), anchorAfterOriginal = true) },
             ),
         )
-        if (stackItem.isEmpty) return
-
         val now = System.currentTimeMillis()
         val shouldMerge = undoStack.isNotEmpty() &&
             lastCaptureTime != 0L &&

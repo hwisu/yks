@@ -4,9 +4,64 @@ YKS is a Kotlin/JVM implementation of the Yjs document model and update
 protocol. It provides shared arrays, maps, text, live XML, subdocuments,
 snapshots, relative positions, undo management, and update V1/V2 operations.
 
-The project targets JDK 21 and is currently distributed as source; Maven
-publishing is not configured yet. Interoperability is tested against Yjs
-`13.6.31`.
+The project targets JDK 21 and is published from SemVer tags to GitHub Packages.
+Interoperability is tested against Yjs `13.6.31`. YKS targets the genuine Yjs
+V1/V2 wire protocols and core CRDT behavior; it is not a line-for-line clone of
+the JavaScript object model. See [Yjs compatibility](YJS_COMPATIBILITY.md) for
+the audited boundary.
+
+## Install
+
+Release `0.1.0` is published as `dev.yks:yks:0.1.0` in the repository's GitHub
+Packages Maven registry. GitHub requires authentication when downloading Maven
+packages, including packages attached to public repositories.
+
+Add the registry to `settings.gradle.kts`:
+
+```kotlin
+val githubUser = providers.gradleProperty("gpr.user")
+    .orElse(providers.environmentVariable("GITHUB_ACTOR"))
+val githubToken = providers.gradleProperty("gpr.key")
+    .orElse(providers.environmentVariable("GITHUB_TOKEN"))
+
+dependencyResolutionManagement {
+    repositories {
+        maven {
+            url = uri("https://maven.pkg.github.com/hwisu/yks")
+            credentials {
+                username = githubUser.orNull
+                password = githubToken.orNull
+            }
+            content { includeGroup("dev.yks") }
+        }
+        mavenCentral()
+    }
+}
+```
+
+For local development, put a classic personal access token with
+`read:packages` in `~/.gradle/gradle.properties`:
+
+```properties
+gpr.user=YOUR_GITHUB_USERNAME
+gpr.key=YOUR_CLASSIC_PAT
+```
+
+See GitHub's [Gradle registry authentication documentation](https://docs.github.com/en/enterprise-cloud@latest/packages/working-with-a-github-packages-registry/working-with-the-gradle-registry)
+for token creation and permission details.
+
+Then add the dependency:
+
+```kotlin
+dependencies {
+    implementation("dev.yks:yks:0.1.0")
+}
+```
+
+In another GitHub Actions repository, expose its `GITHUB_TOKEN` to Gradle and
+grant that repository access under the package's **Manage Actions access**
+setting; see [package access control](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages).
+Consumers need JDK 21 and a Kotlin 2.2-compatible toolchain.
 
 ## Quick start
 
@@ -133,8 +188,8 @@ API fails explicitly until it becomes representable.
   Yjs updates. Applied remote roots therefore remain unopened and are omitted
   from `toJSON()` until an explicit typed getter supplies the expected schema.
   Local clone/snapshot helpers preserve schema known when they are created.
-- Browser DOM helpers such as `toDOM` and selector APIs are outside the current
-  JVM surface.
+- Live XML selector APIs are supported. Browser DOM creation such as `toDOM` is
+  outside the JVM surface.
 - Kotlin callback/type shapes and Kotlin-specific extensions are not a
   line-for-line port of every JavaScript export.
 - The interop gate includes a deterministic 500-seed concurrent array/text/map
@@ -152,12 +207,13 @@ Requirements:
 ./gradlew test
 npm ci
 npm run test:interop
-./gradlew check
+./gradlew check consumerSmokeTest
 ```
 
 `check` runs both the normal Kotlin tests and the Kotlin/Yjs interoperability
-tests. To regenerate committed upstream fixtures and verify that generation is
-clean:
+tests. `consumerSmokeTest` publishes the current version to Maven Local, then
+builds and runs a standalone project against the produced artifact. To
+regenerate committed upstream fixtures and verify that generation is clean:
 
 ```sh
 npm run interop:generate
@@ -166,3 +222,6 @@ git diff --exit-code -- interop/yjs-v1/fixtures
 
 See [the interoperability harness documentation](interop/yjs-v1/README.md) for
 scenario details and standalone update verifiers.
+
+Pushing a tag such as `v0.1.0` runs the same gates, publishes that immutable
+version to GitHub Packages, and verifies it again from a clean remote consumer.

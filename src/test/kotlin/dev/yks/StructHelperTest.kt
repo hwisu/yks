@@ -24,7 +24,7 @@ class StructHelperTest {
         assertEquals(3L, gc.length)
         assertEquals(structSkipRefNumber, skip.ref)
         assertEquals(structGCRefNumber, gc.ref)
-        assertFalse(skip.deleted)
+        assertTrue(skip.deleted)
         assertTrue(gc.deleted)
         assertEquals(0, findIndexSS(structs, 0))
         assertEquals(1, findIndexSS(structs, 1))
@@ -453,6 +453,88 @@ class StructHelperTest {
         assertEquals(listOf(Triple(Id(1, 1), 0L, 1L), Triple(Id(1, 2), 0L, 1L)), visitedWithoutSplits)
         assertTrue(collected.hasId(Id(1, 1)))
         assertTrue(collectedViaDeleteSet.hasId(Id(1, 2)))
+    }
+
+    @Test
+    fun cleanItemHelpersSplitPackedDeletedItemsAtRequestedBoundaries() {
+        val doc = YDoc(clientId = 7, gc = false)
+        assertTrue(
+            doc.store.add(
+                StoreItem(
+                    id = Id(1, 0),
+                    origin = null,
+                    rightOrigin = null,
+                    parent = "body",
+                    parentSub = null,
+                    content = ItemContent.Deleted(RootKind.Text, length = 5),
+                    deleted = true,
+                ),
+            ),
+        )
+
+        doc.transact(block = { transaction ->
+            val right = getItemCleanStart(transaction, Id(1, 2))
+            val left = getItemCleanEnd(transaction, doc.store, Id(1, 0))
+
+            assertEquals(Id(1, 2), right.id)
+            assertEquals(3L, right.length)
+            assertEquals(Id(1, 0), left.id)
+            assertEquals(1L, left.length)
+
+            assertEquals(listOf(Id(1, 0), Id(1, 1), Id(1, 2)), doc.store.clients.getValue(1).map { it.id })
+            assertEquals(listOf(1L, 1L, 3L), doc.store.clients.getValue(1).map { it.length })
+        })
+        assertEquals(listOf(Id(1, 0)), doc.store.clients.getValue(1).map { it.id })
+        assertEquals(listOf(5L), doc.store.clients.getValue(1).map { it.length })
+    }
+
+    @Test
+    fun upstreamTryGcDeleteSetStoreSignatureCollectsWithoutSyntheticTransaction() {
+        val doc = deletedTextDoc()
+        val lifecycle = mutableListOf<String>()
+        doc.observeBeforeAllTransactions { lifecycle.add("beforeAll") }
+        doc.observeBeforeTransactions { lifecycle.add("before") }
+        doc.observeBeforeObserverCalls { lifecycle.add("observers") }
+        doc.observeAfterTransactions { lifecycle.add("after") }
+        doc.observeAfterTransactionCleanup { lifecycle.add("cleanup") }
+        doc.observeAfterAllTransactions { lifecycle.add("afterAll") }
+
+        tryGc(doc.deleteSet(), doc.store) { true }
+
+        assertTrue(doc.store.clients.getValue(1).filter { it.deleted }.all { it.content is ContentDeleted })
+        assertEquals(
+            listOf(Id(1, 0) to 1L, Id(1, 1) to 2L, Id(1, 3) to 1L),
+            doc.store.clients.getValue(1).map { item -> item.id to item.length },
+        )
+        assertEquals(emptyList(), lifecycle)
+    }
+
+    @Test
+    fun upstreamTryGcAllowsEmptyDeleteSetWithOwnerlessStore() {
+        tryGc(DeleteSet.empty(), StructStore()) { error("GC filter must not run") }
+    }
+
+    @Test
+    fun deletedItemMergeDoesNotCrossAConcurrentLogicalSibling() {
+        val doc = YDoc(clientId = 9, gc = false)
+        fun deleted(id: Id, origin: Id?): StoreItem = StoreItem(
+            id = id,
+            origin = origin,
+            rightOrigin = null,
+            parent = "body",
+            parentSub = null,
+            content = ItemContent.Deleted(RootKind.Text),
+            deleted = true,
+        )
+        assertTrue(doc.store.add(deleted(Id(2, 0), origin = null)))
+        assertTrue(doc.store.add(deleted(Id(2, 1), origin = Id(2, 0))))
+        assertTrue(doc.store.add(deleted(Id(1, 0), origin = Id(2, 0))))
+        assertEquals(listOf(Id(2, 0), Id(1, 0), Id(2, 1)), doc.store.sequence("body").map { it.id })
+        val deleteSet = DeleteSet.empty().also { deletes -> deletes.add(Id(2, 0), 2) }
+
+        tryGc(deleteSet, doc.store) { true }
+
+        assertEquals(listOf(Id(2, 0), Id(2, 1)), doc.store.clients.getValue(2).map { it.id })
     }
 
     private fun idSet(vararg triples: Long): IdSet {

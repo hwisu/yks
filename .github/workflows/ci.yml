@@ -27,5 +27,5 @@ jobs:
       - run: npm ci
       - run: npm run interop:generate
       - run: npm run test:interop
-      - run: ./gradlew check --no-daemon
+      - run: ./gradlew check consumerSmokeTest --no-daemon
       - run: git diff --exit-code

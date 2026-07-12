@@ -7,15 +7,17 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 기준 원격 커밋: `origin/main` = `d2e93a6`
-- 이번 커밋 반영 후 `origin/main`보다 5개 커밋 앞섬
-- 2026-07-12 정밀 감사에서 확인한 parity blocker와 후속 edge case를 모두 수정하고 전체 gate를 재검증함
+- 작업 시작 기준 원격 커밋: `origin/main` = `dd019cf`
+- 이 문서를 포함하는 릴리스 커밋에서 공개 API·observer/snapshot/GC 후속 감사를 완료하고 패키지 CI를 추가함
+- 2026-07-12 정밀 감사에서 확인한 core wire/convergence blocker와 후속 edge case를 모두 수정하고 전체 gate를 재검증함
+- JavaScript API·mutable 내부 객체 모델·browser DOM까지 동일한 완전 복제는 아니며, 차이는 `YJS_COMPATIBILITY.md`에 명시함
 - 모든 개선 커밋은 구현·회귀 테스트와 이 문서를 함께 갱신함
 
 현재 커밋 이력:
 
 ```text
-HEAD fix: complete audited Yjs Kotlin parity
+HEAD feat: publish audited Yjs Kotlin package
+dd019cf fix: complete audited Yjs Kotlin parity
 570194c fix: align Yjs cleanup map and XML semantics
 cada05a fix: harden Yjs update metadata and range merging
 92e2908 fix: close audited Yjs interoperability gaps
@@ -270,7 +272,8 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 ### 17. delete transaction-event V1 standardization
 
 - 표현 가능한 root delete-set transaction의 lossless artifact도 표준 V1 payload 사용
-- subdocument insert, delete, destroy-cleanup에서 방출된 3개 event payload 모두 표준 V1인지 검증
+- subdocument insert와 delete에서 방출된 2개 wire update payload가 모두 표준 V1인지 검증
+- destroy-cleanup은 별도 lifecycle transaction/event로 유지하되 중복 wire update를 방출하지 않음
 - 실제 upstream `Y.applyUpdate` sequence가 최종 subdocument deletion state로 수렴하는지 검증
 - standard/lossless channel 분리 상태에서 bidirectional UndoManager regression이 다시 통과함을 확인
 
@@ -323,7 +326,11 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - JS oracle에 verifier regression과 default subdocument scenario 추가
 - upstream Yjs가 생성한 concurrent array/text/map update를 Kotlin과 비교하는 deterministic 500-seed differential test 추가
 - `Gradle check`가 `interopTest`에 의존하도록 연결
-- GitHub Actions에서 Java 21 + Node 22, fixture generation, JS oracle, Gradle check, fixture diff 실행
+- GitHub Actions에서 Java 21 + Node 22, fixture generation, JS oracle, Gradle check,
+  Maven Local standalone consumer, fixture diff 실행
+- SemVer `v*` tag는 `dev.yks:yks:<version>`을 GitHub Packages에 게시
+- publish와 remote consumer를 별도 job으로 분리해 게시 후 소비 재검증만 안전하게 재실행 가능
+- 원격 consumer는 Maven Local을 배제한 새 Gradle home으로 GitHub Packages artifact를 직접 적용·실행
 
 ### 23. update metadata/state export
 
@@ -420,6 +427,47 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - 두 차례 독립 감사에서 추가로 발견된 총 17개 merge/metadata/event/preliminary/snapshot/root/undo/copy
   edge case를 모두 최소 재현과 regression으로 고정
 
+### 30. Yjs 103-export 감사, transaction edge와 패키지 배포
+
+- Yjs `13.6.31`의 103개 export를 독립적으로 전수 대조해 모두 Kotlin 대응점 또는 명시적 JVM adaptation으로 분류
+  - 일반 경로 직접 대응 49개
+  - Kotlin/default-codec adaptation 18개
+  - public/internal contract가 정확히 같지 않은 대응 32개
+  - XML document 동작은 지원하지만 browser DOM을 제외한 타입 4개
+- `AbstractConnector`, upstream 이름의 type alias, active `Transaction` alias와 별도 `TransactionEvent`,
+  `DeleteSet.clients`, clean-start/end, typed snapshot helper 등 공개 surface 보강
+- 7개 live shared type의 detached deep `clone()`과 기존 target-document clone을 함께 지원
+- XML selector/`insertAfter`, snapshot attributes, `YText.applyDelta` sanitize,
+  snapshot `toDelta`/`computeYChange`, format overflow와 array/XML partial-delete-then-throw 동작을 upstream oracle로 고정
+- observer/transaction cleanup 후속 감사:
+  - multi-span array/text/XML delta와 same-format text insert 병합
+  - remote update의 기본 UndoManager capture
+  - 빈 transaction lifecycle은 유지하되 wire update는 억제
+  - `beforeObserverCalls`의 same-parent mutation은 첫 event/update에 포함하고 다음 event에서 중복 제거
+  - 다른 parent/type mutation은 전역 clock으로 숨기지 않고 자기 queued event에 보존
+  - queued event의 add/delete 판정은 upstream `Item.mergeWith`와 같은 virtual merged representative ID 사용
+  - append 가능한 Any/String은 cleanup 병합하되 prepend/middle, Binary, ContentType 장벽은 후속 event에 보존
+  - new-struct scan의 `beforeClock` 경계와 delete/insertion split candidate의 targeted 재병합을 구분해
+    unrelated old range 또는 다른 parent를 과병합하지 않음
+  - 빈 outer transaction 안 nested mutation은 update를 한 번만 방출
+  - 직접 event payload와 실제 update-listener payload를 upstream cleanup phase에 맞춰 각각 캡처
+  - `beforeObserverCalls`가 예외를 던져도 type/deep/afterTransaction만 건너뛰고
+    GC, afterTransactionCleanup, update, subdocs는 finally phase에서 모두 실행 후 오류를 재전파
+- snapshot/GC 후속 감사:
+  - partial snapshot DeleteSet 경계에서 packed deleted struct를 실제 store item으로 분할하고 GC는 분할하지 않음
+  - snapshot 경계 split은 transaction 내부에서만 노출하고 cleanup 전에 원래 packed struct로 재병합
+  - 공식 `tryGc(DeleteSet, StructStore, filter)`는 synthetic transaction 없이 즉시 GC
+  - `tryGc` 뒤 호환 가능한 인접 `ContentDeleted`를 실제 논리 순서 안에서만 병합
+  - GC로 packed delete range가 된 뒤에도 interior ID relative position을 range 포함 검색으로 해소
+  - `createSnapshot(DeleteSet, StateVector)`는 upstream처럼 전달된 참조를 보존
+  - snapshot split cache는 mutable reference에도 안정적인 identity-set 의미 사용
+- Maven publication 추가:
+  - 좌표 `dev.yks:yks:<SemVer>`
+  - main CI에서 Maven Local standalone consumer 실행
+  - `v<SemVer>` tag workflow가 main 도달 가능성, 전체 oracle/gate, 게시, clean remote consumer를 순서대로 검증
+  - publish와 remote consumer job을 분리하고 registry 지연 재시도를 적용
+- 정확한 호환성 계약과 남은 Kotlin/JVM 차이는 `YJS_COMPATIBILITY.md`에 기록
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -495,13 +543,14 @@ subdoc-duplicate-guid-v1.bin
 마지막 전체 검증:
 
 ```text
-./gradlew clean check --no-daemon
+./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.0-test
 BUILD SUCCESSFUL
 ```
 
-- 일반 Kotlin tests: 611 passed
+- 일반 Kotlin tests: 646 passed
 - Kotlin Yjs V1/V2 interop tests: 78 passed
-- JavaScript/Yjs oracle tests: 92 passed
+- JavaScript/Yjs oracle tests: 106 passed
+- Maven Local standalone consumer: passed
 - deterministic upstream differential: 500 seeds, 0 failures
 - 15,000 nested insertion regression: passed
 - fixture regeneration diff: clean
@@ -513,7 +562,8 @@ BUILD SUCCESSFUL
 cd /Volumes/D/yks
 npm run interop:generate
 npm run test:interop
-./gradlew clean check --no-daemon
+./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.0-test
+git diff --exit-code -- interop/yjs-v1/fixtures
 git diff --check
 ```
 
@@ -521,7 +571,12 @@ git diff --check
 
 ## 정밀 감사 후 개선 상태
 
-2026-07-12 감사에서 확인한 sequence ordering, cleanup/map/XML 의미와 두 차례 후속 독립 감사의 17개 공개 API·metadata·preliminary·snapshot·event edge case까지 모두 수정하고 regression을 추가함. 현재 알려진 semantic/convergence blocker는 없음.
+2026-07-12 감사에서 확인한 sequence ordering, cleanup/map/XML 의미, 두 차례 후속 독립 감사의
+공개 API·metadata·preliminary·snapshot·event edge case, 그리고 최종 observer/snapshot/GC
+후속 감사에서 드러난 transaction merge·예외 lifecycle까지 수정하고 regression을 추가함.
+현재 알려진 core wire/semantic/convergence blocker는 없음.
+다만 YKS는 JavaScript API와 내부 객체 모델까지 완전히 동일한 복제는 아니며, 아래 JVM/wire 경계와
+`YJS_COMPATIBILITY.md`의 contract adaptation이 남아 있음.
 
 실제로 남은 경계는 upstream wire 자체 또는 JVM 환경 차이임:
 
@@ -534,9 +589,14 @@ git diff --check
    - 표준 V1/V2 API와 standard event channel은 조용히 option을 유실하거나 private bytes를 반환하지 않음
 3. GC storage compactness
    - wire/pending metadata, large range, clock semantics는 보존됨
-   - 추가 내부 메모리 최적화는 성능 개선 항목일 뿐 correctness blocker가 아님
+   - compatible `ContentDeleted` range는 병합하지만 countable/private metadata가 다른 경우 보수적으로 분리 유지
+   - 이 내부 struct 수 차이는 성능/객체 모델 adaptation이며 wire/convergence blocker가 아님
 4. browser-only surface
-   - DOM 생성, selector 등 JVM에 직접 대응하지 않는 API는 범위 밖
+   - selector와 live XML model 동작은 지원
+   - browser DOM 생성(`toDOM`)은 JVM에 직접 대응하지 않아 범위 밖
+5. Kotlin public/internal contract adaptation
+   - Kotlin 표준 `Array`/`Map`과의 이름 충돌, callback type, mutable Yjs internal struct graph는 정확히 동일하지 않음
+   - 103개 export의 대응 분류와 구체적 차이는 `YJS_COMPATIBILITY.md` 참고
 
 새 기능을 추가할 때는 fixture/oracle을 먼저 추가하고, 표준 wire eligibility와 explicit lossless 경계를 동시에 검증할 것.
 

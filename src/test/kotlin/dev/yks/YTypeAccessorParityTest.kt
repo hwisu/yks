@@ -196,7 +196,7 @@ class YTypeAccessorParityTest {
     }
 
     @Test
-    fun emptyPublicListInsertsNoopBeforeBoundsValidation() {
+    fun emptyPublicListInsertsFollowUpstreamTypeSpecificLifecycleAndBounds() {
         val doc = YDoc(clientId = 1)
         val array = doc.getArray("array")
         val text = doc.getText("text")
@@ -206,7 +206,7 @@ class YTypeAccessorParityTest {
         doc.observeAfterTransactions { transaction -> transactions.add(transaction) }
 
         array.insert(0, emptyList())
-        array.insert(1, emptyList())
+        assertFailsWith<IllegalArgumentException> { array.insert(1, emptyList()) }
         text.insert(0, "")
         text.insert(1, "")
         text.insert(0, emptyList())
@@ -214,13 +214,13 @@ class YTypeAccessorParityTest {
         text.insertText(0, "")
         text.insertText(1, "")
         xml.insert(0, emptyList())
-        xml.insert(1, emptyList())
+        assertFailsWith<IllegalArgumentException> { xml.insert(1, emptyList()) }
         element.insert(1, emptyList())
         typeListInsertGenerics(array, 0, emptyList())
         typeListInsertGenerics(text, 0, emptyList())
         typeListInsertGenerics(xml, 0, emptyList())
 
-        assertTrue(transactions.isEmpty())
+        assertEquals(4, transactions.size)
         assertEquals(emptyList(), array.toArray())
         assertEquals("", text.toString())
         assertEquals("", xml.toString())
@@ -349,9 +349,9 @@ class YTypeAccessorParityTest {
         assertEquals("b", text.toString())
         assertEquals("b", xml.toString())
 
-        array.delete(0, 99)
+        assertFailsWith<IllegalArgumentException> { array.delete(0, 99) }
         text.delete(0, 99)
-        xml.delete(0, 99)
+        assertFailsWith<IllegalArgumentException> { xml.delete(0, 99) }
 
         assertEquals(emptyList(), array.toArray())
         assertEquals("", text.toString())
@@ -362,10 +362,11 @@ class YTypeAccessorParityTest {
         text.delete(0, 0)
         xml.delete(0, 0)
 
-        assertEquals(eventsAfterDeletes, transactions.size)
-        assertFailsWith<IllegalArgumentException> { array.delete(1, 0) }
-        assertFailsWith<IllegalArgumentException> { text.delete(1, 0) }
-        assertFailsWith<IllegalArgumentException> { xml.delete(1, 0) }
+        assertEquals(eventsAfterDeletes + 2, transactions.size)
+        array.delete(1, 0)
+        text.delete(1, 0)
+        xml.delete(1, 0)
+        assertEquals(eventsAfterDeletes + 4, transactions.size)
 
         val aliasText = YDoc(clientId = 2).getText("text")
         val aliasOrigins = mutableListOf<Any?>()
@@ -381,8 +382,9 @@ class YTypeAccessorParityTest {
         aliasText.deleteText(0, -1, origin = "alias-noop")
 
         assertEquals("b", aliasText.toString())
-        assertEquals(listOf<Any?>("alias-delete"), aliasOrigins)
-        assertFailsWith<IllegalArgumentException> { aliasText.deleteText(2, 0, origin = "alias-overflow") }
+        assertEquals(listOf<Any?>("alias-delete", "alias-noop"), aliasOrigins)
+        aliasText.deleteText(2, 0, origin = "alias-overflow")
+        assertEquals(listOf<Any?>("alias-delete", "alias-noop"), aliasOrigins)
     }
 
     @Test

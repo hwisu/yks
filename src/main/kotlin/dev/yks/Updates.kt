@@ -663,6 +663,7 @@ data class ObfuscatorOptions(
     val formatting: Boolean = true,
     val subdocs: Boolean = true,
     val name: Boolean = true,
+    val yxml: Boolean = name,
 )
 
 fun obfuscateUpdate(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray {
@@ -1518,7 +1519,7 @@ private class UpdateObfuscator(
         is ItemContent.MapEntry -> ItemContent.MapEntry(obfuscate(content.value))
         is ItemContent.XmlNode -> content.copy(value = obfuscate(content.value))
         is ItemContent.XmlType -> content.copy(
-            nodeName = if (options.name) obfuscateNodeName(content.nodeName) else content.nodeName,
+            nodeName = if (options.yxml) obfuscateNodeName(content.nodeName) else content.nodeName,
             attributes = if (options.formatting) obfuscateFormatting(content.attributes) else content.attributes,
             baseAttributes = if (options.formatting) {
                 obfuscateFormatting(content.baseAttributes)
@@ -1577,7 +1578,7 @@ private class UpdateObfuscator(
             if (options.formatting) obfuscateFormatting(value.attributes) else value.attributes,
         )
         is YXmlNodeValue.Element -> YXmlNodeValue.Element(
-            nodeName = if (options.name) obfuscateNodeName(value.nodeName) else value.nodeName,
+            nodeName = if (options.yxml) obfuscateNodeName(value.nodeName) else value.nodeName,
             attributes = obfuscateValues(value.attributes),
             children = value.children.map(::obfuscate),
         )

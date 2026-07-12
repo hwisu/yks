@@ -636,8 +636,10 @@ private fun snapshotAttrs(prevSnapshot: Snapshot, nextSnapshot: Snapshot): IdMap
         inserts.add(client, 0, prevClock, emptyList())
         inserts.add(client, prevClock, clock - prevClock, change)
     }
-    val deletes = createIdMapFromIdSet(diffIdSet(nextSnapshot.ds, prevSnapshot.ds), change)
-    return mergeIdMaps(listOf(diffIdMap(inserts, prevSnapshot.ds), deletes))
+    val prevDeletes = prevSnapshot.ds.toIdSet()
+    val nextDeletes = nextSnapshot.ds.toIdSet()
+    val deletes = createIdMapFromIdSet(diffIdSet(nextDeletes, prevDeletes), change)
+    return mergeIdMaps(listOf(diffIdMap(inserts, prevDeletes), deletes))
 }
 
 private fun intersectIdMapWithIdSet(idMap: IdMap, idSet: IdSet): IdMap {

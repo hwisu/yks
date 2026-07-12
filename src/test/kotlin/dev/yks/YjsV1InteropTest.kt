@@ -681,7 +681,7 @@ class YjsV1InteropTest {
         subs.set("child", YDoc(guid = "child", shouldLoad = false))
         subs.delete("child")
 
-        assertEquals(3, updates.size)
+        assertEquals(2, updates.size)
         updates.forEach(::assertStandardV1)
         assertUpstreamAppliesSequence("subdoc-delete", *updates.toTypedArray())
     }

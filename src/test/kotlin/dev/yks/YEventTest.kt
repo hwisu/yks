@@ -25,6 +25,452 @@ class YEventTest {
     }
 
     @Test
+    fun sequenceObserversPreserveMultipleDisjointEditSpansLikeUpstream() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val array = doc.getArray("array")
+        val text = doc.getText("text")
+        val xml = doc.getXmlFragment("xml")
+        array.push("a", "b", "c")
+        text.insert(0, "abc")
+        xml.push(YXmlText("a"), YXmlText("b"), YXmlText("c"))
+        var arrayEvent: YEvent? = null
+        var textEvent: YEvent? = null
+        var xmlEvent: YEvent? = null
+        array.observe { event -> arrayEvent = event }
+        text.observe { event -> textEvent = event }
+        xml.observe { event -> xmlEvent = event }
+
+        doc.transact {
+            array.insert(0, listOf("x"))
+            array.push("y")
+            text.insert(0, "x")
+            text.insert(text.length, "y")
+            xml.insert(0, listOf(YXmlText("x")))
+            xml.push(YXmlText("y"))
+        }
+
+        assertEquals(
+            listOf(
+                YArrayDeltaOp(insert = listOf("x")),
+                YArrayDeltaOp(retain = 3),
+                YArrayDeltaOp(insert = listOf("y")),
+            ),
+            arrayEvent?.arrayDelta,
+        )
+        assertEquals(
+            YTextDelta().insert("x").retain(3).insert("y"),
+            textEvent?.textDelta,
+        )
+        assertEquals(
+            listOf(
+                YArrayDeltaOp(insert = listOf("x")),
+                YArrayDeltaOp(retain = 3),
+                YArrayDeltaOp(insert = listOf("y")),
+            ),
+            xmlEvent?.arrayDelta,
+        )
+    }
+
+    @Test
+    fun replayedFullDeleteSetOnlyReportsNewlyDeletedTextLikeUpstream() {
+        val source = YDoc(clientId = 1, gc = false)
+        val sourceText = source.getText("body")
+        sourceText.insert(0, "abc")
+        val target = YDoc(clientId = 2, gc = false)
+        target.applyUpdate(source.encodeStateAsUpdate())
+        val deltas = mutableListOf<YTextDelta>()
+        target.getText("body").observe { event -> deltas.add(event.textDelta) }
+
+        sourceText.delete(1)
+        target.applyUpdate(source.encodeStateAsUpdate())
+        sourceText.delete(1)
+        target.applyUpdate(source.encodeStateAsUpdate())
+
+        assertEquals(
+            listOf(
+                YTextDelta().retain(1).delete(1),
+                YTextDelta().retain(1).delete(1),
+            ),
+            deltas,
+        )
+    }
+
+    @Test
+    fun adjacentSameFormatInsertsInOneTransactionMergeLikeUpstream() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val text = doc.getText("body")
+        val bold = mapOf("bold" to true)
+        text.insert(0, "a", bold)
+        lateinit var delta: YTextDelta
+        text.observe { event -> delta = event.textDelta }
+
+        doc.transact {
+            text.insert(text.length, "x", bold)
+            text.insert(text.length, "y", bold)
+        }
+
+        assertEquals(YTextDelta().retain(1).insert("xy", bold), delta)
+    }
+
+    @Test
+    fun beforeObserverCallsMutationIsIncludedBeforeEventAndDeduplicatedInCleanupBatch() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val array = doc.getArray("items")
+        val deltas = mutableListOf<List<YArrayDeltaOp>>()
+        val updates = mutableListOf<ByteArray>()
+        var mutateOnce = true
+        doc.observeBeforeObserverCalls {
+            if (mutateOnce) {
+                mutateOnce = false
+                array.push("y")
+            }
+        }
+        array.observe { event -> deltas.add(event.arrayDelta) }
+        doc.observeUpdates { update, _ -> updates.add(update) }
+
+        array.push("x")
+
+        assertEquals(
+            listOf(
+                listOf(YArrayDeltaOp(insert = listOf("x", "y"))),
+                emptyList(),
+            ),
+            deltas,
+        )
+        assertEquals(2, updates.size)
+        val replay = YDoc(clientId = 2)
+        replay.applyUpdate(updates[0])
+        assertEquals(listOf("x", "y"), replay.getArray("items").toArray())
+        replay.applyUpdate(updates[1])
+        assertEquals(listOf("x", "y"), replay.getArray("items").toArray())
+    }
+
+    @Test
+    fun beforeObserverCallsCoverageDoesNotHideMutationOfAnotherType() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val first = doc.getArray("first")
+        val second = doc.getArray("second")
+        val firstDeltas = mutableListOf<List<YArrayDeltaOp>>()
+        val secondDeltas = mutableListOf<List<YArrayDeltaOp>>()
+        var mutateOnce = true
+        doc.observeBeforeObserverCalls {
+            if (mutateOnce) {
+                mutateOnce = false
+                second.push("y")
+            }
+        }
+        first.observe { event -> firstDeltas.add(event.arrayDelta) }
+        second.observe { event -> secondDeltas.add(event.arrayDelta) }
+
+        first.push("x")
+
+        assertEquals(listOf(listOf(YArrayDeltaOp(insert = listOf("x")))), firstDeltas)
+        assertEquals(listOf(listOf(YArrayDeltaOp(insert = listOf("y")))), secondDeltas)
+    }
+
+    @Test
+    fun queuedPrependAndMiddleInsertRepeatBecauseCleanupCannotMergeThem() {
+        val prependDoc = YDoc(clientId = 1, gc = false)
+        val prependArray = prependDoc.getArray("items")
+        val prependDeltas = mutableListOf<List<YArrayDeltaOp>>()
+        var prependOnce = true
+        prependDoc.observeBeforeObserverCalls {
+            if (prependOnce) {
+                prependOnce = false
+                prependArray.insert(0, "y")
+            }
+        }
+        prependArray.observe { event -> prependDeltas.add(event.arrayDelta) }
+
+        prependArray.push("x")
+
+        assertEquals(
+            listOf(
+                listOf(YArrayDeltaOp(insert = listOf("y", "x"))),
+                listOf(YArrayDeltaOp(insert = listOf("y"))),
+            ),
+            prependDeltas,
+        )
+
+        val middleDoc = YDoc(clientId = 1, gc = false)
+        val middleArray = middleDoc.getArray("items")
+        middleArray.push("a", "b")
+        val middleDeltas = mutableListOf<List<YArrayDeltaOp>>()
+        var middleOnce = true
+        middleDoc.observeBeforeObserverCalls {
+            if (middleOnce) {
+                middleOnce = false
+                middleArray.insert(1, "y")
+            }
+        }
+        middleArray.observe { event -> middleDeltas.add(event.arrayDelta) }
+
+        middleArray.push("x")
+
+        assertEquals(
+            listOf(
+                listOf(
+                    YArrayDeltaOp(retain = 1),
+                    YArrayDeltaOp(insert = listOf("y")),
+                    YArrayDeltaOp(retain = 1),
+                    YArrayDeltaOp(insert = listOf("x")),
+                ),
+                listOf(YArrayDeltaOp(retain = 1), YArrayDeltaOp(insert = listOf("y"))),
+            ),
+            middleDeltas,
+        )
+    }
+
+    @Test
+    fun queuedNonMergeableBinaryAndContentTypeRemainAddedInTheirOwnEvent() {
+        val binaryDoc = YDoc(clientId = 1, gc = false)
+        val binaryArray = binaryDoc.getArray("items")
+        val binaryDeltas = mutableListOf<List<YArrayDeltaOp>>()
+        val binary = byteArrayOf(1)
+        var binaryOnce = true
+        binaryDoc.observeBeforeObserverCalls {
+            if (binaryOnce) {
+                binaryOnce = false
+                binaryArray.push("y", binary, "z")
+            }
+        }
+        binaryArray.observe { event -> binaryDeltas.add(event.arrayDelta) }
+
+        binaryArray.push("x")
+
+        assertEquals(2, binaryDeltas.size)
+        assertEquals(2, binaryDeltas[1][0].retain)
+        assertEquals(2, binaryDeltas[1][1].insert?.size)
+        assertTrue(binaryDeltas[1][1].insert?.get(0) is ByteArray)
+        assertEquals("z", binaryDeltas[1][1].insert?.get(1))
+
+        val typeDoc = YDoc(clientId = 1, gc = false)
+        val typeArray = typeDoc.getArray("items")
+        val typeDeltas = mutableListOf<List<YArrayDeltaOp>>()
+        val child = YArray()
+        var typeOnce = true
+        typeDoc.observeBeforeObserverCalls {
+            if (typeOnce) {
+                typeOnce = false
+                typeArray.push(child)
+            }
+        }
+        typeArray.observe { event -> typeDeltas.add(event.arrayDelta) }
+
+        typeArray.push("x")
+
+        assertEquals(2, typeDeltas.size)
+        assertEquals(1, typeDeltas[1][0].retain)
+        assertEquals(1, typeDeltas[1][1].insert?.size)
+        assertTrue(typeDeltas[1][1].insert?.single() is YArray)
+    }
+
+    @Test
+    fun queuedDeleteIsHiddenOnlyWhenTheDeletedItemsVirtuallyMerge() {
+        fun capture(values: List<Any?>): List<List<YArrayDeltaOp>> {
+            val doc = YDoc(clientId = 1, gc = false)
+            val array = doc.getArray("items")
+            array.push(values)
+            val deltas = mutableListOf<List<YArrayDeltaOp>>()
+            var deleteOnce = true
+            doc.observeBeforeObserverCalls {
+                if (deleteOnce) {
+                    deleteOnce = false
+                    array.delete(0)
+                }
+            }
+            array.observe { event -> deltas.add(event.arrayDelta) }
+
+            array.delete(0)
+            return deltas
+        }
+
+        assertEquals(
+            listOf(listOf(YArrayDeltaOp(delete = 1)), emptyList()),
+            capture(listOf("a", "b")),
+        )
+        assertEquals(
+            listOf(listOf(YArrayDeltaOp(delete = 1)), listOf(YArrayDeltaOp(delete = 1))),
+            capture(listOf(byteArrayOf(1), byteArrayOf(2))),
+        )
+    }
+
+    @Test
+    fun deleteSplitCandidateMergesOnlyItsOwnReachableSequenceDuringCleanup() {
+        val sameDoc = YDoc(clientId = 1, gc = false)
+        val sameArray = sameDoc.getArray("same")
+        sameArray.push("a", "b")
+        val sameDeltas = mutableListOf<List<YArrayDeltaOp>>()
+        var appendOnce = true
+        sameDoc.observeBeforeObserverCalls {
+            if (appendOnce) {
+                appendOnce = false
+                sameArray.push("y")
+            }
+        }
+        sameArray.observe { event -> sameDeltas.add(event.arrayDelta) }
+
+        sameArray.delete(0)
+
+        assertEquals(
+            listOf(
+                listOf(
+                    YArrayDeltaOp(delete = 1),
+                    YArrayDeltaOp(retain = 1),
+                    YArrayDeltaOp(insert = listOf("y")),
+                ),
+                emptyList(),
+            ),
+            sameDeltas,
+        )
+
+        val crossDoc = YDoc(clientId = 1, gc = false)
+        val deletedFrom = crossDoc.getArray("deletedFrom")
+        val appendedTo = crossDoc.getArray("appendedTo")
+        deletedFrom.push("a", "b")
+        appendedTo.push("x")
+        val crossDeltas = mutableListOf<List<YArrayDeltaOp>>()
+        var crossOnce = true
+        crossDoc.observeBeforeObserverCalls {
+            if (crossOnce) {
+                crossOnce = false
+                appendedTo.push("y")
+            }
+        }
+        appendedTo.observe { event -> crossDeltas.add(event.arrayDelta) }
+
+        deletedFrom.delete(0)
+
+        assertEquals(
+            listOf(listOf(YArrayDeltaOp(retain = 1), YArrayDeltaOp(insert = listOf("y")))),
+            crossDeltas,
+        )
+    }
+
+    @Test
+    fun newStructCleanupScanDoesNotMergeOldDeletedBoundaryBeforeItsStartClock() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val old = doc.getArray("old")
+        val trigger = doc.getArray("trigger")
+        old.push("a", "b")
+        old.delete(0)
+        val oldDeltas = mutableListOf<List<YArrayDeltaOp>>()
+        var deleteOnce = true
+        doc.observeBeforeObserverCalls {
+            if (deleteOnce) {
+                deleteOnce = false
+                old.delete(0)
+            }
+        }
+        old.observe { event -> oldDeltas.add(event.arrayDelta) }
+
+        trigger.push("x")
+
+        assertEquals(listOf(listOf(YArrayDeltaOp(delete = 1))), oldDeltas)
+    }
+
+    @Test
+    fun beforeObserverFailureSkipsObserversButAlwaysRunsCleanupUpdatesAndSubdocs() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val array = doc.getArray("items")
+        val original = IllegalStateException("before")
+        val cleanupFailure = IllegalArgumentException("cleanup")
+        val updateFailure = IllegalArgumentException("update")
+        val subdocFailure = IllegalArgumentException("subdocs")
+        val seen = mutableListOf<String>()
+        lateinit var updatePayload: ByteArray
+        doc.observeBeforeObserverCalls {
+            seen.add("before")
+            throw original
+        }
+        array.observe { seen.add("type") }
+        doc.observeAfterTransactions { seen.add("afterTransaction") }
+        doc.observeAfterTransactionCleanup {
+            seen.add("cleanup")
+            throw cleanupFailure
+        }
+        doc.observeUpdates { update, _ ->
+            seen.add("update")
+            updatePayload = update.copyOf()
+            throw updateFailure
+        }
+        doc.observeSubdocs {
+            seen.add("subdocs")
+            throw subdocFailure
+        }
+
+        val thrown = assertFailsWith<IllegalStateException> {
+            array.push(YDoc(guid = "nested"))
+        }
+
+        assertSame(original, thrown)
+        assertEquals(listOf("before", "cleanup", "update", "subdocs"), seen)
+        assertEquals(
+            listOf(cleanupFailure, updateFailure, subdocFailure),
+            thrown.suppressed.toList(),
+        )
+        val replay = YDoc(clientId = 2)
+        replay.applyUpdate(updatePayload)
+        assertEquals(1, replay.getArray("items").length)
+        assertEquals(setOf("nested"), replay.getSubdocs().mapTo(linkedSetOf()) { it.guid })
+    }
+
+    @Test
+    fun emptyOuterTransactionDoesNotRepeatNestedBeforeObserverUpdate() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val array = doc.getArray("items")
+        val updates = mutableListOf<ByteArray>()
+        var mutateOnce = true
+        doc.observeBeforeObserverCalls {
+            if (mutateOnce) {
+                mutateOnce = false
+                array.push("y")
+            }
+        }
+        doc.observeUpdates { update, _ -> updates.add(update) }
+
+        doc.transact { }
+
+        assertEquals(1, updates.size)
+        val replay = YDoc(clientId = 2)
+        replay.applyUpdate(updates.single())
+        assertEquals(listOf("y"), replay.getArray("items").toArray())
+    }
+
+    @Test
+    fun observerMutationIsIncludedInCurrentUpdateAndDeduplicatedFromNextEvent() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val array = doc.getArray("items")
+        val deltas = mutableListOf<List<YArrayDeltaOp>>()
+        val updates = mutableListOf<ByteArray>()
+        var mutateOnce = true
+        array.observe { event ->
+            deltas.add(event.arrayDelta)
+            if (mutateOnce) {
+                mutateOnce = false
+                array.push("y")
+            }
+        }
+        doc.observeUpdates { update, _ -> updates.add(update) }
+
+        array.push("x")
+
+        assertEquals(
+            listOf(
+                listOf(YArrayDeltaOp(insert = listOf("x"))),
+                emptyList(),
+            ),
+            deltas,
+        )
+        assertEquals(2, updates.size)
+        val replay = YDoc(clientId = 2)
+        replay.applyUpdate(updates[0])
+        assertEquals(listOf("x", "y"), replay.getArray("items").toArray())
+        replay.applyUpdate(updates[1])
+        assertEquals(listOf("x", "y"), replay.getArray("items").toArray())
+    }
+
+    @Test
     fun eventExposesTransactionCurrentTargetChildListChangedAndGenericDelta() {
         val doc = YDoc(clientId = 1)
         val array = doc.getArray("items")

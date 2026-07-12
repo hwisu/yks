@@ -33,7 +33,7 @@ fun createRelativePositionFromTypeIndex(
     renderer: AbstractRenderer = baseRenderer,
 ): RelativePosition {
     require(index >= 0) { "index must be non-negative" }
-    val items = type.doc.sequence(type.name).filter { it.content.kind == type.kind && it.countable }
+    val items = type.doc.relativePositionSequence(type)
 
     var remaining = index
     if (assoc < 0) {
@@ -75,9 +75,13 @@ fun createAbsolutePositionFromRelativePosition(
             else -> itemId
         }
         val item = doc.getItem(anchorId) ?: return null
-        val type = doc.typeForParent(item.parent) ?: return null
-        val ordered = doc.sequence(item.parent).filter { it.content.kind == type.kind && it.countable }
-        val rawIndex = ordered.indexOfFirst { it.id == anchorId }
+        val type = doc.typeForParent(item.parent) ?: doc.getOrNull(item.parent) ?: return null
+        val ordered = doc.relativePositionSequence(type)
+        val rawIndex = ordered.indexOfFirst { candidate ->
+            anchorId.client == candidate.id.client &&
+                anchorId.clock >= candidate.id.clock &&
+                anchorId.clock < checkedClockAdd(candidate.id.clock, candidate.length, "relative position item end")
+        }
         if (rawIndex < 0) return null
         val visibleBefore = ordered
             .take(rawIndex)
@@ -91,7 +95,8 @@ fun createAbsolutePositionFromRelativePosition(
     }
 
     val type = when {
-        relativePosition.tname != null -> doc.typeForParent(relativePosition.tname)
+        relativePosition.tname != null ->
+            doc.typeForParent(relativePosition.tname) ?: doc.getOrNull(relativePosition.tname)
         relativePosition.type != null -> {
             val typeId = if (followUndoneDeletions) doc.followRedone(relativePosition.type) else relativePosition.type
             doc.typeFromItemId(typeId)
@@ -101,13 +106,17 @@ fun createAbsolutePositionFromRelativePosition(
     val index = if (relativePosition.assoc < 0) {
         0
     } else {
-            doc.sequence(type.name)
-            .filter { it.content.kind == type.kind && it.countable }
+        doc.relativePositionSequence(type)
             .sumOf { item -> rendererContentLength(renderer, item.toItemStruct(doc)) }
             .toInt()
     }
     return AbsolutePosition(type, index, relativePosition.assoc)
 }
+
+private fun YDoc.relativePositionSequence(type: AbstractYType): List<StoreItem> =
+    sequence(type.name).filter { item ->
+        item.countable && (type is YUnopenedRoot || item.content.kind == type.kind)
+    }
 
 fun encodeRelativePosition(relativePosition: RelativePosition): ByteArray {
     val encoder = BinaryEncoder()

@@ -55,6 +55,7 @@ class Skip(
     override val id: Id,
     override var length: Long,
 ) : AbstractStruct(id, length) {
+    override val deleted: Boolean get() = true
     override val ref: Int get() = structSkipRefNumber
 
     override fun mergeWith(right: AbstractStruct): Boolean {
@@ -308,20 +309,29 @@ fun nextID(transaction: YTransaction): Id = nextID(transaction.doc)
 fun getTypeStructs(type: AbstractYType): List<ItemStruct> =
     type.doc.typeChildren(type).map { item -> item.toItemStruct(type.doc) }
 
+fun getItem(store: StructStore, id: Id): ItemStruct = store.getItem(id)
+
 fun getItemCleanStart(doc: YDoc, id: Id): ItemStruct =
-    doc.getItem(id)?.toItemStruct(doc) ?: error("struct not found: $id")
+    doc.store.getStoreItemCleanStart(id).toItemStruct(doc)
 
 fun getItemCleanStart(transaction: YTransaction, id: Id): ItemStruct =
-    getItemCleanStart(transaction.doc, id)
+    transaction.doc.store
+        .getStoreItemCleanStart(id, transaction::registerSplitMergeCandidate)
+        .toItemStruct(transaction.doc)
 
-fun getItemCleanEnd(doc: YDoc, id: Id): ItemStruct = getItemCleanStart(doc, id)
+fun getItemCleanEnd(doc: YDoc, id: Id): ItemStruct =
+    doc.store.getStoreItemCleanEnd(id).toItemStruct(doc)
 
 fun getItemCleanEnd(transaction: YTransaction, id: Id): ItemStruct =
-    getItemCleanEnd(transaction.doc, id)
+    transaction.doc.store
+        .getStoreItemCleanEnd(id, transaction::registerSplitMergeCandidate)
+        .toItemStruct(transaction.doc)
 
 fun getItemCleanEnd(transaction: YTransaction, store: StructStore, id: Id): ItemStruct {
     require(transaction.doc.store === store) { "store must belong to the transaction document" }
-    return getItemCleanEnd(transaction.doc, id)
+    return store
+        .getStoreItemCleanEnd(id, transaction::registerSplitMergeCandidate)
+        .toItemStruct(transaction.doc)
 }
 
 fun iterateStructsByIdSet(
@@ -450,6 +460,17 @@ fun tryGc(
     idSet: IdSet,
     gcFilter: (AbstractStruct) -> Boolean = transaction.doc.gcFilter,
 ): IdSet = gcIdSet(transaction.doc, idSet, gcFilter)
+
+fun tryGc(
+    deleteSet: DeleteSet,
+    store: StructStore,
+    gcFilter: (AbstractStruct) -> Boolean,
+) {
+    if (deleteSet.isEmpty) return
+    val doc = store.ownerDoc ?: error("tryGc requires a document-owned StructStore")
+    collectGarbageNow(doc, deleteSet.toIdSet(), gcFilter)
+    store.mergeDeletedItems(deleteSet)
+}
 
 fun tryGcDeleteSet(
     doc: YDoc,

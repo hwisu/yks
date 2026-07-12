@@ -104,7 +104,7 @@ class YTextDeltaTest {
                 .insert("b"),
             text.toDelta(),
         )
-        assertEquals(listOf<Any?>(null), origins)
+        assertEquals(listOf<Any?>(null, null, null), origins)
 
         text.formatText(1, 1, mapOf("italic" to true), origin = "format-text")
 
@@ -114,14 +114,26 @@ class YTextDeltaTest {
                 .insert("b", mapOf("italic" to true)),
             text.toDelta(),
         )
-        assertEquals(listOf<Any?>(null, "format-text"), origins)
+        assertEquals(listOf<Any?>(null, null, null, "format-text"), origins)
 
         text.formatText(0, 0, mapOf("underline" to true), origin = "noop")
 
-        assertEquals(listOf<Any?>(null, "format-text"), origins)
-        assertFailsWith<IllegalArgumentException> { text.format(3, 0, mapOf("code" to true)) }
-        assertFailsWith<IllegalArgumentException> { text.format(0, 99, mapOf("code" to true)) }
-        assertFailsWith<IllegalArgumentException> { text.formatText(3, 1, emptyMap(), origin = "overflow") }
+        text.format(3, 0, mapOf("code" to true))
+        assertEquals(listOf<Any?>(null, null, null, "format-text"), origins)
+
+        text.format(0, 4, mapOf("code" to true))
+        assertEquals(
+            YTextDelta()
+                .insert("a", mapOf("bold" to true, "code" to true))
+                .insert("b", mapOf("code" to true, "italic" to true))
+                .insert("\n\n", mapOf("code" to true)),
+            text.toDelta(),
+        )
+        text.formatText(text.length + 1, 1, emptyMap(), origin = "overflow")
+        assertEquals(
+            listOf<Any?>(null, null, null, "format-text", null, "overflow"),
+            origins,
+        )
     }
 
     @Test
@@ -870,7 +882,7 @@ class YTextDeltaTest {
         assertEquals(before, text.toDelta())
         assertEquals(YTextDelta().insert("abc", mapOf("bold" to true)), text.toDelta())
         assertEquals(2, text.liveFormatItemCountForTest())
-        assertEquals(0, cleanupTransactions.size)
+        assertEquals(1, cleanupTransactions.size)
     }
 
     @Test

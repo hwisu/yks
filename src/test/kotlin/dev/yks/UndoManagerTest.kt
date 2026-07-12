@@ -452,7 +452,7 @@ class UndoManagerTest {
     }
 
     @Test
-    fun managerRespectsTypeScopeAndIgnoresRemoteUpdates() {
+    fun managerRespectsTypeScopeAndCapturesTrackedRemoteUpdatesLikeUpstream() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("body")
         val map = doc.getMap("meta")
@@ -464,13 +464,41 @@ class UndoManagerTest {
         val remote = YDoc(clientId = 2)
         remote.getText("body").insert(0, "remote")
         doc.applyUpdate(remote.encodeStateAsUpdate())
-        assertFalse(undoManager.canUndo)
+        assertTrue(undoManager.canUndo)
         assertEquals("remote", text.toString())
 
-        text.insert(6, " local")
+        undoManager.undo()
+        assertEquals("", text.toString())
+
+        text.insert(0, "local")
         assertTrue(undoManager.canUndo)
         undoManager.undo()
-        assertEquals("remote", text.toString())
+        assertEquals("", text.toString())
+    }
+
+    @Test
+    fun documentScopeCapturesEmptyTransactionAndCallsCaptureHookLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        var captureCalls = 0
+        val undoManager = UndoManager(
+            doc,
+            UndoManagerOptions(
+                captureTimeoutMillis = 0,
+                captureTransaction = {
+                    captureCalls++
+                    true
+                },
+            ),
+        )
+
+        doc.transact { }
+
+        assertEquals(1, captureCalls)
+        assertEquals(1, undoManager.undoStack.size)
+        assertTrue(undoManager.canUndo)
+        assertTrue(undoManager.undoStack.single().isEmpty)
+        assertEquals(null, undoManager.undo())
+        assertFalse(undoManager.canUndo)
     }
 
     @Test
@@ -1087,7 +1115,9 @@ class UndoManagerTest {
     private fun syncDocs(vararg docs: YDoc) {
         val updates = docs.map { doc -> doc.encodeStateAsUpdate() }
         docs.forEach { target ->
-            updates.forEach { update -> target.applyUpdate(update) }
+            updates.forEach { update -> target.applyUpdate(update, origin = RemoteSyncOrigin) }
         }
     }
+
+    private object RemoteSyncOrigin
 }

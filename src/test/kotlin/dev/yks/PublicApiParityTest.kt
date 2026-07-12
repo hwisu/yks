@@ -15,7 +15,7 @@ class PublicApiParityTest {
         val doc = Doc(clientId = 1)
         val type: Type = doc.getText("body")
         val ytype: YType = type
-        val transactions = mutableListOf<Transaction>()
+        val transactions = mutableListOf<TransactionEvent>()
 
         doc.observeAfterTransactions { transaction -> transactions.add(transaction) }
         (type as YText).insert(0, "x")
@@ -81,7 +81,7 @@ class PublicApiParityTest {
         assertSame(element, doc.get("paragraph"))
         assertNull(doc.getOrNull("missing"))
         val missing = doc.get("missing")
-        assertTrue(missing is YArray)
+        assertTrue(missing is YUnopenedRoot)
         assertSame(missing, doc.get("missing"))
         assertSame(missing, doc.getOrNull("missing"))
         assertEquals(setOf("body", "items", "meta", "missing", "paragraph", "xml"), doc.rootNames())
@@ -108,7 +108,7 @@ class PublicApiParityTest {
         assertTrue(text is YText)
         assertTrue(xml is YXmlFragment)
         assertTrue(element is YXmlElementType)
-        assertEquals("element", element.nodeName)
+        assertEquals("UNDEFINED", element.nodeName)
         assertSame(array, doc.get("items", YArrayRefID))
         assertSame(map, doc.get("meta", YMapRefID))
         assertSame(text, doc.get("body", RootKind.Text))

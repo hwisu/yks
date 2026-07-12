@@ -139,14 +139,14 @@ class YDoc(
         get() = getSubdocs()
 
     operator fun get(name: String): AbstractYType =
-        rootType(name) ?: unopenedRoot(name) ?: getArray(name)
+        rootType(name) ?: unopenedRoot(name) ?: createUnopenedRoot(name)
 
     fun get(name: String, kind: RootKind): AbstractYType = when (kind) {
         RootKind.Array -> getArray(name)
         RootKind.Map -> getMap(name)
         RootKind.Text -> getText(name)
         RootKind.XmlFragment -> getXmlFragment(name)
-        RootKind.XmlElement -> getXmlElement(name, name)
+        RootKind.XmlElement -> getXmlElement(name)
         RootKind.XmlHook,
         RootKind.XmlText -> error("XML node type refs cannot be document roots")
     }
@@ -157,15 +157,16 @@ class YDoc(
 
     fun get(): YArray = getArray("")
 
-    fun getArray(name: String): YArray = getOrCreate(name, RootKind.Array) { YArray(this, name) }
+    fun getArray(name: String = ""): YArray = getOrCreate(name, RootKind.Array) { YArray(this, name) }
 
-    fun getMap(name: String): YMap = getOrCreate(name, RootKind.Map) { YMap(this, name) }
+    fun getMap(name: String = ""): YMap = getOrCreate(name, RootKind.Map) { YMap(this, name) }
 
-    fun getText(name: String): YText = getOrCreate(name, RootKind.Text) { YText(this, name) }
+    fun getText(name: String = ""): YText = getOrCreate(name, RootKind.Text) { YText(this, name) }
 
-    fun getXmlFragment(name: String): YXmlFragment = getOrCreate(name, RootKind.XmlFragment) { YXmlFragment(this, name) }
+    fun getXmlFragment(name: String = ""): YXmlFragment =
+        getOrCreate(name, RootKind.XmlFragment) { YXmlFragment(this, name) }
 
-    fun getXmlElement(name: String, nodeName: String = name): YXmlElementType =
+    fun getXmlElement(name: String = "", nodeName: String = "UNDEFINED"): YXmlElementType =
         getOrCreate(name, RootKind.XmlElement) { YXmlElementType(this, name, nodeName) }
 
     fun createArray(): YArray = createNestedType(RootKind.Array) { nestedName -> YArray(this, nestedName) }
@@ -841,7 +842,7 @@ class YDoc(
     internal fun rootType(name: String): AbstractYType? = rootTypes[name]
 
     fun rootNames(): Set<String> {
-        return (rootTypes.keys + store.allItems().map { it.parent })
+        return (rootTypes.keys + unopenedRootEntries.keys + store.allItems().map { it.parent })
             .filterNot { it in nestedNames }
             .filterNot { it.startsWith("__yjs_gc__:") }
             .toSortedSet()
@@ -854,6 +855,11 @@ class YDoc(
 
     private fun unopenedRoot(name: String): YUnopenedRoot? {
         if (name !in rootNames()) return null
+        return unopenedRootEntries.getOrPut(name) { YUnopenedRoot(this, name) }
+    }
+
+    private fun createUnopenedRoot(name: String): YUnopenedRoot {
+        require(name !in nestedNames) { "nested type '$name' cannot be opened as a root type" }
         return unopenedRootEntries.getOrPut(name) { YUnopenedRoot(this, name) }
     }
 
@@ -981,15 +987,28 @@ class YDoc(
             require(index <= visible.size) { "insert index is out of bounds" }
             val right = visible.getOrNull(index)
             val rightIndex = right?.let(full::indexOf) ?: full.size
-            return full.getOrNull(rightIndex - 1)?.id to right?.id
+            val left = full.getOrNull(rightIndex - 1)
+            registerVirtualInsertionSplitCandidate(left, right)
+            return left?.id to right?.id
         }
         val full = sequence(parent).filter { it.content.kind == kind && it.countable }
         val visible = full.filter { !it.deleted }
         require(index <= visible.size) { "insert index is out of bounds" }
         val right = visible.getOrNull(index)
         val rightIndex = right?.let { full.indexOf(it) } ?: full.size
-        val origin = full.getOrNull(rightIndex - 1)?.id
-        return origin to right?.id
+        val left = full.getOrNull(rightIndex - 1)
+        registerVirtualInsertionSplitCandidate(left, right)
+        return left?.id to right?.id
+    }
+
+    private fun registerVirtualInsertionSplitCandidate(left: StoreItem?, right: StoreItem?) {
+        if (
+            left != null &&
+            right != null &&
+            left.canVirtuallyMerge(left, right, setOf(left.id to right.id))
+        ) {
+            currentTransaction?.mergeStructs?.add(right.id)
+        }
     }
 
     internal fun visibleMapValue(parent: String, key: String): YValue? {
@@ -1317,16 +1336,27 @@ class YDoc(
         }
     }
 
-    internal fun deleteVisible(parent: String, index: Int, length: Int, origin: Any? = null) {
+    internal fun deleteVisible(
+        parent: String,
+        index: Int,
+        length: Int,
+        origin: Any? = null,
+        strictLength: Boolean = true,
+    ) {
         val visible = visibleSequence(parent)
         val start = index.coerceAtLeast(0)
-        require(start <= visible.size) { "delete range is out of bounds" }
-        if (length <= 0 || start == visible.size) return
-        val end = (start + length).coerceAtMost(visible.size)
         transact(origin = origin) {
-            val deleteSet = DeleteSet.empty()
-            visible.subList(start, end).forEach { deleteSet.add(it.id, it.length) }
-            applyDeleteSet(deleteSet)
+            if (length <= 0) return@transact
+            val available = (visible.size - start).coerceAtLeast(0)
+            val deleteCount = minOf(length, available)
+            if (deleteCount > 0) {
+                val deleteSet = DeleteSet.empty()
+                visible.subList(start, start + deleteCount).forEach { deleteSet.add(it.id, it.length) }
+                applyDeleteSet(deleteSet)
+            }
+            if (strictLength && length > available) {
+                throw IllegalArgumentException("delete range is out of bounds")
+            }
         }
     }
 
@@ -1455,6 +1485,7 @@ class YDoc(
     private fun applyDeleteSet(deleteSet: DeleteSet) {
         if (deleteSet.isEmpty) return
         val expandedDeleteSet = expandDeleteSetWithNestedTypeContent(deleteSet)
+        registerVirtualSplitMergeCandidates(expandedDeleteSet)
         val newlyDeleted = store.allItems()
             .filter { !it.deleted && expandedDeleteSet.contains(it.id) }
             .map { it.copy(deleted = false) }
@@ -1462,7 +1493,10 @@ class YDoc(
         pendingDeletes.addAll(expandedDeleteSet)
         val changed = store.markDeleted(expandedDeleteSet)
         if (changed) {
-            currentTransaction?.deleteSet?.addAll(expandedDeleteSet)
+            val newlyDeletedSet = DeleteSet.empty().also { transactionDeleteSet ->
+                newlyDeleted.forEach { item -> transactionDeleteSet.add(item.id, item.length) }
+            }
+            currentTransaction?.deleteSet?.addAll(newlyDeletedSet)
             newlyDeleted.forEach {
                 currentTransaction?.deletedItems?.add(it)
                 currentTransaction?.markChanged(it.parent, it.parentSub)
@@ -1475,6 +1509,30 @@ class YDoc(
                     reapplyTextFormats(parent)
                     currentTransaction?.markChanged(parent, null)
                 }
+        }
+    }
+
+    /**
+     * StoreItem values are unit-sized even when upstream currently represents adjacent values as
+     * one packed Item. Record the right unit at every deletion boundary that would split such an
+     * Item, mirroring splitItem's transaction._mergeStructs entry.
+     */
+    private fun registerVirtualSplitMergeCandidates(deleteSet: DeleteSet) {
+        val transaction = currentTransaction ?: return
+        val allItems = store.allItems()
+        allItems.groupBy { item -> item.parent to item.parentSub }.forEach { (parentKey, _) ->
+            val (parent, parentSub) = parentKey
+            val logicalItems = if (parentSub == null) store.sequence(parent) else mapItemOrder(parent, parentSub)
+            logicalItems.zipWithNext().forEach { (left, right) ->
+                val leftWillBeDeleted = !left.deleted && deleteSet.contains(left.id)
+                val rightWillBeDeleted = !right.deleted && deleteSet.contains(right.id)
+                if (
+                    leftWillBeDeleted != rightWillBeDeleted &&
+                    left.canVirtuallyMerge(left, right, setOf(left.id to right.id))
+                ) {
+                    transaction.mergeStructs.add(right.id)
+                }
+            }
         }
     }
 
@@ -1756,7 +1814,6 @@ class YDoc(
     }
 
     private fun enqueueEmit(transaction: Transaction) {
-        if (transaction.isEmpty) return
         pendingTransactionEmits.addLast(transaction)
         if (isEmittingTransactions) return
         isEmittingTransactions = true
@@ -1764,6 +1821,10 @@ class YDoc(
         try {
             while (pendingTransactionEmits.isNotEmpty()) {
                 val batch = mutableListOf<YTransactionEvent>()
+                // Yjs physically merges adjacent Item structs during transaction cleanup. This
+                // store keeps one item per value/code unit, so retain the equivalent representative
+                // id for later events in the same cleanup batch.
+                val mergedStructRepresentatives = linkedMapOf<Id, Id>()
                 while (pendingTransactionEmits.isNotEmpty()) {
                     val next = pendingTransactionEmits.removeFirst()
                     val event = createTransactionEvent(next)
@@ -1772,7 +1833,7 @@ class YDoc(
                         val wasEmittingTransactionEvent = isEmittingTransactionEvent
                         isEmittingTransactionEvent = true
                         try {
-                            emit(next, event)
+                            emit(next, event, mergedStructRepresentatives)
                         } finally {
                             isEmittingTransactionEvent = wasEmittingTransactionEvent
                         }
@@ -1839,128 +1900,367 @@ class YDoc(
         )
     }
 
-    private fun emit(transaction: Transaction, event: YTransactionEvent) {
-        val callbacks = mutableListOf<() -> Unit>()
-        val transactionUpdate = DocumentUpdate(
-            transaction.addedItems,
-            transaction.deleteSet,
-            store.parentItemIds(),
-            store.parentKinds(),
-        )
-        val standardUpdate by lazy { UpdateCodec.encode(transactionUpdate) }
-        val standardUpdateV2 by lazy { UpdateCodec.encodeV2(transactionUpdate) }
-        val losslessUpdateV2 by lazy {
-            UpdateCodec.encodeV2Lossless(transactionUpdate)
-        }
+    private fun emit(
+        transaction: Transaction,
+        event: YTransactionEvent,
+        mergedStructRepresentatives: MutableMap<Id, Id>,
+    ) {
+        resetSplitRepresentatives(transaction.mergeStructs, mergedStructRepresentatives)
+        val beforeObserverCallbacks = mutableListOf<() -> Unit>()
         beforeObserverCallsListeners.toList().forEach { listener ->
-            callbacks.add { listener(event) }
+            beforeObserverCallbacks.add { listener(event) }
         }
-        callbacks.addAll(transactionEventCallbacks("beforeObserverCalls", event))
-        callbacks.addAll(docEventCallbacks("beforeObserverCalls", YDocEvent(name = "beforeObserverCalls", transaction = event)))
-        transactionListeners.toList().forEach { listener ->
-            callbacks.add { listener(event) }
-        }
-        val directEvents = linkedMapOf<String, YEvent>()
-        event.changedParents.forEach { parent ->
-            typeForParent(parent)?.let { type ->
-                val yEvent = createEvent(type, transaction, event, transaction.beforeParents[parent])
-                directEvents[parent] = yEvent
-                callbacks.add { type.emit(yEvent) }
+        beforeObserverCallbacks.addAll(transactionEventCallbacks("beforeObserverCalls", event))
+        beforeObserverCallbacks.addAll(
+            docEventCallbacks("beforeObserverCalls", YDocEvent(name = "beforeObserverCalls", transaction = event)),
+        )
+        var firstError: Throwable? = null
+        fun callCallbacks(callbacks: Iterable<() -> Unit>) {
+            callbacks.forEach { callback ->
+                try {
+                    callback()
+                } catch (error: Throwable) {
+                    if (firstError == null) {
+                        firstError = error
+                    } else {
+                        firstError?.addSuppressed(error)
+                    }
+                }
             }
         }
-        callbacks.add { emitDeepEvents(transaction, event.update, directEvents) }
-        afterTransactionListeners.toList().forEach { listener ->
-            callbacks.add { listener(event) }
+        callCallbacks(beforeObserverCallbacks)
+
+        val hasWireContent = event.afterState.any { (client, clock) ->
+            clock > (event.beforeState[client] ?: 0)
+        } || !transaction.deleteSet.isEmpty
+        // Observer callbacks may enqueue another transaction before the update listeners run.
+        // Snapshot the wire payload lazily so this update includes those newly integrated structs,
+        // matching Yjs' writeStructsFromTransaction cleanup timing.
+        val wireTransactionUpdate by lazy {
+            DocumentUpdate(
+                store.itemsSince(transaction.beforeState).map { item -> item.copy() },
+                transaction.deleteSet.copy(),
+                store.parentItemIds().toMap(),
+                store.parentKinds().toMap(),
+            )
         }
-        callbacks.addAll(transactionEventCallbacks("afterTransaction", event))
-        callbacks.addAll(docEventCallbacks("afterTransaction", YDocEvent(name = "afterTransaction", transaction = event)))
-        callbacks.add {
+        val standardUpdate by lazy { UpdateCodec.encode(wireTransactionUpdate) }
+        val standardUpdateV2 by lazy { UpdateCodec.encodeV2(wireTransactionUpdate) }
+        val losslessUpdate by lazy { UpdateCodec.encodeLossless(wireTransactionUpdate) }
+        val losslessUpdateV2 by lazy {
+            UpdateCodec.encodeV2Lossless(wireTransactionUpdate)
+        }
+
+        // Upstream aborts the type/deep/afterTransaction phase when beforeObserverCalls fails,
+        // then still performs all cleanup work from finally.
+        if (firstError == null) {
+            val observerCallbacks = mutableListOf<() -> Unit>()
+            val eventUpdateItems = store.itemsSince(transaction.beforeState)
+            val eventLosslessUpdate = UpdateCodec.encodeLossless(
+                DocumentUpdate(
+                    eventUpdateItems,
+                    transaction.deleteSet,
+                    store.parentItemIds(),
+                    store.parentKinds(),
+                ),
+            )
+            transactionListeners.toList().forEach { listener ->
+                observerCallbacks.add { listener(event) }
+            }
+            val effectiveInsertSet = createIdSet().also { ids ->
+                eventUpdateItems.forEach { item ->
+                    val representative = mergedStructRepresentatives[item.id] ?: item.id
+                    if (representative.clock >= (transaction.beforeState[representative.client] ?: 0)) {
+                        ids.add(item.id, item.length)
+                    }
+                }
+            }
+            val effectiveDeleteSet = createDeleteSet().also { deletes ->
+                store.allItems().forEach { item ->
+                    val representative = mergedStructRepresentatives[item.id] ?: item.id
+                    if (transaction.deleteSet.contains(representative)) {
+                        deletes.add(item.id, item.length)
+                    }
+                }
+            }
+            val directEvents = linkedMapOf<String, YEvent>()
+            event.changedParents.forEach { parent ->
+                typeForParent(parent)?.let { type ->
+                    val yEvent = createEvent(
+                        type,
+                        transaction,
+                        event,
+                        transaction.beforeParents[parent],
+                        effectiveInsertSet,
+                        effectiveDeleteSet,
+                        eventLosslessUpdate,
+                    )
+                    directEvents[parent] = yEvent
+                    observerCallbacks.add { type.emit(yEvent) }
+                }
+            }
+            observerCallbacks.add { emitDeepEvents(transaction, eventLosslessUpdate, directEvents) }
+            afterTransactionListeners.toList().forEach { listener ->
+                observerCallbacks.add { listener(event) }
+            }
+            observerCallbacks.addAll(transactionEventCallbacks("afterTransaction", event))
+            observerCallbacks.addAll(
+                docEventCallbacks("afterTransaction", YDocEvent(name = "afterTransaction", transaction = event)),
+            )
+            callCallbacks(observerCallbacks)
+        }
+
+        val cleanupCallbacks = mutableListOf<() -> Unit>()
+        cleanupCallbacks.add {
             if (gc && !transaction.deleteSet.isEmpty) {
                 collectGarbageNow(this, transaction.deleteSet.toIdSet(), gcFilter)
             }
         }
-        afterTransactionCleanupListeners.toList().forEach { listener ->
-            callbacks.add { listener(event) }
+        cleanupCallbacks.add {
+            store.mergeDeletedItems(transaction.deleteSet)
+            store.mergeSplitCandidates(transaction.mergeStructs)
         }
-        callbacks.addAll(transactionEventCallbacks("afterTransactionCleanup", event))
-        callbacks.addAll(
+        cleanupCallbacks.add {
+            mergeNewStructRepresentatives(event.beforeState, event.afterState, mergedStructRepresentatives)
+            mergeSplitCandidateRepresentatives(transaction.mergeStructs, mergedStructRepresentatives)
+        }
+        afterTransactionCleanupListeners.toList().forEach { listener ->
+            cleanupCallbacks.add { listener(event) }
+        }
+        cleanupCallbacks.addAll(transactionEventCallbacks("afterTransactionCleanup", event))
+        cleanupCallbacks.addAll(
             docEventCallbacks(
                 "afterTransactionCleanup",
                 YDocEvent(name = "afterTransactionCleanup", transaction = event),
             ),
         )
+        if (hasWireContent) {
+            updateListeners.toList().forEach { listener ->
+                cleanupCallbacks.add { listener(standardUpdate, transaction.origin) }
+            }
+            updateEventListeners.toList().forEach { listener ->
+                cleanupCallbacks.add { listener(standardUpdate, transaction.origin, this, event) }
+            }
+            if (eventListeners["update"].orEmpty().isNotEmpty()) {
+                cleanupCallbacks.add {
+                    emitDocEvent(
+                        YDocEvent(
+                            name = "update",
+                            update = standardUpdate,
+                            origin = transaction.origin,
+                            transaction = event,
+                        ),
+                    )
+                }
+            }
+            updateV2EventListeners.toList().forEach { listener ->
+                cleanupCallbacks.add { listener(standardUpdateV2, transaction.origin, this, event) }
+            }
+            if (eventListeners["updateV2"].orEmpty().isNotEmpty()) {
+                cleanupCallbacks.add {
+                    emitDocEvent(
+                        YDocEvent(
+                            name = "updateV2",
+                            update = standardUpdateV2,
+                            origin = transaction.origin,
+                            transaction = event,
+                        ),
+                    )
+                }
+            }
+            updateLosslessEventListeners.toList().forEach { listener ->
+                cleanupCallbacks.add { listener(losslessUpdate, transaction.origin, this, event) }
+            }
+            if (eventListeners["updateLossless"].orEmpty().isNotEmpty()) {
+                cleanupCallbacks.add {
+                    emitDocEvent(
+                        YDocEvent(
+                            name = "updateLossless",
+                            update = losslessUpdate,
+                            origin = transaction.origin,
+                            transaction = event,
+                        ),
+                    )
+                }
+            }
+            updateV2LosslessEventListeners.toList().forEach { listener ->
+                cleanupCallbacks.add { listener(losslessUpdateV2, transaction.origin, this, event) }
+            }
+            if (eventListeners["updateV2Lossless"].orEmpty().isNotEmpty()) {
+                cleanupCallbacks.add {
+                    emitDocEvent(
+                        YDocEvent(
+                            name = "updateV2Lossless",
+                            update = losslessUpdateV2,
+                            origin = transaction.origin,
+                            transaction = event,
+                        ),
+                    )
+                }
+            }
+        }
         event.subdocEvent()?.let { subdocEvent ->
-            callbacks.add { emitSubdocEvent(subdocEvent, event) }
-            callbacks.add {
+            cleanupCallbacks.add { emitSubdocEvent(subdocEvent, event) }
+            cleanupCallbacks.add {
                 subdocEvent.removed.forEach { subdoc ->
                     if (!subdoc.isDestroyed) subdoc.destroy()
                 }
             }
         }
-        updateListeners.toList().forEach { listener ->
-            callbacks.add { listener(standardUpdate, transaction.origin) }
+        callCallbacks(cleanupCallbacks)
+        firstError?.let { throw it }
+    }
+
+    private fun resetSplitRepresentatives(
+        candidates: List<Id>,
+        representatives: MutableMap<Id, Id>,
+    ) {
+        candidates.forEach { candidate ->
+            val representative = representatives[candidate] ?: return@forEach
+            representatives.entries
+                .filter { (_, value) -> value == representative }
+                .forEach { (id, _) -> representatives[id] = id }
         }
-        updateEventListeners.toList().forEach { listener ->
-            callbacks.add { listener(standardUpdate, transaction.origin, this, event) }
-        }
-        if (eventListeners["update"].orEmpty().isNotEmpty()) {
-            callbacks.add {
-                emitDocEvent(
-                    YDocEvent(
-                        name = "update",
-                        update = standardUpdate,
-                        origin = transaction.origin,
-                        transaction = event,
-                    ),
-                )
+    }
+
+    /** Mirrors cleanupTransactions' afterState scan, including its firstChangePos bound. */
+    private fun mergeNewStructRepresentatives(
+        beforeState: StateVector,
+        afterState: StateVector,
+        representatives: MutableMap<Id, Id>,
+    ) {
+        val allItems = store.allItems()
+        val linkedPairs = currentLogicalPairs(allItems)
+        afterState.forEach { (client, afterClock) ->
+            val beforeClock = beforeState[client] ?: 0
+            if (beforeClock == afterClock) return@forEach
+            val clientItems = allItems.filter { item -> item.id.client == client }.sortedBy { item -> item.id.clock }
+            if (clientItems.size < 2) return@forEach
+            val changedIndex = clientItems.indexOfFirst { item ->
+                checkedClockAdd(item.id.clock, item.length, "virtual scan item end") > beforeClock
+            }
+            if (changedIndex < 0) return@forEach
+            val firstChangePosition = maxOf(changedIndex, 1)
+            var index = clientItems.lastIndex
+            while (index >= firstChangePosition) {
+                var groupStart = index
+                while (
+                    groupStart > 0 &&
+                    clientItems[groupStart - 1].canVirtuallyMerge(
+                        clientItems[groupStart - 1],
+                        clientItems[groupStart],
+                        linkedPairs,
+                    )
+                ) {
+                    groupStart--
+                }
+                if (groupStart < index) {
+                    val representative = clientItems[groupStart].id
+                    for (memberIndex in groupStart..index) {
+                        representatives[clientItems[memberIndex].id] = representative
+                    }
+                } else {
+                    representatives[clientItems[index].id] = clientItems[index].id
+                }
+                index = groupStart - 1
             }
         }
-        updateV2EventListeners.toList().forEach { listener ->
-            callbacks.add { listener(standardUpdateV2, transaction.origin, this, event) }
-        }
-        if (eventListeners["updateV2"].orEmpty().isNotEmpty()) {
-            callbacks.add {
-                emitDocEvent(
-                    YDocEvent(
-                        name = "updateV2",
-                        update = standardUpdateV2,
-                        origin = transaction.origin,
-                        transaction = event,
-                    ),
-                )
+    }
+
+    /** Mirrors the targeted right-then-left `_mergeStructs` phase for virtual unit items. */
+    private fun mergeSplitCandidateRepresentatives(
+        candidates: List<Id>,
+        representatives: MutableMap<Id, Id>,
+    ) {
+        if (candidates.isEmpty()) return
+        val candidateSet = candidates.toSet()
+        val allItems = store.allItems()
+        val linkedPairs = currentLogicalPairs(allItems)
+        allItems.groupBy { item -> item.parent to item.parentSub }.forEach { (parentKey, _) ->
+            val (parent, parentSub) = parentKey
+            val logicalItems = if (parentSub == null) store.sequence(parent) else mapItemOrder(parent, parentSub)
+            var index = 0
+            while (index < logicalItems.size) {
+                var end = index
+                while (
+                    end + 1 < logicalItems.size &&
+                    logicalItems[end].canVirtuallyMerge(logicalItems[end], logicalItems[end + 1], linkedPairs)
+                ) {
+                    end++
+                }
+                val group = logicalItems.subList(index, end + 1)
+                if (group.any { item -> candidateSet.any { candidate -> item.containsClock(candidate) } }) {
+                    val representative = group.first().id
+                    group.forEach { item -> representatives[item.id] = representative }
+                }
+                index = end + 1
             }
         }
-        updateLosslessEventListeners.toList().forEach { listener ->
-            callbacks.add { listener(event.update, transaction.origin, this, event) }
+    }
+
+    private fun currentLogicalPairs(allItems: List<StoreItem>): Set<Pair<Id, Id>> = buildSet {
+        allItems.groupBy { item -> item.parent to item.parentSub }.forEach { (parentKey, _) ->
+            val (parent, parentSub) = parentKey
+            val logicalItems = if (parentSub == null) store.sequence(parent) else mapItemOrder(parent, parentSub)
+            logicalItems.zipWithNext().forEach { (left, right) -> add(left.id to right.id) }
         }
-        if (eventListeners["updateLossless"].orEmpty().isNotEmpty()) {
-            callbacks.add {
-                emitDocEvent(
-                    YDocEvent(
-                        name = "updateLossless",
-                        update = event.update,
-                        origin = transaction.origin,
-                        transaction = event,
-                    ),
-                )
-            }
+    }
+
+    private fun StoreItem.containsClock(id: Id): Boolean =
+        this.id.client == id.client &&
+            id.clock >= this.id.clock &&
+            id.clock < checkedClockAdd(this.id.clock, length, "virtual candidate item end")
+
+    private fun StoreItem.canVirtuallyMerge(
+        previous: StoreItem,
+        right: StoreItem,
+        linkedPairs: Set<Pair<Id, Id>>,
+    ): Boolean {
+        val previousLastId = Id(
+            previous.id.client,
+            checkedClockAdd(previous.id.clock, previous.length - 1, "virtual merged item last id"),
+        )
+        val mergeClass = content.virtualMergeClass() ?: return false
+        return id.client == right.id.client &&
+            checkedClockAdd(previous.id.clock, previous.length, "virtual merged item end") == right.id.clock &&
+            (previous.id to right.id) in linkedPairs &&
+            right.origin == previousLastId &&
+            rightOrigin == right.rightOrigin &&
+            deleted == right.deleted &&
+            id !in redoneByOriginal &&
+            right.id !in redoneByOriginal &&
+            parent == right.parent &&
+            parentSub == right.parentSub &&
+            isGc == right.isGc &&
+            mergeClass == right.content.virtualMergeClass()
+    }
+
+    private fun ItemContent.virtualMergeClass(): VirtualMergeClass? = when (this) {
+        is ItemContent.Value -> when (value) {
+            is YValue.BinaryValue,
+            is YValue.TypeRef,
+            is YValue.SubdocRef -> null
+            else -> VirtualMergeClass.Any
         }
-        updateV2LosslessEventListeners.toList().forEach { listener ->
-            callbacks.add { listener(losslessUpdateV2, transaction.origin, this, event) }
+        is ItemContent.MapEntry -> when (value) {
+            is YValue.BinaryValue,
+            is YValue.TypeRef,
+            is YValue.SubdocRef -> null
+            else -> VirtualMergeClass.Any
         }
-        if (eventListeners["updateV2Lossless"].orEmpty().isNotEmpty()) {
-            callbacks.add {
-                emitDocEvent(
-                    YDocEvent(
-                        name = "updateV2Lossless",
-                        update = losslessUpdateV2,
-                        origin = transaction.origin,
-                        transaction = event,
-                    ),
-                )
-            }
-        }
-        callAllYksCallbacks(callbacks)
+        is ItemContent.XmlNode -> VirtualMergeClass.Any
+        is ItemContent.Text -> VirtualMergeClass.String
+        is ItemContent.Deleted -> VirtualMergeClass.Deleted
+        is ItemContent.TextEmbed,
+        is ItemContent.TextFormat,
+        is ItemContent.NativeTextFormat,
+        is ItemContent.XmlType -> null
+    }
+
+    private enum class VirtualMergeClass {
+        Any,
+        String,
+        Deleted,
     }
 
     internal fun changedParentsFor(transaction: Transaction): Set<String> =
@@ -2126,8 +2426,10 @@ class YDoc(
         transaction: Transaction,
         event: YTransactionEvent,
         before: ParentSnapshot?,
+        effectiveInsertSet: IdSet,
+        effectiveDeleteSet: DeleteSet,
+        update: ByteArray,
     ): YEvent {
-        val update = event.update
         val changedSubs = transaction.changedParentSubs[type.name].orEmpty()
         val changedKeys = changedSubs.filterNotNull().toSet()
         val mapChanges = before?.mapSnapshot()?.let { mapBefore ->
@@ -2143,13 +2445,13 @@ class YDoc(
         val arrayDelta = when {
             sequenceBefore == null -> emptyList()
             sequenceBefore.kind == RootKind.Array && type.kind == RootKind.Array -> {
-                diffArrayDelta(sequenceBefore.items, visibleSequence(type.name))
+                diffArrayDelta(type as YArray, effectiveInsertSet, effectiveDeleteSet)
             }
             sequenceBefore.kind == RootKind.XmlFragment && type.kind == RootKind.XmlFragment -> {
-                diffXmlDelta(sequenceBefore.items, visibleSequence(type.name))
+                diffXmlDelta(type as YXmlSharedType, effectiveInsertSet, effectiveDeleteSet)
             }
             sequenceBefore.kind == RootKind.XmlElement && type.kind == RootKind.XmlElement -> {
-                diffXmlDelta(sequenceBefore.items, visibleSequence(type.name))
+                diffXmlDelta(type as YXmlSharedType, effectiveInsertSet, effectiveDeleteSet)
             }
             else -> emptyList()
         }
@@ -2158,7 +2460,7 @@ class YDoc(
             sequenceBefore.kind == type.kind &&
             (type.kind == RootKind.Text || type.kind == RootKind.XmlText)
         ) {
-            diffTextDelta(sequenceBefore.items, visibleSequence(type.name))
+            diffTextDelta(type as YText, sequenceBefore.items, effectiveInsertSet, effectiveDeleteSet)
         } else {
             YTextDelta()
         }
@@ -2170,8 +2472,8 @@ class YDoc(
             target = type,
             origin = transaction.origin,
             update = update,
-            insertSet = event.insertSet,
-            deleteSet = event.deleteSet,
+            insertSet = effectiveInsertSet,
+            deleteSet = effectiveDeleteSet,
             transaction = event,
             keysChanged = changedKeys,
             mapChanges = mapChanges,
@@ -2210,82 +2512,109 @@ class YDoc(
         }.toMap()
     }
 
-    private fun diffArrayDelta(before: List<StoreItem>, after: List<StoreItem>): List<YArrayDeltaOp> {
-        return diffSequence(before, after) { items ->
-            listOf(YArrayDeltaOp(insert = items.map(::arrayItemValue)))
-        }
-    }
+    private fun diffArrayDelta(
+        type: YArray,
+        effectiveInsertSet: IdSet,
+        effectiveDeleteSet: DeleteSet,
+    ): List<YArrayDeltaOp> =
+        diffSequenceEvent(type, effectiveInsertSet, effectiveDeleteSet) { item -> arrayItemValue(item) }
 
-    private fun diffXmlDelta(before: List<StoreItem>, after: List<StoreItem>): List<YArrayDeltaOp> {
-        return diffSequence(before, after) { items ->
-            listOf(YArrayDeltaOp(insert = items.map { item ->
-                when (val content = item.content) {
-                    is ItemContent.XmlType -> typeFromXmlType(content)
-                    else -> content.toXmlEventJson(this)
-                }
-            }))
-        }
-    }
-
-    private fun diffTextDelta(before: List<StoreItem>, after: List<StoreItem>): YTextDelta {
-        diffTextFormattingDelta(before, after)?.let { return it }
-        val delta = YTextDelta()
-        val (prefix, deleteCount, inserted) = diffSequenceParts(before, after)
-        if (prefix > 0) delta.retain(prefix)
-        if (deleteCount > 0) delta.delete(deleteCount)
-        var pending = StringBuilder()
-        var pendingAttrs: Map<String, Any?>? = null
-        fun flush() {
-            if (pending.isNotEmpty()) {
-                delta.insert(pending.toString(), pendingAttrs.orEmpty())
-                pending = StringBuilder()
-            }
-        }
-        inserted.forEach { item ->
-            val attrs = textAttributesToPublic(item.content.textAttributesOrEmpty())
-            if (pendingAttrs != null && pendingAttrs != attrs) flush()
-            pendingAttrs = attrs
+    private fun diffXmlDelta(
+        type: YXmlSharedType,
+        effectiveInsertSet: IdSet,
+        effectiveDeleteSet: DeleteSet,
+    ): List<YArrayDeltaOp> =
+        diffSequenceEvent(type, effectiveInsertSet, effectiveDeleteSet) { item ->
             when (val content = item.content) {
-                is ItemContent.Text -> pending.append(content.value)
-                is ItemContent.TextEmbed -> {
-                    flush()
-                    delta.insertEmbed(valueToAny(content.value), attrs)
-                    pendingAttrs = null
-                }
-                is ItemContent.XmlType -> {
-                    flush()
-                    delta.insertEmbed(typeFromXmlType(content), attrs)
-                    pendingAttrs = null
-                }
-                else -> Unit
+                is ItemContent.XmlType -> typeFromXmlType(content)
+                else -> content.toXmlEventJson(this)
             }
         }
-        flush()
+
+    /**
+     * Mirrors YEvent.changes' linked-list scan. Looking only at a common prefix/suffix turns
+     * two disjoint edits into a delete-and-reinsert of the unchanged middle of the sequence.
+     */
+    private fun diffSequenceEvent(
+        type: AbstractYType,
+        effectiveInsertSet: IdSet,
+        effectiveDeleteSet: DeleteSet,
+        insertedValue: (StoreItem) -> Any?,
+    ): List<YArrayDeltaOp> {
+        val delta = mutableListOf<YArrayDeltaOp>()
+        sequence(type.name)
+            .filter { item -> item.content.kind == type.kind && item.countable }
+            .forEach { item ->
+                val added = effectiveInsertSet.hasId(item.id)
+                val deleted = effectiveDeleteSet.contains(item.id)
+                when {
+                    item.deleted && deleted && !added -> delta.appendDelete(item.length.toDeltaLength())
+                    !item.deleted && added -> delta.appendInsert(insertedValue(item))
+                    !item.deleted -> delta.appendRetain(item.length.toDeltaLength())
+                }
+            }
+        while (delta.lastOrNull()?.retain != null) delta.removeLast()
         return delta
     }
 
-    private fun diffTextFormattingDelta(before: List<StoreItem>, after: List<StoreItem>): YTextDelta? {
-        if (before.size != after.size) return null
-        if (before.indices.any { index -> !before[index].content.sameTextContentAs(after[index].content) }) return null
-        val segments = mutableListOf<Pair<Int, Map<String, Any?>>>()
-        before.indices.forEach { index ->
-            val attrs = textAttributeDiff(
-                before[index].content.textAttributesOrEmpty(),
-                after[index].content.textAttributesOrEmpty(),
-            )
-            val last = segments.lastOrNull()
-            if (last != null && last.second == attrs) {
-                segments[segments.lastIndex] = last.first + 1 to attrs
-            } else {
-                segments.add(1 to attrs)
-            }
-        }
-        while (segments.lastOrNull()?.second?.isEmpty() == true) {
-            segments.removeAt(segments.lastIndex)
-        }
+    /**
+     * Text uses the same item-identity scan, with attribute diffs on retained content. This
+     * preserves disjoint insert/delete/format spans in a single transaction.
+     */
+    private fun diffTextDelta(
+        type: YText,
+        before: List<StoreItem>,
+        effectiveInsertSet: IdSet,
+        effectiveDeleteSet: DeleteSet,
+    ): YTextDelta {
         val delta = YTextDelta()
-        segments.forEach { (length, attrs) -> delta.retain(length, attrs) }
-        return delta
+        val beforeById = before.associateBy { item -> item.id }
+
+        sequence(type.name)
+            .filter { item -> item.content.kind == type.kind }
+            .forEach { item ->
+                if (!item.countable) {
+                    return@forEach
+                }
+                val added = effectiveInsertSet.hasId(item.id)
+                val deleted = effectiveDeleteSet.contains(item.id)
+                when {
+                    item.deleted && deleted && !added -> {
+                        delta.delete(item.length.toDeltaLength())
+                    }
+                    !item.deleted && added -> {
+                        appendTextEventInsert(delta, item)
+                    }
+                    !item.deleted -> {
+                        val oldContent = beforeById[item.id]?.content
+                        val attributes = if (oldContent == null) {
+                            emptyMap()
+                        } else {
+                            textAttributeDiff(
+                                oldContent.textAttributesOrEmpty(),
+                                item.content.textAttributesOrEmpty(),
+                            )
+                        }
+                        delta.retain(item.length.toDeltaLength(), attributes)
+                    }
+                }
+            }
+
+        val trimmed = delta.ops.toMutableList()
+        while (trimmed.lastOrNull()?.let { op -> op.retain != null && op.attributes.isEmpty() } == true) {
+            trimmed.removeLast()
+        }
+        return YTextDelta(trimmed)
+    }
+
+    private fun appendTextEventInsert(delta: YTextDelta, item: StoreItem) {
+        val attributes = textAttributesToPublic(item.content.textAttributesOrEmpty())
+        when (val content = item.content) {
+            is ItemContent.Text -> delta.insert(content.value, attributes)
+            is ItemContent.TextEmbed -> delta.insertEmbed(valueToAny(content.value), attributes)
+            is ItemContent.XmlType -> delta.insertEmbed(typeFromXmlType(content), attributes)
+            else -> Unit
+        }
     }
 
     private fun textAttributeDiff(before: Map<String, YValue>, after: Map<String, YValue>): Map<String, Any?> {
@@ -2300,35 +2629,36 @@ class YDoc(
         }.toMap()
     }
 
-    private fun diffSequence(
-        before: List<StoreItem>,
-        after: List<StoreItem>,
-        insertOps: (List<StoreItem>) -> List<YArrayDeltaOp>,
-    ): List<YArrayDeltaOp> {
-        val (prefix, deleteCount, inserted) = diffSequenceParts(before, after)
-        val delta = mutableListOf<YArrayDeltaOp>()
-        if (prefix > 0) delta.add(YArrayDeltaOp(retain = prefix))
-        if (deleteCount > 0) delta.add(YArrayDeltaOp(delete = deleteCount))
-        if (inserted.isNotEmpty()) delta.addAll(insertOps(inserted))
-        return delta
+    private fun MutableList<YArrayDeltaOp>.appendRetain(length: Int) {
+        val last = lastOrNull()
+        if (last?.retain != null) {
+            this[lastIndex] = last.copy(retain = last.retain + length)
+        } else {
+            add(YArrayDeltaOp(retain = length))
+        }
     }
 
-    private fun diffSequenceParts(before: List<StoreItem>, after: List<StoreItem>): Triple<Int, Int, List<StoreItem>> {
-        var prefix = 0
-        while (prefix < before.size && prefix < after.size && before[prefix].id == after[prefix].id) {
-            prefix++
+    private fun MutableList<YArrayDeltaOp>.appendDelete(length: Int) {
+        val last = lastOrNull()
+        if (last?.delete != null) {
+            this[lastIndex] = last.copy(delete = last.delete + length)
+        } else {
+            add(YArrayDeltaOp(delete = length))
         }
-        var suffix = 0
-        while (
-            suffix < before.size - prefix &&
-            suffix < after.size - prefix &&
-            before[before.lastIndex - suffix].id == after[after.lastIndex - suffix].id
-        ) {
-            suffix++
+    }
+
+    private fun MutableList<YArrayDeltaOp>.appendInsert(value: Any?) {
+        val last = lastOrNull()
+        if (last?.insert != null && last.attributes.isEmpty()) {
+            this[lastIndex] = last.copy(insert = last.insert + value)
+        } else {
+            add(YArrayDeltaOp(insert = listOf(value)))
         }
-        val deleteCount = before.size - prefix - suffix
-        val inserted = after.subList(prefix, after.size - suffix)
-        return Triple(prefix, deleteCount, inserted)
+    }
+
+    private fun Long.toDeltaLength(): Int {
+        require(this in 1..Int.MAX_VALUE.toLong()) { "event delta length exceeds Int range: $this" }
+        return toInt()
     }
 
     private fun <T : AbstractYType> getOrCreate(name: String, kind: RootKind, factory: () -> T): T {
@@ -2879,6 +3209,7 @@ class YDoc(
         val deletedItems = mutableListOf<StoreItem>()
         val deleteSet = DeleteSet.empty()
         val cleanUps = createIdSet()
+        val mergeStructs = mutableListOf<Id>()
         val addedSubdocs = linkedSetOf<YDoc>()
         val removedSubdocs = linkedSetOf<YDoc>()
         val loadedSubdocs = linkedSetOf<YDoc>()
@@ -2946,13 +3277,17 @@ class YTransaction internal constructor(
     val deletedItemCount: Int get() = transaction.deletedItems.size
     val update: ByteArray get() = transaction.update
 
-    fun adds(id: Id): Boolean = insertSet.hasId(id)
+    fun adds(id: Id): Boolean = id.clock >= (beforeState[id.client] ?: 0)
 
-    fun adds(client: Long, clock: Long): Boolean = insertSet.has(client, clock)
+    fun adds(client: Long, clock: Long): Boolean = adds(Id(client, clock))
 
     fun deletes(id: Id): Boolean = deleteSet.contains(id)
 
     fun deletes(client: Long, clock: Long): Boolean = deletes(Id(client, clock))
+
+    internal fun registerSplitMergeCandidate(item: StoreItem) {
+        transaction.mergeStructs.add(item.id)
+    }
 
     internal fun addChangedType(type: AbstractYType, parentSub: String? = null) {
         require(type.doc === doc) { "type must belong to this transaction's document" }
@@ -3279,9 +3614,9 @@ class YTransactionEvent internal constructor(
     val addedItemCount: Int get() = addedItems.size
     val deletedItemCount: Int get() = deletedItems.size
 
-    fun adds(id: Id): Boolean = insertSet.hasId(id)
+    fun adds(id: Id): Boolean = id.clock >= (beforeState[id.client] ?: 0)
 
-    fun adds(client: Long, clock: Long): Boolean = insertSet.has(client, clock)
+    fun adds(client: Long, clock: Long): Boolean = adds(Id(client, clock))
 
     fun adds(struct: AbstractStruct): Boolean = adds(struct.id)
 
@@ -3301,7 +3636,8 @@ class YTransactionEvent internal constructor(
     }
 }
 
-typealias Transaction = YTransactionEvent
+typealias Transaction = YTransaction
+typealias TransactionEvent = YTransactionEvent
 
 private fun List<StoreItem>.toIdSet(): IdSet {
     val idSet = createIdSet()

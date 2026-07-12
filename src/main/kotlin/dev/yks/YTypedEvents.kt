@@ -44,7 +44,7 @@ data class YEventChanges<out D>(
     val keys: Map<String, YMapChange>,
 )
 
-private fun <D> YEvent.toTypedChanges(
+internal fun <D> YEvent.toTypedChanges(
     delta: D,
     includeSequenceItems: Boolean = true,
 ): YEventChanges<D> {
@@ -76,6 +76,22 @@ private fun <D> YEvent.toTypedChanges(
         keys = mapChanges.toMap(),
     )
 }
+
+/** Upstream-compatible alias for the common event key-change map. */
+val YEvent.keys: Map<String, YMapChange>
+    get() = mapChanges
+
+/** Upstream-compatible view of the common `event.changes` payload. */
+val YEvent.changes: YEventChanges<Any>
+    get() = when (target.kind) {
+        RootKind.Array,
+        RootKind.XmlFragment,
+        RootKind.XmlElement -> toTypedChanges(arrayDelta)
+        RootKind.Map,
+        RootKind.XmlHook -> toTypedChanges(emptyList<YArrayDeltaOp>())
+        RootKind.Text,
+        RootKind.XmlText -> toTypedChanges(textDelta, includeSequenceItems = false)
+    }
 
 class YArrayEvent internal constructor(event: YEvent) : YTypedEvent<YArray>(event) {
     init {

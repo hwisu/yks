@@ -5,11 +5,31 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class YDocTest {
+    @Test
+    fun defaultGettersAndGenericGetMatchUpstreamRootCreation() {
+        val genericDoc = YDoc(clientId = 1)
+        val undecided = genericDoc["undecided"]
+
+        assertIs<YUnopenedRoot>(undecided)
+        assertSame(undecided, genericDoc.share["undecided"])
+        assertEquals(emptyMap(), genericDoc.toJSON())
+        assertSame(genericDoc.getText("undecided"), genericDoc.share["undecided"])
+
+        assertEquals("", YDoc(clientId = 2).getArray().name)
+        assertEquals("", YDoc(clientId = 3).getMap().name)
+        assertEquals("", YDoc(clientId = 4).getText().name)
+        assertEquals("", YDoc(clientId = 5).getXmlFragment().name)
+        val xmlElement = YDoc(clientId = 6).getXmlElement()
+        assertEquals("", xmlElement.name)
+        assertEquals("UNDEFINED", xmlElement.nodeName)
+    }
+
     @Test
     fun arrayChangesConvergeThroughUpdates() {
         val left = YDoc(clientId = 1)
@@ -266,10 +286,40 @@ class YDocTest {
     }
 
     @Test
+    fun emptyTransactionEmitsFullLifecycleWithoutAnUpdateLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val order = mutableListOf<String>()
+        var updateCount = 0
+
+        doc.observeBeforeAllTransactions { order.add("beforeAllTransactions") }
+        doc.observeBeforeTransactions { order.add("beforeTransaction") }
+        doc.observeBeforeObserverCalls { order.add("beforeObserverCalls") }
+        doc.observeAfterTransactions { order.add("afterTransaction") }
+        doc.observeAfterTransactionCleanup { order.add("afterTransactionCleanup") }
+        doc.observeAfterAllTransactions { order.add("afterAllTransactions") }
+        doc.observeUpdates { _, _ -> updateCount++ }
+
+        doc.transact { }
+
+        assertEquals(
+            listOf(
+                "beforeAllTransactions",
+                "beforeTransaction",
+                "beforeObserverCalls",
+                "afterTransaction",
+                "afterTransactionCleanup",
+                "afterAllTransactions",
+            ),
+            order,
+        )
+        assertEquals(0, updateCount)
+    }
+
+    @Test
     fun transactionEventsExposeDocMetaStructViewsAndIdSetAliases() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("body")
-        val events = mutableListOf<Transaction>()
+        val events = mutableListOf<TransactionEvent>()
 
         doc.observeBeforeTransactions { event ->
             assertTrue(event.doc === doc)

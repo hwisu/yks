@@ -355,6 +355,38 @@ class SubdocTest {
     }
 
     @Test
+    fun updatePrecedesSubdocsAndLoadOnlyTransactionEmitsNoUpdate() {
+        val doc = YDoc(clientId = 1)
+        val map = doc.getMap("subdocs")
+        val subdoc = YDoc(guid = "ordered-load", shouldLoad = false)
+        val order = mutableListOf<String>()
+        var updateV2Count = 0
+        var losslessCount = 0
+        var losslessV2Count = 0
+
+        doc.observeUpdates { _, _ -> order.add("update") }
+        doc.onUpdateV2 { _, _, _, _ -> updateV2Count++ }
+        doc.onUpdateLossless { _, _, _, _ -> losslessCount++ }
+        doc.onUpdateV2Lossless { _, _, _, _ -> losslessV2Count++ }
+        doc.observeSubdocs { order.add("subdocs") }
+
+        map.set("sub", subdoc)
+
+        assertEquals(listOf("update", "subdocs"), order)
+        assertEquals(1, updateV2Count)
+        assertEquals(1, losslessCount)
+        assertEquals(1, losslessV2Count)
+
+        order.clear()
+        subdoc.load()
+
+        assertEquals(listOf("subdocs"), order)
+        assertEquals(1, updateV2Count)
+        assertEquals(1, losslessCount)
+        assertEquals(1, losslessV2Count)
+    }
+
+    @Test
     fun insertingAndDeletingSubdocInOneTransactionCancelsAddedAndRemovedLikeUpstream() {
         val doc = YDoc(clientId = 1)
         val events = mutableListOf<YSubdocEvent>()

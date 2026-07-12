@@ -1,8 +1,14 @@
 package dev.yks
 
 typealias Doc = YDoc
+typealias AbstractType = AbstractYType
 typealias Type = AbstractYType
 typealias YType = AbstractYType
+typealias Text = YText
+typealias XmlElement = YXmlElementType
+typealias XmlText = YXmlTextType
+typealias XmlFragment = YXmlFragment
+typealias XmlHook = YXmlHook
 
 fun generateNewClientId(): Long = YDoc.generateNewClientId()
 
@@ -37,7 +43,10 @@ data class YTypeChild(
     val length: Long,
 )
 
-fun getTypeChildren(type: AbstractYType): List<YTypeChild> =
+fun getTypeChildren(type: AbstractYType): List<ItemStruct> =
+    type.doc.typeChildren(type).map { item -> item.toItemStruct(type.doc) }
+
+fun getTypeChildSummaries(type: AbstractYType): List<YTypeChild> =
     type.doc.typeChildren(type).map { item ->
         YTypeChild(
             id = item.id,
@@ -76,6 +85,17 @@ fun isParentOf(parent: AbstractYType, child: AbstractYType): Boolean {
     return parent.doc.pathBetween(parent.name, child.name) != null
 }
 
+fun isParentOf(parent: AbstractYType, child: Item?): Boolean {
+    var current = child
+    while (current != null) {
+        if (current.parent == parent.name) return true
+        val currentParent = parent.doc.typeForParent(current.parent) ?: return false
+        val ownerId = parent.doc.typeRefItemId(currentParent) ?: return false
+        current = parent.doc.getItem(ownerId)?.toItemStruct(parent.doc)
+    }
+    return false
+}
+
 fun computeModifiedFromItems(doc: YDoc, items: IdSet): Map<AbstractYType, Set<String?>> {
     val modified = linkedMapOf<AbstractYType, MutableSet<String?>>()
     iterateStructsByIdSetWithoutSplits(doc.store, items) { struct, _, _ ->
@@ -98,8 +118,21 @@ fun typeMapGetSnapshot(parent: YMap, key: String, snapshot: Snapshot): Any? =
 fun typeMapGetAllSnapshot(parent: YMap, snapshot: Snapshot): Map<String, Any?> =
     parent.doc.mapAtSnapshot(parent, snapshot).mapValues { (_, value) -> parent.doc.valueToAny(value) }
 
+fun typeListToArraySnapshot(parent: AbstractYType, snapshot: Snapshot): List<Any?> = when (parent) {
+    is YUnopenedRoot -> error("an unopened root has no concrete list type")
+    is YArray -> parent.doc.arrayAtSnapshot(parent, snapshot)
+    is YXmlTextType -> parent.doc.textArrayAtSnapshot(parent, snapshot)
+    is YText -> parent.doc.textArrayAtSnapshot(parent, snapshot)
+    is YXmlElementType -> parent.doc.sequenceAtSnapshot(parent, snapshot).map { item ->
+        item.content.toXmlChild(parent.doc)
+    }
+    is YXmlFragment -> parent.doc.xmlFragmentArrayAtSnapshot(parent, snapshot)
+    is YXmlHook,
+    is YMap -> error("map-backed shared types do not have list content")
+}
+
 fun typeArrayToArraySnapshot(parent: YArray, snapshot: Snapshot): List<Any?> =
-    parent.doc.arrayAtSnapshot(parent, snapshot)
+    typeListToArraySnapshot(parent, snapshot)
 
 fun typeTextToDeltaSnapshot(parent: YText, snapshot: Snapshot): YTextDelta =
     parent.doc.textDeltaAtSnapshot(parent, snapshot)

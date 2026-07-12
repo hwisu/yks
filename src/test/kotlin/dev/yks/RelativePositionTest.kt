@@ -5,6 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class RelativePositionTest {
@@ -80,6 +81,19 @@ class RelativePositionTest {
         assertEquals("xbc", text.toString())
         assertEquals(1, createAbsolutePositionFromRelativePosition(rightAssociated, doc)?.index)
         assertEquals(0, createAbsolutePositionFromRelativePosition(leftAssociated, doc)?.index)
+    }
+
+    @Test
+    fun relativePositionResolvesInsideGarbageCollectedPackedDeleteRange() {
+        val doc = YDoc(clientId = 1, gc = true)
+        val text = doc.getText("text")
+        text.insert(0, "ab")
+        val anchoredInsideFutureRange = createRelativePositionFromTypeIndex(text, 1)
+
+        text.delete(0, 2)
+
+        assertEquals(listOf(Id(1, 0) to 2L), doc.store.clients.getValue(1).map { item -> item.id to item.length })
+        assertEquals(0, createAbsolutePositionFromRelativePosition(anchoredInsideFutureRange, doc)?.index)
     }
 
     @Test
@@ -311,5 +325,27 @@ class RelativePositionTest {
         assertEquals(mapOf("client" to typeId.client, "clock" to typeId.clock), json["type"])
         assertFalse(json.containsKey("tname"))
         assertEquals(1, createAbsolutePositionFromRelativePosition(position, doc)?.index)
+    }
+
+    @Test
+    fun relativePositionResolvesAgainstRemoteUnopenedRootWithoutGuessingItsType() {
+        val source = YDoc(clientId = 1)
+        val sourceText = source.getText("body")
+        sourceText.insert(0, "abc")
+        val position = createRelativePositionFromTypeIndex(sourceText, 1)
+        val target = YDoc(clientId = 2)
+        target.applyUpdate(source.encodeStateAsUpdate())
+
+        val unopened = assertNotNull(target.getOrNull("body"))
+        val absolute = assertNotNull(createAbsolutePositionFromRelativePosition(position, target))
+        val unopenedPosition = createRelativePositionFromTypeIndex(unopened, 1)
+        val unopenedAbsolute = assertNotNull(createAbsolutePositionFromRelativePosition(unopenedPosition, target))
+
+        assertTrue(unopened is YUnopenedRoot)
+        assertSame(unopened, absolute.type)
+        assertEquals(1, absolute.index)
+        assertEquals(0, absolute.assoc)
+        assertSame(unopened, unopenedAbsolute.type)
+        assertEquals(1, unopenedAbsolute.index)
     }
 }

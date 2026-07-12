@@ -1,0 +1,126 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Validate release tag
+        id: version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          semver_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if [[ ! "$version" =~ $semver_pattern ]]; then
+            echo "Tag '$GITHUB_REF_NAME' must be v<SemVer>, for example v0.1.0 or v0.2.0-rc.1." >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Require a commit reachable from main
+        shell: bash
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "Release tag '$GITHUB_REF_NAME' must point to a commit reachable from main." >&2
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run interop:generate
+      - run: npm run test:interop
+
+      - name: Verify Kotlin, interoperability, and published consumer
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        run: ./gradlew clean check consumerSmokeTest --no-daemon "-PreleaseVersion=$RELEASE_VERSION"
+
+      - run: git diff --exit-code
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Publish to GitHub Packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+        run: ./gradlew publishAllPublicationsToGitHubPackagesRepository --no-daemon "-PreleaseVersion=$RELEASE_VERSION"
+
+  verify-consumer:
+    needs:
+      - verify
+      - publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Verify consumption from GitHub Packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GRADLE_USER_HOME: ${{ runner.temp }}/yks-remote-consumer-gradle
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if ./gradlew -p consumer-smoke clean run --no-daemon --refresh-dependencies \
+              "-PyksVersion=$RELEASE_VERSION" \
+              "-PyksRepositoryUrl=https://maven.pkg.github.com/hwisu/yks"; then
+              exit 0
+            fi
+            if [[ "$attempt" -eq 6 ]]; then
+              exit 1
+            fi
+            if [[ "$attempt" -lt 4 ]]; then
+              sleep $((attempt * 5))
+            else
+              sleep 30
+            fi
+          done

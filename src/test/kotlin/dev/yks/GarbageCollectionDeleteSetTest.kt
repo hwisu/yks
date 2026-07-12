@@ -115,6 +115,7 @@ class GarbageCollectionDeleteSetTest {
         }
 
         assertTrue(equalDeleteSets(expected, merged))
+        assertEquals(5L, merged.clients.getValue(1).single().len)
         assertTrue(isDeleted(merged, Id(1, 3)))
         assertTrue(isDeleted(merged, 2, 1))
         assertFalse(isDeleted(merged, Id(2, 2)))

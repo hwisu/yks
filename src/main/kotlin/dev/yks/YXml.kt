@@ -69,7 +69,7 @@ class YXmlElementType internal constructor(
     val nodeName: String = name,
     kind: RootKind = RootKind.XmlElement,
 ) : YXmlSharedType(doc, name, kind), Iterable<Any?> {
-    constructor(nodeName: String) : this(YDoc(), "", nodeName) {
+    constructor(nodeName: String = "UNDEFINED") : this(YDoc(), "", nodeName) {
         markDetached()
     }
 
@@ -139,6 +139,8 @@ class YXmlElementType internal constructor(
 
     fun getAttributes(): Map<String, Any?> = getAttrs()
 
+    fun getAttributes(snapshot: Snapshot): Map<String, Any?> = getAttrs(snapshot)
+
     fun getAttrs(snapshot: Snapshot): Map<String, Any?> =
         doc.mapAtSnapshot(this, snapshot).mapValues { (_, value) -> doc.valueToAny(value) }
 
@@ -203,13 +205,19 @@ class YXmlElementType internal constructor(
     }
 
     fun insert(index: Int, nodes: List<YXmlNode>) {
-        if (nodes.isEmpty()) return
         val insertionValues = nodes.map(YXmlNode::toRichSnapshotInsertionValue)
         if (isPreliminary) {
+            if (nodes.isEmpty()) return
             preliminaryList.addAll(index.coerceIn(0, preliminaryList.size), insertionValues)
             return
         }
         val start = index.coerceAtLeast(0)
+        if (nodes.isEmpty()) {
+            doc.transact {
+                require(start <= length) { "insert index is out of bounds" }
+            }
+            return
+        }
         require(start <= length) { "insert index is out of bounds" }
         if (insertionValues.any { child -> child is AbstractYType }) {
             doc.transact {
@@ -249,13 +257,19 @@ class YXmlElementType internal constructor(
     }
 
     fun insertTypes(index: Int, types: List<AbstractYType>) {
-        if (types.isEmpty()) return
         if (isPreliminary) {
+            if (types.isEmpty()) return
             require(types.none { type -> type === this }) { "shared type cannot contain itself" }
             preliminaryList.addAll(index.coerceIn(0, preliminaryList.size), types)
             return
         }
         val start = index.coerceAtLeast(0)
+        if (types.isEmpty()) {
+            doc.transact {
+                require(start <= length) { "insert index is out of bounds" }
+            }
+            return
+        }
         require(start <= length) { "insert index is out of bounds" }
         doc.preflightNestedValue(types)
         doc.transact {
@@ -354,6 +368,14 @@ class YXmlElementType internal constructor(
     fun createTreeWalker(filter: (Any?) -> Boolean = { true }): Sequence<Any?> =
         xmlTreeWalker(toArray(), filter)
 
+    fun querySelector(query: String): Any? = xmlQuerySelectorAll(this, query).firstOrNull()
+
+    fun querySelectorAll(query: String): List<Any?> = xmlQuerySelectorAll(this, query)
+
+    fun insertAfter(ref: Any?, content: List<Any?>) {
+        xmlInsertAfter(this, ref, content)
+    }
+
     fun toDeltaDeep(renderer: AbstractRenderer = activeRenderer): YXmlElementDeepDelta =
         renderXmlElementDeepDelta(this, DeepDeltaRenderOptions(renderer = renderer))
 
@@ -410,7 +432,13 @@ class YXmlElementType internal constructor(
         toArray().forEachIndexed(action)
     }
 
-    fun clone(targetDoc: YDoc = doc): YXmlElementType =
+    fun clone(): YXmlElementType =
+        YXmlElementType(nodeName).also { cloned ->
+            cloneXmlChildrenDetached(cloned)
+            cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueDetached() })
+        }
+
+    fun clone(targetDoc: YDoc): YXmlElementType =
         targetDoc.createXmlElementType(nodeName, kind).also { cloned ->
             cloneXmlChildrenInto(cloned, targetDoc)
             cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
@@ -460,6 +488,19 @@ class YXmlElementType internal constructor(
         }
     }
 
+    private fun cloneXmlChildrenDetached(target: YXmlElementType) {
+        xmlItems().forEach { item ->
+            when (val content = item.content) {
+                is ItemContent.XmlNode -> target.insert(target.preliminaryList.size, listOf(content.value.toNode()))
+                is ItemContent.XmlType -> {
+                    val cloned = doc.typeFromXmlType(content).cloneValueDetached() as AbstractYType
+                    target.insertType(target.preliminaryList.size, cloned)
+                }
+                else -> Unit
+            }
+        }
+    }
+
     private fun insertDeltaValues(
         index: Int,
         values: List<Any?>,
@@ -482,13 +523,20 @@ class YXmlTextType internal constructor(
     doc: YDoc,
     name: String = "",
 ) : YText(doc, name, RootKind.XmlText) {
-    constructor() : this(YDoc(), "") {
+    constructor(text: String = "") : this(YDoc(), "") {
         markDetached()
+        if (text.isNotEmpty()) insert(0, text)
     }
 
     val nextSibling: Any? get() = xmlSibling(this, offset = 1)
 
     val prevSibling: Any? get() = xmlSibling(this, offset = -1)
+
+    override fun clone(): YXmlTextType = YXmlTextType()
+        .also { cloned ->
+            cloned.applyDelta(toDelta().cloneDetached())
+            cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueDetached() })
+        }
 
     override fun clone(targetDoc: YDoc): YXmlTextType = targetDoc.createXmlTextType()
         .also { cloned ->
@@ -517,6 +565,10 @@ class YXmlHook internal constructor(
 
     init {
         require(hookName.isNotBlank()) { "XML hook name must not be blank" }
+    }
+
+    override fun clone(): YXmlHook = YXmlHook(hookName).also { cloned ->
+        cloned.setAttrs(toMap().mapValues { (_, value) -> value.cloneValueDetached() })
     }
 
     override fun clone(targetDoc: YDoc): YXmlHook = targetDoc.createXmlHook(hookName).also { cloned ->
@@ -786,13 +838,19 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
     val firstChild: Any? get() = get(0)
 
     fun insert(index: Int, nodes: List<YXmlNode>) {
-        if (nodes.isEmpty()) return
         val insertionValues = nodes.map(YXmlNode::toRichSnapshotInsertionValue)
         if (isPreliminary) {
+            if (nodes.isEmpty()) return
             preliminaryList.addAll(index.coerceIn(0, preliminaryList.size), insertionValues)
             return
         }
         val start = index.coerceAtLeast(0)
+        if (nodes.isEmpty()) {
+            doc.transact {
+                require(start <= length) { "insert index is out of bounds" }
+            }
+            return
+        }
         require(start <= length) { "insert index is out of bounds" }
         if (insertionValues.any { child -> child is AbstractYType }) {
             doc.transact {
@@ -832,13 +890,19 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
     }
 
     fun insertTypes(index: Int, types: List<AbstractYType>) {
-        if (types.isEmpty()) return
         if (isPreliminary) {
+            if (types.isEmpty()) return
             require(types.none { type -> type === this }) { "shared type cannot contain itself" }
             preliminaryList.addAll(index.coerceIn(0, preliminaryList.size), types)
             return
         }
         val start = index.coerceAtLeast(0)
+        if (types.isEmpty()) {
+            doc.transact {
+                require(start <= length) { "insert index is out of bounds" }
+            }
+            return
+        }
         require(start <= length) { "insert index is out of bounds" }
         doc.preflightNestedValue(types)
         doc.transact {
@@ -1037,6 +1101,14 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
     fun createTreeWalker(filter: (Any?) -> Boolean = { true }): Sequence<Any?> =
         xmlTreeWalker(toArray(), filter)
 
+    fun querySelector(query: String): Any? = xmlQuerySelectorAll(this, query).firstOrNull()
+
+    fun querySelectorAll(query: String): List<Any?> = xmlQuerySelectorAll(this, query)
+
+    fun insertAfter(ref: Any?, content: List<Any?>) {
+        xmlInsertAfter(this, ref, content)
+    }
+
     fun toDeltaDeep(renderer: AbstractRenderer = activeRenderer): YXmlFragmentDeepDelta =
         renderXmlFragmentDeepDelta(this, DeepDeltaRenderOptions(renderer = renderer))
 
@@ -1112,7 +1184,26 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
 
     override fun iterator(): Iterator<Any?> = toArray().iterator()
 
-    fun clone(targetDoc: YDoc = doc): YXmlFragment {
+    fun clone(): YXmlFragment {
+        return YXmlFragment().also { cloned ->
+            xmlItems().forEach { item ->
+                when (val content = item.content) {
+                    is ItemContent.XmlNode -> cloned.insert(
+                        cloned.preliminaryList.size,
+                        listOf(content.value.toNode()),
+                    )
+                    is ItemContent.XmlType -> {
+                        val clonedChild = doc.typeFromXmlType(content).cloneValueDetached() as AbstractYType
+                        cloned.insertType(cloned.preliminaryList.size, clonedChild)
+                    }
+                    else -> Unit
+                }
+            }
+            cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueDetached() })
+        }
+    }
+
+    fun clone(targetDoc: YDoc): YXmlFragment {
         return targetDoc.createXmlFragment().also { cloned ->
             xmlItems().forEach { item ->
                 when (val content = item.content) {
@@ -1332,6 +1423,77 @@ private fun xmlTreeWalker(nodes: Iterable<Any?>, filter: (Any?) -> Boolean): Seq
             is YXmlElement -> yieldAll(xmlTreeWalker(node.toList(), filter))
         }
     }
+}
+
+private fun xmlQuerySelectorAll(parent: YXmlSharedType, query: String): List<Any?> {
+    val children = when (parent) {
+        is YXmlElementType -> if (parent.isPreliminary) parent.preliminaryList.toList() else parent.toArray()
+        is YXmlFragment -> if (parent.isPreliminary) parent.preliminaryList.toList() else parent.toArray()
+    }
+    return xmlTreeWalker(children) { node ->
+        when (node) {
+            is YXmlElementType -> node.nodeName.equals(query, ignoreCase = true)
+            is YXmlElement -> node.nodeName.equals(query, ignoreCase = true)
+            else -> false
+        }
+    }.toList()
+}
+
+private fun xmlInsertAfter(parent: YXmlSharedType, ref: Any?, content: List<Any?>) {
+    require(content.all { value -> value is AbstractYType || value is YXmlNode }) {
+        "XML content must contain shared XML types or detached XML nodes"
+    }
+    require(content.none { value -> value === parent }) { "shared type cannot contain itself" }
+    if (content.isEmpty()) return
+
+    val insertionIndex = if (parent.isPreliminary) {
+        if (ref == null) {
+            0
+        } else {
+            val index = parent.preliminaryList.indexOfFirst { child -> child === ref }
+            require(index >= 0) { "reference item not found" }
+            index + 1
+        }
+    } else {
+        when (ref) {
+            null -> 0
+            is AbstractYType -> {
+                require(ref.doc === parent.doc) { "reference type must belong to the same document" }
+                val id = parent.doc.typeRefItemId(ref) ?: error("reference type is not integrated")
+                parent.visibleXmlInsertionIndexAfter(id)
+            }
+            is ItemStruct -> parent.visibleXmlInsertionIndexAfter(ref.id)
+            else -> error("reference must be null, an Item, or an integrated XML type")
+        }
+    }
+
+    if (!parent.isPreliminary) {
+        parent.doc.preflightNestedValue(content.filterIsInstance<AbstractYType>())
+    }
+    val insertContent = {
+        var index = insertionIndex
+        content.forEach { value ->
+            when (parent) {
+                is YXmlElementType -> when (value) {
+                    is AbstractYType -> parent.insertType(index, value)
+                    is YXmlNode -> parent.insert(index, listOf(value))
+                }
+                is YXmlFragment -> when (value) {
+                    is AbstractYType -> parent.insertType(index, value)
+                    is YXmlNode -> parent.insert(index, listOf(value))
+                }
+            }
+            index++
+        }
+    }
+    if (parent.isPreliminary) insertContent() else parent.doc.transact(block = insertContent)
+}
+
+private fun YXmlSharedType.visibleXmlInsertionIndexAfter(id: Id): Int {
+    val items = doc.sequence(name).filter { item -> item.content.isXmlSequenceChild() && item.content.kind == kind }
+    val referenceIndex = items.indexOfFirst { item -> item.id == id }
+    require(referenceIndex >= 0) { "reference item not found" }
+    return items.take(referenceIndex + 1).count { item -> !item.deleted && item.countable }
 }
 
 private fun normalizeXmlSliceIndex(index: Int, size: Int): Int {

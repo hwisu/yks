@@ -6,41 +6,58 @@ data class SnapshotRootType(
 )
 
 data class Snapshot(
-    val ds: IdSet,
+    val ds: DeleteSet,
     val sv: StateVector,
     /** Local adaptation metadata; standard snapshot encoding intentionally contains only ds/sv. */
     val roots: Map<String, SnapshotRootType> = emptyMap(),
 ) {
-    constructor(deleteSet: DeleteSet, stateVector: StateVector) : this(deleteSet.toIdSet(), stateVector.toMap())
+    constructor(deleteSet: IdSet, stateVector: StateVector) : this(deleteSet.toDeleteSet(), stateVector.toMap())
 
-    val deleteSet: DeleteSet get() = ds.toDeleteSet()
+    val deleteSet: DeleteSet get() = ds
 }
 
 fun createSnapshot(deleteSet: DeleteSet, stateVector: StateVector): Snapshot =
-    Snapshot(deleteSet.toIdSet(), stateVector.toMap())
+    Snapshot(deleteSet, stateVector)
 
 fun createSnapshot(deleteSet: IdSet, stateVector: StateVector): Snapshot =
-    Snapshot(deleteSet.copy(), stateVector.toMap())
+    Snapshot(deleteSet.toDeleteSet(), stateVector.toMap())
 
 val emptySnapshot: Snapshot = createSnapshot(createIdSet(), emptyMap())
 
+private object SplitSnapshotAffectedStructsMetaKey
+
 fun snapshot(doc: YDoc): Snapshot = Snapshot(
-    ds = doc.deleteSet().toIdSet(),
+    ds = doc.deleteSet(),
     sv = doc.stateVector().toMap(),
     roots = doc.concreteRootMetadata(),
 )
 
 @Suppress("UNCHECKED_CAST")
 fun splitSnapshotAffectedStructs(transaction: YTransaction, snapshot: Snapshot) {
-    val seen = transaction.meta.getOrPut(::splitSnapshotAffectedStructs) { linkedSetOf<Snapshot>() } as MutableSet<Snapshot>
+    val seen = transaction.meta.getOrPut(SplitSnapshotAffectedStructsMetaKey, ::identitySnapshotSet) as MutableSet<Snapshot>
     if (!seen.add(snapshot)) return
+    val store = transaction.doc.store
     snapshot.sv.forEach { (client, clock) ->
-        if (clock < transaction.doc.store.getClock(client)) {
-            getItemCleanStart(transaction.doc, Id(client, clock))
+        if (clock < store.getClock(client)) {
+            getItemCleanStart(transaction, Id(client, clock))
         }
     }
-    iterateStructsByIdSet(transaction.doc, snapshot.ds) { _, _, _ -> }
+    snapshot.ds.clients.forEach { (client, ranges) ->
+        ranges.forEach { range ->
+            val start = Id(client, range.clock)
+            if (store.contains(start)) {
+                getItemCleanStart(transaction, start)
+            }
+            val end = Id(client, range.end - 1)
+            if (store.contains(end)) {
+                getItemCleanEnd(transaction, store, end)
+            }
+        }
+    }
 }
+
+private fun identitySnapshotSet(): MutableSet<Snapshot> =
+    java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Snapshot, Boolean>())
 
 fun createDocFromSnapshot(originDoc: YDoc, snapshot: Snapshot, newDoc: YDoc = YDoc()): YDoc {
     check(!originDoc.gc) { "Garbage-collection must be disabled in `originDoc`!" }
@@ -50,15 +67,16 @@ fun createDocFromSnapshot(originDoc: YDoc, snapshot: Snapshot, newDoc: YDoc = YD
 }
 
 fun equalSnapshots(left: Snapshot, right: Snapshot): Boolean =
-    left.sv == right.sv && equalIdSets(left.ds, right.ds)
+    left.sv == right.sv && equalDeleteSets(left.ds, right.ds)
 
 fun encodeSnapshot(snapshot: Snapshot): ByteArray =
     encodeSnapshotV2(snapshot, IdSetEncoderV1())
 
 fun encodeSnapshotV2(snapshot: Snapshot, encoder: IdSetEncoderV1 = IdSetEncoderV2()): ByteArray {
-    requireYjsSafeIdSet(snapshot.ds)
+    val deleteIds = snapshot.ds.toIdSet()
+    requireYjsSafeIdSet(deleteIds)
     requireYjsSafeStateVector(snapshot.sv)
-    writeIdSet(encoder, snapshot.ds)
+    writeIdSet(encoder, deleteIds)
     writeStateVector(encoder, snapshot.sv)
     return encoder.toByteArray()
 }
@@ -94,6 +112,6 @@ private fun snapshotContainsDecodedUpdate(snapshot: Snapshot, decoded: DocumentU
     }
     if (!structsCovered) return false
 
-    val mergedDeletes = mergeIdSets(listOf(snapshot.ds, decoded.deleteSet.toIdSet()))
-    return equalIdSets(snapshot.ds, mergedDeletes)
+    val mergedDeletes = mergeDeleteSets(listOf(snapshot.ds, decoded.deleteSet))
+    return equalDeleteSets(snapshot.ds, mergedDeletes)
 }

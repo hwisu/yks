@@ -7,12 +7,13 @@ data class DeleteRange(val clock: Long, val length: Long) {
     }
 
     val end: Long = checkedClockAdd(clock, length, "delete range end")
+    val len: Long get() = length
 
     fun contains(clock: Long): Boolean = clock >= this.clock && clock < end
 }
 
 class DeleteSet internal constructor(
-    internal val clients: MutableMap<Long, MutableList<DeleteRange>> = linkedMapOf(),
+    val clients: MutableMap<Long, MutableList<DeleteRange>> = linkedMapOf(),
 ) {
     val isEmpty: Boolean get() = clients.values.all { it.isEmpty() }
 

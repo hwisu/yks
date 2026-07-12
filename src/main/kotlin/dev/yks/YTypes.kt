@@ -71,7 +71,7 @@ sealed class AbstractYType protected constructor(
     name: String,
     internal val kind: RootKind,
 ) {
-    internal var doc: YDoc = doc
+    var doc: YDoc = doc
         private set
     var name: String = name
         internal set
@@ -547,13 +547,19 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
     val attrSize: Int get() = getAttrs().size
 
     fun insert(index: Int, values: List<Any?>) {
-        if (values.isEmpty()) return
         if (isPreliminary) {
+            if (values.isEmpty()) return
             require(values.none { value -> value === this }) { "shared type cannot contain itself" }
             preliminaryList.addAll(index.coerceIn(0, preliminaryList.size), values)
             return
         }
         val start = index.coerceAtLeast(0)
+        if (values.isEmpty()) {
+            doc.transact {
+                require(start <= size) { "insert index is out of bounds" }
+            }
+            return
+        }
         require(start <= size) { "insert index is out of bounds" }
         doc.preflightNestedValue(values)
         doc.transact {
@@ -753,7 +759,14 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
 
     fun toArray(): List<Any?> = toList()
 
-    fun clone(targetDoc: YDoc = doc): YArray {
+    fun clone(): YArray {
+        return YArray().also { cloned ->
+            cloned.push(toList().map { it.cloneValueDetached() })
+            cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueDetached() })
+        }
+    }
+
+    fun clone(targetDoc: YDoc): YArray {
         return targetDoc.createArray().also { cloned ->
             cloned.push(toList().map { it.cloneValueInto(targetDoc) })
             cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
@@ -857,11 +870,13 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
     override fun toJSON(): List<Any?> = toList().map(::toYTypeJsonValue)
 
     companion object {
-        fun from(values: Iterable<Any?>, doc: YDoc = YDoc(), name: String = ""): YArray {
+        fun from(values: Iterable<Any?>): YArray = YArray(values)
+
+        fun from(values: Iterable<Any?>, doc: YDoc, name: String = ""): YArray {
             return doc.getArray(name).also { it.push(values.toList()) }
         }
 
-        fun from(delta: List<YArrayDeltaOp>, doc: YDoc = YDoc(), name: String = ""): YArray {
+        fun from(delta: List<YArrayDeltaOp>, doc: YDoc, name: String = ""): YArray {
             return doc.getArray(name).also { it.applyDelta(delta) }
         }
 
@@ -1073,21 +1088,21 @@ open class YText internal constructor(
     }
 
     fun delete(index: Int, length: Int = 1) {
+        if (length == 0) return
         if (isPreliminary) {
-            if (length == 0) return
             queuePreliminaryOperation { delete(index, length) }
             return
         }
-        doc.deleteVisible(name, index, length)
+        doc.deleteVisible(name, index, length, strictLength = false)
     }
 
     fun deleteText(index: Int, length: Int = 1, origin: Any? = null) {
+        if (length == 0) return
         if (isPreliminary) {
-            if (length == 0) return
             queuePreliminaryOperation { deleteText(index, length, origin) }
             return
         }
-        doc.deleteVisible(name, index, length, origin = origin)
+        doc.deleteVisible(name, index, length, origin = origin, strictLength = false)
     }
 
     fun clear() {
@@ -1128,6 +1143,8 @@ open class YText internal constructor(
         if (warnIfPreliminary()) return emptyMap()
         return doc.typeAttributes(name)
     }
+
+    fun getAttributes(): Map<String, Any?> = getAttrs()
 
     fun getAttrs(snapshot: Snapshot): Map<String, Any?> =
         doc.mapAtSnapshot(this, snapshot).mapValues { (_, value) -> doc.valueToAny(value) }
@@ -1189,32 +1206,37 @@ open class YText internal constructor(
     }
 
     fun format(index: Int, length: Int, attributes: Map<String, Any?>) {
-        if (isPreliminary) {
-            if (length <= 0 || attributes.isEmpty()) return
-            queuePreliminaryOperation(attributes) { format(index, length, attributes) }
-            return
-        }
-        val start = index.coerceAtLeast(0)
-        require(start <= this.length) { "format range is out of bounds" }
-        if (length <= 0 || attributes.isEmpty()) return
-        require(start + length <= this.length) { "format range is out of bounds" }
-        doc.transact {
-            formatNativeRange(start, length, normalizeTextFormatAttributes(attributes))
-        }
+        formatRange(index, length, attributes, origin = null)
     }
 
     fun formatText(index: Int, length: Int, attributes: Map<String, Any?>, origin: Any? = null) {
+        formatRange(index, length, attributes, origin)
+    }
+
+    private fun formatRange(index: Int, length: Int, attributes: Map<String, Any?>, origin: Any?) {
+        if (length == 0) return
         if (isPreliminary) {
-            if (length <= 0 || attributes.isEmpty()) return
-            queuePreliminaryOperation(attributes) { formatText(index, length, attributes, origin) }
+            queuePreliminaryOperation(attributes) { formatRange(index, length, attributes, origin) }
             return
         }
         val start = index.coerceAtLeast(0)
-        require(start <= this.length) { "format range is out of bounds" }
-        if (length <= 0 || attributes.isEmpty()) return
-        require(start + length <= this.length) { "format range is out of bounds" }
         doc.transact(origin = origin) {
-            formatNativeRange(start, length, normalizeTextFormatAttributes(attributes))
+            val currentLength = this.length
+            if (start >= currentLength) return@transact
+            val normalized = normalizeTextFormatAttributes(attributes)
+            if (length < 0) {
+                insertTransientFormatMarkers(start, normalized)
+                return@transact
+            }
+            val available = currentLength - start
+            val existingLength = minOf(length, available)
+            if (normalized.isNotEmpty()) {
+                formatNativeRange(start, existingLength, normalized)
+            }
+            val overflow = length - available
+            if (overflow > 0) {
+                insert(this.length, "\n".repeat(overflow), attributes)
+            }
         }
     }
 
@@ -1222,27 +1244,38 @@ open class YText internal constructor(
         delta: YTextDelta,
         origin: Any? = null,
         renderer: AbstractRenderer = activeRenderer,
+        sanitize: Boolean = true,
     ) {
         if (isPreliminary) {
             queuePreliminaryOperation(
                 delta.ops.flatMap { op -> listOf(op.insert, op.attributes) },
-            ) { applyDelta(delta, origin, renderer) }
+            ) { applyDelta(delta, origin, renderer, sanitize) }
             return
         }
         doc.preflightNestedValue(delta.ops.flatMap { op -> listOf(op.insert, op.attributes) })
         doc.transact({ transaction ->
             var renderedIndex = 0
-            delta.ops.forEach { op ->
+            delta.ops.forEachIndexed { opIndex, op ->
                 when {
                     op.insert != null -> {
-                        val insert = op.insert
+                        val rawInsert = op.insert
+                        val index = renderedSequenceIndexToVisibleIndex(this, renderedIndex, renderer)
+                        val insert = if (
+                            !sanitize &&
+                            opIndex == delta.ops.lastIndex &&
+                            rawInsert is String &&
+                            rawInsert.endsWith('\n') &&
+                            index == length
+                        ) {
+                            rawInsert.dropLast(1)
+                        } else {
+                            rawInsert
+                        }
                         if (insert is String) {
-                            if (insert.isEmpty()) return@forEach
-                            val index = renderedSequenceIndexToVisibleIndex(this, renderedIndex, renderer)
+                            if (insert.isEmpty()) return@forEachIndexed
                             insert(index, insert, op.attributes)
                             renderedIndex += insert.length
                         } else {
-                            val index = renderedSequenceIndexToVisibleIndex(this, renderedIndex, renderer)
                             insertEmbed(index, insert, op.attributes)
                             renderedIndex += 1
                         }
@@ -1261,7 +1294,7 @@ open class YText internal constructor(
                         renderedIndex += op.retain
                     }
                     op.delete != null -> {
-                        if (op.delete <= 0) return@forEach
+                        if (op.delete <= 0) return@forEachIndexed
                         val startRendered = renderedIndex.coerceAtLeast(0)
                         recordRendererAttributedDeletes(transaction, this, startRendered, op.delete, renderer)
                         val index = renderedSequenceIndexToVisibleIndex(this, startRendered, renderer)
@@ -1276,6 +1309,10 @@ open class YText internal constructor(
                 }
             }
         }, origin = origin)
+    }
+
+    fun applyDelta(delta: YTextDelta, sanitize: Boolean) {
+        applyDelta(delta, origin = null, renderer = activeRenderer, sanitize = sanitize)
     }
 
     fun applyDeltaDeep(delta: YTextDeepDelta, origin: Any? = null) {
@@ -1334,6 +1371,131 @@ open class YText internal constructor(
                     pendingAttributes = null
                 }
                 else -> Unit
+            }
+        }
+        flush()
+        return delta
+    }
+
+    fun toDelta(
+        snapshot: Snapshot?,
+        prevSnapshot: Snapshot? = null,
+        computeYChange: ((change: String, id: Id) -> Any?)? = null,
+    ): YTextDelta {
+        if (warnIfPreliminary()) return YTextDelta()
+        if (prevSnapshot == null) {
+            return snapshot?.let { doc.textDeltaAtSnapshot(this, it) } ?: toDelta()
+        }
+
+        fun StoreItem.isVisibleAt(target: Snapshot?): Boolean = if (target == null) {
+            !deleted
+        } else {
+            id.clock < (target.sv[id.client] ?: 0) && !target.ds.hasId(id)
+        }
+
+        val delta = YTextDelta()
+        val formats = linkedMapOf<String, YValue>()
+        var pendingText = StringBuilder()
+        var pendingAttributes: Map<String, Any?>? = null
+        var hasYChange = false
+        var yChange: Any? = null
+        var yChangeType: String? = null
+        var yChangeClient: Long? = null
+        var yChangeEndClock: Long? = null
+
+        fun publicAttributes(content: ItemContent): Map<String, Any?> {
+            val values = content.baseTextAttributes().toMutableMap()
+            formats.forEach { (key, value) ->
+                if (value == YValue.Null) values.remove(key) else values[key] = value
+            }
+            return buildMap {
+                putAll(textAttributesToPublic(values))
+                if (hasYChange) put("ychange", yChange)
+            }
+        }
+
+        fun flush() {
+            if (pendingText.isNotEmpty()) {
+                delta.insertSegment(pendingText.toString(), pendingAttributes.orEmpty())
+                pendingText = StringBuilder()
+            }
+        }
+
+        fun resetYChange() {
+            hasYChange = false
+            yChange = null
+            yChangeType = null
+            yChangeClient = null
+            yChangeEndClock = null
+        }
+
+        doc.sequence(name).forEach { item ->
+            if (item.content.kind != kind || !item.isVisibleAt(snapshot) && !item.isVisibleAt(prevSnapshot)) {
+                return@forEach
+            }
+            when (val content = item.content) {
+                is ItemContent.NativeTextFormat -> {
+                    flush()
+                    resetYChange()
+                    if (item.isVisibleAt(snapshot)) {
+                        if (content.value == YValue.Null) {
+                            formats.remove(content.key)
+                        } else {
+                            formats[content.key] = content.value
+                        }
+                    }
+                }
+                is ItemContent.Text -> {
+                    val change = when {
+                        snapshot != null && !item.isVisibleAt(snapshot) -> "removed"
+                        !item.isVisibleAt(prevSnapshot) -> "added"
+                        else -> null
+                    }
+                    if (change == null) {
+                        if (hasYChange) {
+                            flush()
+                            resetYChange()
+                        }
+                    } else {
+                        val continuesPackedString = hasYChange &&
+                            yChangeType == change &&
+                            yChangeClient == item.id.client &&
+                            yChangeEndClock == item.id.clock
+                        if (!continuesPackedString) {
+                            val nextYChange = computeYChange?.invoke(change, item.id) ?: mapOf("type" to change)
+                            if (!hasYChange || yChange != nextYChange) flush()
+                            yChange = nextYChange
+                        }
+                        hasYChange = true
+                        yChangeType = change
+                        yChangeClient = item.id.client
+                        yChangeEndClock = item.id.clock + item.length
+                    }
+                    val attributes = publicAttributes(content)
+                    if (pendingAttributes != null && pendingAttributes != attributes) flush()
+                    pendingAttributes = attributes
+                    pendingText.append(content.value)
+                }
+                is ItemContent.TextEmbed -> {
+                    flush()
+                    delta.insertEmbed(doc.valueToAny(content.value), publicAttributes(content))
+                    pendingAttributes = null
+                    resetYChange()
+                }
+                is ItemContent.XmlType -> {
+                    flush()
+                    delta.insertEmbed(doc.typeFromXmlType(content), publicAttributes(content))
+                    pendingAttributes = null
+                    resetYChange()
+                }
+                is ItemContent.TextFormat,
+                is ItemContent.Value,
+                is ItemContent.MapEntry,
+                is ItemContent.XmlNode,
+                is ItemContent.Deleted -> {
+                    flush()
+                    resetYChange()
+                }
             }
         }
         flush()
@@ -1411,7 +1573,14 @@ open class YText internal constructor(
 
     override fun toJson(): String = toString()
 
-    open fun clone(targetDoc: YDoc = doc): YText {
+    open fun clone(): YText {
+        return YText().also { cloned ->
+            cloned.applyDelta(toDelta().cloneDetached())
+            cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueDetached() })
+        }
+    }
+
+    open fun clone(targetDoc: YDoc): YText {
         return targetDoc.createText().also { cloned ->
             cloned.applyDelta(toDelta().cloneInto(targetDoc))
             cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
@@ -1532,10 +1701,24 @@ open class YText internal constructor(
         insertNativeFormatMarkers(visible.size, terminalChanges)
     }
 
-    private fun insertNativeFormatMarkers(index: Int, attributes: Map<String, YValue>): Id? {
+    private fun insertTransientFormatMarkers(index: Int, attributes: Map<String, YValue>) {
+        if (attributes.isEmpty()) return
+        val ambient = textItems().getOrNull(index)?.content?.textAttributes().orEmpty()
+        val changes = attributes.filter { (key, value) -> (ambient[key] ?: YValue.Null) != value }
+        if (changes.isEmpty()) return
+        val lastMarker = insertNativeFormatMarkers(index, changes)
+        val restore = changes.keys.associateWith { key -> ambient[key] ?: YValue.Null }
+        insertNativeFormatMarkers(index, restore, originOverride = lastMarker)
+    }
+
+    private fun insertNativeFormatMarkers(
+        index: Int,
+        attributes: Map<String, YValue>,
+        originOverride: Id? = null,
+    ): Id? {
         if (attributes.isEmpty()) return null
         val anchors = doc.insertionAnchors(name, kind, index)
-        var origin = anchors.first
+        var origin = originOverride ?: anchors.first
         attributes.forEach { (key, value) ->
             val item = StoreItem(
                 id = doc.nextId(),
@@ -1627,6 +1810,20 @@ internal fun YTextDelta.cloneInto(targetDoc: YDoc): YTextDelta {
         when {
             op.insert is String -> cloned.insertSegment(op.insert, attrs)
             op.insert != null -> cloned.insertEmbed(op.insert.cloneValueInto(targetDoc), attrs)
+            op.retain != null -> cloned.retain(op.retain, attrs)
+            op.delete != null -> cloned.delete(op.delete)
+        }
+    }
+    return cloned
+}
+
+internal fun YTextDelta.cloneDetached(): YTextDelta {
+    val cloned = YTextDelta()
+    ops.forEach { op ->
+        val attrs = op.attributes.mapValues { (_, value) -> value.cloneValueDetached() }
+        when {
+            op.insert is String -> cloned.insertSegment(op.insert, attrs)
+            op.insert != null -> cloned.insertEmbed(op.insert.cloneValueDetached(), attrs)
             op.retain != null -> cloned.retain(op.retain, attrs)
             op.delete != null -> cloned.delete(op.delete)
         }
@@ -1867,7 +2064,13 @@ open class YMap internal constructor(
         .mapValues { (_, value) -> toYTypeJsonValue(value) }
         .inJavaScriptObjectKeyOrder()
 
-    open fun clone(targetDoc: YDoc = doc): YMap {
+    open fun clone(): YMap {
+        return YMap().also { cloned ->
+            cloned.setAttrs(toMap().mapValues { (_, value) -> value.cloneValueDetached() })
+        }
+    }
+
+    open fun clone(targetDoc: YDoc): YMap {
         return targetDoc.createMap().also { cloned ->
             cloned.setAttrs(toMap().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
         }
@@ -1907,17 +2110,37 @@ private fun String.toJavaScriptArrayIndexOrNull(): Long? {
 }
 
 internal fun Any?.cloneValueInto(targetDoc: YDoc): Any? = when (this) {
+    is YXmlTextType -> clone(targetDoc)
+    is YXmlHook -> clone(targetDoc)
+    is YXmlElementType -> clone(targetDoc)
+    is YXmlFragment -> clone(targetDoc)
     is YArray -> clone(targetDoc)
     is YMap -> clone(targetDoc)
     is YText -> clone(targetDoc)
-    is YXmlFragment -> clone(targetDoc)
-    is YXmlElementType -> clone(targetDoc)
-    is YXmlTextType -> clone(targetDoc)
     is List<*> -> map { it.cloneValueInto(targetDoc) }
     is Array<*> -> map { it.cloneValueInto(targetDoc) }
-    is Map<*, *> -> entries.associate { (key, value) ->
+    is Map<*, *> -> entries.associateTo(linkedMapOf()) { (key, value) ->
         require(key is String) { "YValue map keys must be strings" }
         key to value.cloneValueInto(targetDoc)
+    }
+    is ByteArray -> copyOf()
+    else -> this
+}
+
+internal fun Any?.cloneValueDetached(): Any? = when (this) {
+    is YXmlTextType -> clone()
+    is YXmlHook -> clone()
+    is YXmlElementType -> clone()
+    is YXmlFragment -> clone()
+    is YArray -> clone()
+    is YMap -> clone()
+    is YText -> clone()
+    is YXmlNode -> clone()
+    is List<*> -> map { it.cloneValueDetached() }
+    is Array<*> -> map { it.cloneValueDetached() }
+    is Map<*, *> -> entries.associateTo(linkedMapOf()) { (key, value) ->
+        require(key is String) { "YValue map keys must be strings" }
+        key to value.cloneValueDetached()
     }
     is ByteArray -> copyOf()
     else -> this
