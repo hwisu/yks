@@ -151,20 +151,33 @@ class StructStore(private val owner: YDoc? = null) {
 
     internal fun sequence(parent: String): List<StoreItem> {
         val items = allItems().filter { it.parent == parent && it.parentSub == null }
-        val children = linkedMapOf<Id?, MutableList<StoreItem>>()
-        items.forEach { item -> children.getOrPut(item.origin) { mutableListOf() }.add(item) }
-        children.values.forEach { sortSiblings(it) }
+        if (items.size < 2) return items
 
+        // Rebuild the linked sequence using the same conflict scan as Item.integrate in Yjs.
+        // A simple origin-child traversal is insufficient: an item's rightOrigin may constrain
+        // it relative to items from a different origin subtree.
+        val itemIds = items.mapTo(hashSetOf()) { item -> item.id }
+        val remaining = items.sortedBy { item -> item.id }.toMutableList()
         val ordered = mutableListOf<StoreItem>()
-        val stack = ArrayDeque<StoreItem>()
-        children[null].orEmpty().asReversed().forEach(stack::addLast)
-        while (stack.isNotEmpty()) {
-            val child = stack.removeLast()
-            ordered.add(child)
-            val nestedChildren = children[child.id].orEmpty()
-            for (index in nestedChildren.lastIndex downTo 0) {
-                stack.addLast(nestedChildren[index])
+        val integratedIds = hashSetOf<Id>()
+
+        while (remaining.isNotEmpty()) {
+            val nextIndex = remaining.indexOfFirst { item ->
+                val anchorsIntegrated =
+                    (item.origin !in itemIds || item.origin in integratedIds) &&
+                        (item.rightOrigin !in itemIds || item.rightOrigin in integratedIds)
+                val earlierClientItemsIntegrated = items.none { candidate ->
+                    candidate.id.client == item.id.client &&
+                        candidate.id.clock < item.id.clock &&
+                        candidate.id !in integratedIds
+                }
+                anchorsIntegrated && earlierClientItemsIntegrated
             }
+            // Valid Yjs updates are acyclic. Keep malformed/private legacy data deterministic
+            // instead of looping forever if it contains a dependency cycle.
+            val item = remaining.removeAt(if (nextIndex >= 0) nextIndex else 0)
+            insertSequenceItem(ordered, item)
+            integratedIds.add(item.id)
         }
         return ordered
     }
@@ -173,37 +186,40 @@ class StructStore(private val owner: YDoc? = null) {
         .filter { it.parent == parent && it.parentSub == key }
         .sortedWith(compareBy<StoreItem> { it.id.clock }.thenBy { it.id.client })
 
-    private fun sortSiblings(items: MutableList<StoreItem>) {
-        val byId = items.associateBy { it.id }
-        val outgoing = items.associateWith { mutableSetOf<StoreItem>() }
-        val incoming = items.associateWith { 0 }.toMutableMap()
+    private fun insertSequenceItem(ordered: MutableList<StoreItem>, item: StoreItem) {
+        var leftIndex = item.origin?.let { origin ->
+            ordered.indexOfFirst { existing -> existing.id == origin }.takeIf { index -> index >= 0 }
+        } ?: -1
+        var scanIndex = leftIndex + 1
+        val conflictingItems = hashSetOf<Id>()
+        val itemsBeforeOrigin = hashSetOf<Id>()
 
-        for (item in items) {
-            val right = item.rightOrigin?.let(byId::get)
-            if (right != null && outgoing.getValue(item).add(right)) {
-                incoming[right] = incoming.getValue(right) + 1
-            }
-        }
+        while (scanIndex < ordered.size) {
+            val other = ordered[scanIndex]
+            if (compareIDs(other.id, item.rightOrigin)) break
 
-        val ready = items.filter { incoming.getValue(it) == 0 }.sortedBy { it.id }.toMutableList()
-        val sorted = mutableListOf<StoreItem>()
-        while (ready.isNotEmpty()) {
-            val next = ready.removeAt(0)
-            sorted.add(next)
-            for (target in outgoing.getValue(next).sortedBy { it.id }) {
-                incoming[target] = incoming.getValue(target) - 1
-                if (incoming.getValue(target) == 0) {
-                    ready.add(target)
-                    ready.sortBy { it.id }
+            itemsBeforeOrigin.add(other.id)
+            conflictingItems.add(other.id)
+            when {
+                compareIDs(item.origin, other.origin) -> {
+                    if (other.id.client < item.id.client) {
+                        leftIndex = scanIndex
+                        conflictingItems.clear()
+                    } else if (compareIDs(item.rightOrigin, other.rightOrigin)) {
+                        break
+                    }
                 }
+                other.origin != null && other.origin in itemsBeforeOrigin -> {
+                    if (other.origin !in conflictingItems) {
+                        leftIndex = scanIndex
+                        conflictingItems.clear()
+                    }
+                }
+                else -> break
             }
+            scanIndex++
         }
 
-        if (sorted.size != items.size) {
-            items.sortBy { it.id }
-        } else {
-            items.clear()
-            items.addAll(sorted)
-        }
+        ordered.add(leftIndex + 1, item)
     }
 }

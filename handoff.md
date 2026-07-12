@@ -7,14 +7,16 @@
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 현재 `origin/main`보다 21개 커밋 앞서 있음
-- 아직 push하지 않음
-- XML 문자열 surface parity 작업은 구현과 전체 검증이 끝났으며 이 문서와 함께 커밋함
+- 기준 원격 커밋: `origin/main` = `d2e93a6`
+- 이번 커밋 반영 후 `origin/main`보다 1개 커밋 앞섬
+- 2026-07-12 정밀 감사에서 기존 완료 선언과 달리 추가 parity blocker를 확인하여 개선 작업 진행 중
+- 모든 개선 커밋은 구현·회귀 테스트와 이 문서를 함께 갱신함
 
 현재 커밋 이력:
 
 ```text
-HEAD docs: finalize Yjs Kotlin implementation handoff
+HEAD feat: match Yjs sequence conflict ordering
+d2e93a6 docs: finalize Yjs Kotlin implementation handoff
 befbff7 feat: emit standard delete transaction updates
 50b2b2e feat: preserve pending GC update metadata
 828c39d feat: emit standard root transaction updates
@@ -266,6 +268,15 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - 실제 upstream `Y.applyUpdate` sequence가 최종 subdocument deletion state로 수렴하는지 검증
 - detached nested owner fallback을 유지한 상태에서 bidirectional UndoManager regression이 다시 통과함을 확인
 
+### 18. Yjs sequence conflict ordering
+
+- 기존 `origin` child DFS + sibling 정렬을 upstream `Item.integrate`와 같은 전역 conflict scan으로 교체
+- `rightOrigin`이 서로 다른 origin subtree 사이를 제한하는 경우도 전체 연결 순서에서 처리
+- anchor와 동일 client의 앞 clock이 먼저 통합된 뒤 항목을 배치하도록 causal replay 보장
+- 정밀 감사에서 발견한 5-update 최소 반례를 회귀 테스트로 추가
+  - upstream 결과: `[c, base]`
+  - Kotlin 결과도 `[c, base]`, pending struct 없음
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -362,9 +373,19 @@ git diff --check
 
 이 머신의 Codex shell에서는 위 명령 앞에 `rtk`를 붙여 실행해야 함.
 
-## 구현 완료 상태와 의도적인 compatibility constraints
+## 정밀 감사 후 개선 상태
 
-현재 검증 범위에서 남은 semantic/convergence blocker는 없음. 다음 항목은 Yjs wire 제약 또는 성능 최적화이며 lossless fallback/pre-materialization 정책으로 확정함:
+기존의 "semantic/convergence blocker 없음" 선언은 철회함. 이번 커밋에서 핵심 sequence ordering blocker를 수정했으며, 다음 항목은 후속 커밋에서 계속 개선해야 함:
+
+1. 대형 `ContentDeleted`/GC range를 truncation이나 clock 단위 반복 없이 보존
+2. 표준 update API의 private `YKS` fallback 제거 또는 명시적 분리
+3. baseline+incremental `mergeUpdates`/`mergeUpdatesV2`의 genuine wire 보장
+4. emoji, BigInt, undefined, signed zero, NaN/Infinity의 lib0 value parity
+5. nested subdocument, formatting key 충돌, V2 snapshot decoder 수정
+6. `toJSON`, text embed, XML string, detached type 등 공개 API semantics 정렬
+7. automatic GC, 누락 public export, verifier/CI/fuzz coverage 보강
+
+아래 항목은 기존 구현의 compatibility 제약 기록이며, 위 blocker를 모두 해결한 뒤 실제 남은 JVM adaptation만 재분류해야 함:
 
 1. root XML schema
    - root shared type kind와 root `XmlElement` node name은 Yjs update wire에 없음

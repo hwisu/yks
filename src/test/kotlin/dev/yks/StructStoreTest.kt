@@ -1,5 +1,6 @@
 package dev.yks
 
+import java.util.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -9,6 +10,24 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class StructStoreTest {
+    @Test
+    fun sequenceMatchesYjsGlobalConflictOrdering() {
+        val updates = listOf(
+            "AQEKAAgBAWEBdwJvYQA=",
+            "AQEeAAgBAWEBdwJvYwA=",
+            "AAIeAQABCgEAAQ==",
+            "AQEKAYgeAAF3BGJhc2UCHgEAAQoBAAE=",
+            "AQEeAUgKAAF3AWMCHgEAAQoBAAE=",
+        ).map(Base64.getDecoder()::decode)
+        val doc = YDoc(clientId = 99, gc = false)
+        val array = doc.getArray("a")
+
+        updates.forEach(doc::applyUpdate)
+
+        assertEquals(listOf("c", "base"), array.toList())
+        assertNull(doc.store.pendingStructs)
+    }
+
     @Test
     fun getStateVectorExposesRawDocumentStateVector() {
         val doc = YDoc(clientId = 1)
