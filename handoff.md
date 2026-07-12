@@ -16,7 +16,8 @@
 현재 커밋 이력:
 
 ```text
-HEAD feat: publish audited Yjs Kotlin package
+HEAD ci: update GitHub Actions runtimes
+f9b6563 feat: publish audited Yjs Kotlin package
 dd019cf fix: complete audited Yjs Kotlin parity
 570194c fix: align Yjs cleanup map and XML semantics
 cada05a fix: harden Yjs update metadata and range merging
@@ -466,6 +467,7 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
   - main CI에서 Maven Local standalone consumer 실행
   - `v<SemVer>` tag workflow가 main 도달 가능성, 전체 oracle/gate, 게시, clean remote consumer를 순서대로 검증
   - publish와 remote consumer job을 분리하고 registry 지연 재시도를 적용
+  - GitHub-hosted runner의 Node 20 폐기 경고를 제거하도록 Node 24 기반 공식 Actions를 commit SHA로 고정
 - 정확한 호환성 계약과 남은 Kotlin/JVM 차이는 `YJS_COMPATIBILITY.md`에 기록
 
 ## 완료된 작업: XML + subdocument V1
