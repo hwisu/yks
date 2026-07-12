@@ -5,10 +5,11 @@ protocol. It provides shared arrays, maps, text, live XML, subdocuments,
 snapshots, relative positions, undo management, and update V1/V2 operations.
 
 The project targets JDK 21 and is published from SemVer tags to GitHub Packages.
-Interoperability is tested against Yjs `13.6.31`. YKS targets the genuine Yjs
-V1/V2 wire protocols and core CRDT behavior; it is not a line-for-line clone of
-the JavaScript object model. See [Yjs compatibility](YJS_COMPATIBILITY.md) for
-the audited boundary.
+Interoperability is tested against Yjs `13.6.31` and independently against Yrs
+`0.27.2` in its Yjs-compatible UTF-16 mode. YKS targets the genuine Yjs V1/V2
+wire protocols and core CRDT behavior; it is not a line-for-line clone of either
+runtime's object model. See [Yjs compatibility](YJS_COMPATIBILITY.md) for the
+audited boundary.
 
 ## Install
 
@@ -202,6 +203,7 @@ Requirements:
 
 - JDK 21
 - Node.js 22 or newer for the JavaScript oracle
+- Rust 1.97.0 for the pinned Yrs oracle
 
 ```sh
 ./gradlew test
@@ -217,11 +219,14 @@ regenerate committed upstream fixtures and verify that generation is clean:
 
 ```sh
 npm run interop:generate
-git diff --exit-code -- interop/yjs-v1/fixtures
+npm run interop:check-clean
 ```
 
-See [the interoperability harness documentation](interop/yjs-v1/README.md) for
-scenario details and standalone update verifiers.
+See the [Yjs harness](interop/yjs-v1/README.md) and
+[Yrs harness](interop/yrs-oracle/README.md) documentation for scenario details
+and standalone update verifiers. The Yrs oracle always uses UTF-16 offsets,
+deterministic client IDs, and retained deleted content so that it measures the
+shared Yjs wire contract instead of Yrs-only defaults.
 
 Pushing a tag such as `v0.1.1` runs the same gates, publishes that immutable
 version to GitHub Packages, and verifies it again from a clean remote consumer.

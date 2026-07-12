@@ -10,14 +10,16 @@
 - 작업 시작 기준 원격 커밋: `origin/main` = `dd019cf`
 - 이 문서를 포함하는 릴리스 커밋에서 공개 API·observer/snapshot/GC 후속 감사를 완료하고 패키지 CI를 추가함
 - 2026-07-12 정밀 감사에서 확인한 core wire/convergence blocker와 후속 edge case를 모두 수정하고 전체 gate를 재검증함
-- MIT 라이선스, upstream Yjs/lib0 저작권 고지, Maven POM/JAR 검증을 추가하고 `v0.1.1` 교정 릴리스를 준비함
+- MIT 라이선스, upstream Yjs/lib0 저작권 고지, Maven POM/JAR 검증을 포함한 `v0.1.1` 교정 릴리스를 게시·검증함
+- Yrs `0.27.2`를 독립 Rust oracle로 고정하고 공통 Yjs wire/CRDT 영역의 양방향 drift를 재검증함
 - JavaScript API·mutable 내부 객체 모델·browser DOM까지 동일한 완전 복제는 아니며, 차이는 `YJS_COMPATIBILITY.md`에 명시함
 - 모든 개선 커밋은 구현·회귀 테스트와 이 문서를 함께 갱신함
 
 현재 커밋 이력:
 
 ```text
-HEAD chore: license published YKS artifacts
+HEAD test: add Yrs compatibility oracle
+53482f4 chore: license published YKS artifacts
 08cdfd0 ci: update GitHub Actions runtimes
 f9b6563 feat: publish audited Yjs Kotlin package
 dd019cf fix: complete audited Yjs Kotlin parity
@@ -489,6 +491,44 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - 이미 immutable하게 게시된 `v0.1.0` artifact는 덮어쓰지 않음
 - license-complete artifact는 새 patch version `v0.1.1`로 게시하고 clean remote consumer로 재검증
 
+### 32. Yrs 0.27.2 독립 양방향 oracle
+
+- Rust port Yrs `0.27.2`와 Rust `1.97.0`을 exact pin하고 `Cargo.lock`을 커밋
+- 모든 oracle document는 Yjs/YKS와 같은 의미를 비교하도록 다음 compatibility profile 사용:
+  - deterministic client ID
+  - `OffsetKind::Utf16`
+  - `skip_gc = true`
+- Yrs가 생성한 15개 binary fixture를 Kotlin이 직접 적용:
+  - V1/V2 `A😀BC` baseline과 UTF-16 index 3 삭제의 causal/delete-first 순서
+  - JavaScript-safe 53-bit client ID `9_007_199_254_740_000`
+  - string/number/bool/null/binary array와 map
+  - nested `root.profile`
+  - 3-client concurrent array의 6개 delivery permutation
+  - Yrs의 deterministic middle-Skip update sequence
+- Kotlin이 별도 임시 디렉터리에 만든 10개 core update bundle을 한 Rust process의
+  `verify-kotlin`이 다시 적용해 반대 방향도 의미 검증
+- Yrs `0.27.2` upstream 회귀를 Kotlin과 Rust 양쪽에 고정:
+  - dependency-last pending delete set이 삭제된 `G`를 부활시키지 않음
+  - partial Skip 안쪽 block 통합
+  - middle Skip을 채우는 out-of-order sequence가 `PcabQd`로 수렴
+  - 최종 state vector, pending struct/delete 소진까지 함께 확인
+- 이 범위에서 재현되는 YKS semantic/wire drift는 없었으므로 production CRDT 코드는 변경하지 않음
+- Yrs 기본 byte-offset, Yrs-only weak/query/sync API와 추가 subdocument option은 Yjs `13.6.31`
+  compatibility claim 밖의 의도적 runtime 차이로 문서화
+- CI/publish verify에 다음을 연결:
+  - pinned Rust setup action
+  - fixture regeneration
+  - `cargo fmt --check`와 `cargo test --locked`
+  - Kotlin/Yrs interop test
+  - tracked 변경뿐 아니라 새 untracked fixture도 실패시키는 clean check
+
+주요 경로:
+
+- `interop/yrs-oracle/`
+- `src/test/kotlin/dev/yks/YrsInteropTest.kt`
+- `interop/check-generated-clean.mjs`
+- `rust-toolchain.toml`
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -569,8 +609,11 @@ BUILD SUCCESSFUL
 ```
 
 - 일반 Kotlin tests: 646 passed
-- Kotlin Yjs V1/V2 interop tests: 78 passed
+- Kotlin interop tests: 85 passed
+  - Yjs V1/V2: 78 passed
+  - Yrs V1/V2/regression: 7 passed
 - JavaScript/Yjs oracle tests: 106 passed
+- Rust/Yrs oracle tests: 4 passed
 - Maven Local standalone consumer: passed
 - Maven POM + binary/source JAR MIT metadata/content: passed
 - resolved consumer JAR의 MIT + upstream Yjs/lib0 attribution: passed
@@ -586,7 +629,7 @@ cd /Volumes/D/yks
 npm run interop:generate
 npm run test:interop
 ./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.1-test
-git diff --exit-code -- interop/yjs-v1/fixtures
+npm run interop:check-clean
 git diff --check
 ```
 

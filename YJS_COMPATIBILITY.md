@@ -30,7 +30,8 @@ The independent export audit classified the 103 upstream names as follows:
 
 ## Tested guarantees
 
-CI regenerates fixtures with upstream Yjs and verifies:
+CI regenerates fixtures with upstream Yjs and the pinned Yrs `0.27.2` crate and
+verifies:
 
 - update V1 and V2 encode, decode, apply, merge, diff, convert, obfuscate, and
   state-vector operations;
@@ -42,6 +43,14 @@ CI regenerates fixtures with upstream Yjs and verifies:
   Kotlin;
 - publication to a Maven repository followed by a clean standalone consumer
   build and cross-document update round trip.
+
+The independent Yrs oracle checks both directions: Yrs-produced V1/V2 updates
+are applied by Kotlin, and Kotlin-produced updates are applied by Yrs. Its
+deterministic compatibility profile uses `OffsetKind::Utf16`, retained deleted
+content, and explicit client IDs. It covers non-BMP text edits and reverse
+delivery, nested and binary values, concurrent insertion permutations,
+JavaScript-safe 53-bit client IDs, and the out-of-order pending/Skip/delete
+regressions fixed through Yrs `0.27.2`.
 
 The upstream-named update APIs return genuine Yjs bytes or fail explicitly when
 a Kotlin-only state cannot be represented. APIs ending in `Lossless` may use a
@@ -87,6 +96,16 @@ private `YKS` envelope and must not be sent to JavaScript Yjs.
    - A rare `computeYChange` callback boundary can be coarser after packed
      `ContentString` data has been normalized into YKS's store representation;
      visible text and change attribution remain preserved.
+
+5. Yrs-specific runtime extensions
+   - Yrs defaults text indexes to UTF-8 byte offsets, while Yjs and YKS use
+     UTF-16 code units. Cross-runtime tests explicitly select Yrs UTF-16 mode.
+   - Yrs-only weak links, query/runtime synchronization APIs, and extra encoded
+     subdocument options are not part of the Yjs `13.6.31` compatibility claim.
+   - Update encoders may choose different valid struct packing. Cross-runtime
+     generated updates are compared by state-vector and document semantics;
+     byte identity is required only when regenerating a fixture with the same
+     pinned producer.
 
 Applications that communicate with JavaScript Yjs should stay on the standard
 V1/V2 APIs and use explicit typed getters for remotely created roots. Kotlin-only

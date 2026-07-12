@@ -30,17 +30,18 @@ tasks.withType<Jar>().configureEach {
 
 tasks.test {
     useJUnitPlatform {
-        excludeTags("yjs-interop")
+        excludeTags("yjs-interop", "yrs-interop")
     }
 }
 
 tasks.register<Test>("interopTest") {
-    description = "Runs cross-language compatibility tests against upstream Yjs fixtures."
+    description = "Runs cross-language compatibility tests against upstream Yjs and Yrs fixtures."
     group = LifecycleBasePlugin.VERIFICATION_GROUP
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
+    systemProperty("yks.projectDirectory", rootProject.projectDir.absolutePath)
     useJUnitPlatform {
-        includeTags("yjs-interop")
+        includeTags("yjs-interop", "yrs-interop")
     }
 }
 

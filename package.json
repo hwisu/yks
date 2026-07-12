@@ -3,9 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "interop:generate": "node interop/yjs-v1/generate-fixtures.mjs",
-    "interop:verify": "node interop/yjs-v1/verify-update.mjs",
-    "test:interop": "node --test interop/yjs-v1/*.test.mjs"
+    "interop:generate": "npm run interop:yjs:generate && npm run interop:yrs:generate",
+    "interop:verify": "npm run interop:yjs:verify --",
+    "test:interop": "npm run test:interop:yjs && npm run test:interop:yrs",
+    "interop:yjs:generate": "node interop/yjs-v1/generate-fixtures.mjs",
+    "interop:yjs:verify": "node interop/yjs-v1/verify-update.mjs",
+    "test:interop:yjs": "node --test interop/yjs-v1/*.test.mjs",
+    "interop:yrs:generate": "cargo run --locked --quiet --manifest-path interop/yrs-oracle/Cargo.toml -- generate",
+    "test:interop:yrs": "cargo fmt --manifest-path interop/yrs-oracle/Cargo.toml -- --check && cargo test --locked --quiet --manifest-path interop/yrs-oracle/Cargo.toml",
+    "interop:check-clean": "node interop/check-generated-clean.mjs"
   },
   "devDependencies": {
     "yjs": "13.6.31"
