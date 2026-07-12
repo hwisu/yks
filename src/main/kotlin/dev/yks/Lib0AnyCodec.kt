@@ -65,7 +65,7 @@ internal fun writeLib0Any(encoder: BinaryEncoder, value: Any?) {
 private fun writeLib0Number(encoder: BinaryEncoder, value: Number) {
     val number = value.toDouble()
     if (value is Long) {
-        require(kotlin.math.abs(number) <= 9_007_199_254_740_992.0 && number.toLong() == value) {
+        require(value in -YJS_MAX_SAFE_INTEGER..YJS_MAX_SAFE_INTEGER) {
             "Long is not exactly representable as a JavaScript number: $value"
         }
     }

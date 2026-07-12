@@ -169,6 +169,44 @@ class CodecValueCorrectnessTest {
         assertTrue(!childV2.shouldLoad)
     }
 
+    @Test
+    fun mergeUpdatesNormalizesOverlappingPackedDeletedRanges() {
+        val full = contentDeletedUpdate(10)
+        val prefix = contentDeletedUpdate(5)
+        val tail = diffUpdate(full, encodeStateVector(mapOf(1L to 5L)))
+
+        listOf(
+            mergeUpdates(listOf(full, tail)),
+            mergeUpdates(listOf(tail, full)),
+            mergeUpdates(listOf(prefix, full)),
+            mergeUpdates(listOf(full, prefix)),
+        ).forEach { merged ->
+            assertTrue(!merged.hasYksMagic())
+            assertEquals(mapOf(1L to 10L), decodeStateVector(encodeStateVectorFromUpdate(merged)))
+            assertEquals(10L, decodeUpdate(merged).structs.sumOf { struct -> struct.length })
+        }
+    }
+
+    @Test
+    fun unsafeYjsNumbersUseLosslessPrivateEncoding() {
+        val unsafe = YJS_MAX_SAFE_INTEGER + 2
+        val rangeDoc = YDoc(clientId = 2)
+        applyUpdate(rangeDoc, contentDeletedUpdate(unsafe))
+        val rangeRelay = encodeStateAsUpdate(rangeDoc)
+        assertTrue(rangeRelay.hasYksMagic())
+        assertEquals(unsafe, decodeUpdate(rangeRelay).structs.single().length)
+
+        val deleteSet = DeleteSet.empty().also { set -> set.add(Id(1, unsafe), 1) }
+        assertTrue(UpdateCodec.encode(DocumentUpdate(emptyList(), deleteSet)).hasYksMagic())
+        assertTrue(UpdateCodec.encodeV2(DocumentUpdate(emptyList(), deleteSet)).hasYksMagic())
+
+        val valueDoc = YDoc(clientId = 3)
+        valueDoc.getText("body").insertEmbed(0, Long.MAX_VALUE)
+        val valueUpdate = encodeStateAsUpdate(valueDoc)
+        assertTrue(valueUpdate.hasYksMagic())
+        assertEquals(Long.MAX_VALUE, createDocFromUpdate(valueUpdate).getText("body").toDelta().ops.single().insert)
+    }
+
     private fun contentDeletedUpdate(length: Long): ByteArray = BinaryEncoder().also { encoder ->
         encoder.writeVarUInt(1)
         encoder.writeVarUInt(1)

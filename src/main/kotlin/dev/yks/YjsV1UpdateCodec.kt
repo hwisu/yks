@@ -4,6 +4,7 @@ private const val INFO_CONTENT_MASK = 0x1f
 private const val INFO_HAS_PARENT_SUB = 0x20
 private const val INFO_HAS_RIGHT_ORIGIN = 0x40
 private const val INFO_HAS_ORIGIN = 0x80
+internal const val YJS_MAX_SAFE_INTEGER: Long = 9_007_199_254_740_991L
 
 /** Byte-exact implementation of the uncompressed Yjs update V1 envelope. */
 internal object UpdateCodec {
@@ -96,18 +97,39 @@ internal object UpdateCodec {
         return decodeV1(BinaryDecoder(bytes))
     }
 
+    fun parseMeta(bytes: ByteArray): UpdateMeta {
+        if (bytes.hasLegacyMagic()) return LegacyUpdateCodec.decode(bytes).toUpdateMeta()
+        val from = linkedMapOf<Long, Long>()
+        val to = linkedMapOf<Long, Long>()
+        decodeV1(BinaryDecoder(bytes), from, to)
+        return UpdateMeta(from, to)
+    }
+
     fun decode(decoder: BinaryDecoder): DocumentUpdate = decode(decoder.readRemainingBytes())
 
     fun decodeV2(bytes: ByteArray): DocumentUpdate =
         if (bytes.isNotEmpty() && bytes[0] != 0.toByte()) decode(bytes) else decodeV2(UpdateDecoderV2(bytes))
 
-    fun decodeV2(decoder: UpdateDecoderV2): DocumentUpdate {
+    fun parseMetaV2(bytes: ByteArray): UpdateMeta {
+        if (bytes.isNotEmpty() && bytes[0] != 0.toByte()) return parseMeta(bytes)
+        val from = linkedMapOf<Long, Long>()
+        val to = linkedMapOf<Long, Long>()
+        decodeV2(UpdateDecoderV2(bytes), from, to)
+        return UpdateMeta(from, to)
+    }
+
+    fun decodeV2(
+        decoder: UpdateDecoderV2,
+        metaFrom: MutableMap<Long, Long>? = null,
+        metaTo: MutableMap<Long, Long>? = null,
+    ): DocumentUpdate {
         if (decoder.usesLegacyRest) return decode(decoder.restDecoder)
         val structs = mutableListOf<DecodedWireItem>()
         repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
             val numberOfStructs = decoder.restDecoder.readVarUInt().toDecodedCount()
             val client = decoder.readClient()
             var clock = decoder.restDecoder.readVarUInt()
+            recordMetaStart(metaFrom, client, clock)
             repeat(numberOfStructs) {
                 val info = decoder.readInfo()
                 when (info and INFO_CONTENT_MASK) {
@@ -149,6 +171,7 @@ internal object UpdateCodec {
                     }
                 }
             }
+            recordMetaEnd(metaTo, client, clock)
         }
         val deleteSet = DeleteSet.empty()
         repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
@@ -162,12 +185,17 @@ internal object UpdateCodec {
         return DocumentUpdate(structs.toStoreItems(), deleteSet)
     }
 
-    private fun decodeV1(decoder: BinaryDecoder): DocumentUpdate {
+    private fun decodeV1(
+        decoder: BinaryDecoder,
+        metaFrom: MutableMap<Long, Long>? = null,
+        metaTo: MutableMap<Long, Long>? = null,
+    ): DocumentUpdate {
         val structs = mutableListOf<DecodedWireItem>()
         repeat(decoder.readVarUInt().toDecodedCount()) {
             val numberOfStructs = decoder.readVarUInt().toDecodedCount()
             val client = decoder.readVarUInt()
             var clock = decoder.readVarUInt()
+            recordMetaStart(metaFrom, client, clock)
             repeat(numberOfStructs) {
                 val info = decoder.readByte()
                 when (info and INFO_CONTENT_MASK) {
@@ -213,10 +241,21 @@ internal object UpdateCodec {
                     }
                 }
             }
+            recordMetaEnd(metaTo, client, clock)
         }
         val deleteSet = readDeleteSet(decoder)
         check(!decoder.hasRemaining()) { "update has trailing bytes" }
         return DocumentUpdate(structs.toStoreItems(), deleteSet)
+    }
+
+    private fun recordMetaStart(meta: MutableMap<Long, Long>?, client: Long, clock: Long) {
+        if (meta == null) return
+        meta[client] = minOf(meta[client] ?: clock, clock)
+    }
+
+    private fun recordMetaEnd(meta: MutableMap<Long, Long>?, client: Long, clock: Long) {
+        if (meta == null) return
+        meta[client] = maxOf(meta[client] ?: clock, clock)
     }
 
     private fun writeItem(
@@ -520,9 +559,11 @@ internal object UpdateCodec {
 }
 
 private fun DocumentUpdate.isSupportedStandardUpdate(isV2: Boolean): Boolean {
+    if (!deleteSet.hasYjsSafeRanges()) return false
+    if (parentItemIds.values.any { id -> !id.isYjsSafeId() }) return false
+    if (items.any { item -> !item.hasYjsSafeClocks() }) return false
     if (items.isEmpty()) return true
     val clients = items.groupBy { item -> item.id.client }
-    if (clients.keys.any { client -> client !in 0..9_007_199_254_740_992L }) return false
     val parentItems = parentItemIds + items.mapNotNull { item ->
         item.content.directTypeRef()?.name?.let { name -> name to item.id }
     }.toMap()
@@ -548,6 +589,26 @@ private fun DocumentUpdate.isSupportedStandardUpdate(isV2: Boolean): Boolean {
                 item.hasResolvableV1Parent(parentItems) &&
                 item.hasConsistentInheritedMetadata(items)
         }
+    }
+}
+
+internal fun Long.isYjsSafeVarUint(): Boolean = this in 0..YJS_MAX_SAFE_INTEGER
+
+internal fun Id.isYjsSafeId(): Boolean = client.isYjsSafeVarUint() && clock.isYjsSafeVarUint()
+
+private fun StoreItem.hasYjsSafeClocks(): Boolean =
+    id.isYjsSafeId() &&
+        length.isYjsSafeVarUint() &&
+        runCatching { checkedClockAdd(id.clock, length).isYjsSafeVarUint() }.getOrDefault(false) &&
+        (origin?.isYjsSafeId() != false) &&
+        (rightOrigin?.isYjsSafeId() != false) &&
+        (unresolvedParent?.id?.isYjsSafeId() != false)
+
+private fun DeleteSet.hasYjsSafeRanges(): Boolean = clients.all { (client, ranges) ->
+    client.isYjsSafeVarUint() && ranges.all { range ->
+        range.clock.isYjsSafeVarUint() &&
+            range.length.isYjsSafeVarUint() &&
+            range.end.isYjsSafeVarUint()
     }
 }
 
@@ -639,9 +700,7 @@ private fun YValue.isSupportedAnyValue(topLevel: Boolean): Boolean = when (this)
     is YValue.Bool,
     is YValue.StringValue,
     is YValue.BinaryValue -> true
-    is YValue.LongNumber -> value.toDouble().let { number ->
-        kotlin.math.abs(number) <= 9_007_199_254_740_992.0 && number.toLong() == value
-    }
+    is YValue.LongNumber -> value in -YJS_MAX_SAFE_INTEGER..YJS_MAX_SAFE_INTEGER
     is YValue.DoubleNumber -> true
     is YValue.BigIntNumber -> runCatching { value.longValueExact() }.isSuccess
     is YValue.ListValue -> value.all { nested -> nested.isSupportedAnyValue(topLevel = false) }
@@ -662,8 +721,8 @@ private fun YValue.isSupportedJsonValue(): Boolean = when (this) {
     is YValue.SubdocRef -> false
     YValue.Null,
     is YValue.Bool,
-    is YValue.LongNumber,
     is YValue.StringValue -> true
+    is YValue.LongNumber -> value in -YJS_MAX_SAFE_INTEGER..YJS_MAX_SAFE_INTEGER
     is YValue.DoubleNumber -> value.isFinite()
     is YValue.ListValue -> value.all(YValue::isSupportedJsonValue)
     is YValue.MapValue -> value.values.all(YValue::isSupportedJsonValue)

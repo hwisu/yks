@@ -7,12 +7,12 @@ data class UpdateMeta(
 )
 
 fun parseUpdateMeta(update: ByteArray): UpdateMeta =
-    UpdateCodec.decode(update).toUpdateMeta()
+    UpdateCodec.parseMeta(update)
 
 fun parseUpdateMetaV2(update: ByteArray): UpdateMeta =
-    UpdateCodec.decodeV2(update).toUpdateMeta()
+    UpdateCodec.parseMetaV2(update)
 
-private fun DocumentUpdate.toUpdateMeta(): UpdateMeta {
+internal fun DocumentUpdate.toUpdateMeta(): UpdateMeta {
     val from = linkedMapOf<Long, Long>()
     val to = linkedMapOf<Long, Long>()
     items.forEach { item ->

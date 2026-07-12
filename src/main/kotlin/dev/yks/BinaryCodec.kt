@@ -46,7 +46,15 @@ class BinaryEncoder {
     }
 
     fun writeVarInt(value: Long) {
-        writeVarUInt((value shl 1) xor (value shr 63))
+        var current = (value shl 1) xor (value shr 63)
+        // Zig-zag encoding spans the full unsigned 64-bit domain. Values whose encoded
+        // high bit is set are negative only as a Kotlin Long representation, not as a
+        // varuint payload, so emit their raw bits with unsigned shifts.
+        while ((current and -0x80L) != 0L) {
+            writeByte(((current and 0x7f) or 0x80).toInt())
+            current = current ushr 7
+        }
+        writeByte(current.toInt())
     }
 
     fun writeLib0VarInt(value: Long, forceNegative: Boolean = false) {

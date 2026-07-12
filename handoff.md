@@ -8,14 +8,15 @@
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
 - 기준 원격 커밋: `origin/main` = `d2e93a6`
-- 이번 커밋 반영 후 `origin/main`보다 2개 커밋 앞섬
+- 이번 커밋 반영 후 `origin/main`보다 3개 커밋 앞섬
 - 2026-07-12 정밀 감사에서 기존 완료 선언과 달리 추가 parity blocker를 확인하여 개선 작업 진행 중
 - 모든 개선 커밋은 구현·회귀 테스트와 이 문서를 함께 갱신함
 
 현재 커밋 이력:
 
 ```text
-HEAD fix: close audited Yjs interoperability gaps
+HEAD fix: harden Yjs update metadata and range merging
+92e2908 fix: close audited Yjs interoperability gaps
 3b40be1 fix: match Yjs sequence conflict ordering
 d2e93a6 docs: finalize Yjs Kotlin implementation handoff
 befbff7 feat: emit standard delete transaction updates
@@ -333,6 +334,18 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - local transaction delete set 기록, filter, user entry replacement migration, subscription cleanup 지원
 - 두 client mapping과 delete attribution을 standard update로 동기화한 뒤 Kotlin 및 실제 Yjs 13.6.31에서 복원 검증
 
+### 25. update metadata, packed-range merge, 수치 안전성
+
+- `parseUpdateMeta`/`parseUpdateMetaV2`가 decoder에서 버려지는 `Skip`도 wire clock 범위에 포함하도록 struct section을 직접 추적
+- `mergeUpdates`/`mergeUpdatesV2`가 packed `ContentDeleted`/GC를 시작 ID 하나로 dedupe하지 않고 client별 interval coverage로 정규화
+  - `[0,5)` 뒤 `[0,10)`을 합쳐도 tail `5..10`을 보존
+  - `[0,10)`과 `[5,10)`을 합쳐도 중복 struct나 private fallback 없이 genuine update 유지
+- item/origin/right-origin/unresolved-parent/parent/delete-set의 client, clock, length, end를 JS safe-integer 범위까지 검증
+- delete-only update도 안전 범위 검사를 건너뛰지 않으며, 초과 값은 반올림되는 표준 wire 대신 lossless private envelope 사용
+- V1 JSON text embed/format의 중첩 `Long`도 safe integer만 표준 writer에 허용
+- private zig-zag varint가 `Long.MIN_VALUE..Long.MAX_VALUE` 전체를 무손실 기록하도록 unsigned bit emission 수정
+- `PermanentUserData`가 user map 또는 `ids`/`ds` array 교체·삭제 뒤에도 기존 client/delete 귀속을 누적 보존하고 새 shared array로 이관
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -412,7 +425,7 @@ subdoc-duplicate-guid-v1.bin
 BUILD SUCCESSFUL
 ```
 
-- 일반 Kotlin tests: 549 passed
+- 일반 Kotlin tests: 553 passed
 - Kotlin Yjs V1/V2 interop tests: 73 passed
 - JavaScript/Yjs oracle tests: 78 passed
 - deterministic upstream differential: 500 seeds, 0 failures

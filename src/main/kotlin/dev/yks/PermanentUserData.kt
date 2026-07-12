@@ -46,21 +46,6 @@ class PermanentUserData(
         val initialUser = getOrCreateUser(userDescription)
         userArray(initialUser, IDS_KEY).push(clientId)
 
-        var currentUser = initialUser
-        mappingSubscriptions += yusers.observe {
-            val replacement = yusers.get(userDescription) as? YMap ?: return@observe
-            if (replacement === currentUser) return@observe
-            currentUser = replacement
-            val ids = userArray(replacement, IDS_KEY)
-            clients.forEach { (mappedClientId, mappedUserDescription) ->
-                if (mappedUserDescription == userDescription) ids.push(mappedClientId)
-            }
-            dss[userDescription]
-                ?.takeUnless { deleteSet -> deleteSet.isEmpty }
-                ?.let(::encodePermanentDeleteSet)
-                ?.let { encoded -> userArray(replacement, DELETE_SETS_KEY).push(encoded) }
-        }
-
         mappingSubscriptions += doc.observeAfterTransactions { transaction ->
             val deleteSet = transaction.deleteSet
             if (!transaction.local || deleteSet.isEmpty || !filter(transaction, deleteSet)) return@observeAfterTransactions
@@ -99,23 +84,42 @@ class PermanentUserData(
     }
 
     private fun initUser(user: YMap, userDescription: String) {
+        val ids = userArray(user, IDS_KEY)
+        val deleteSets = userArray(user, DELETE_SETS_KEY)
         val existing = userBindings[userDescription]
-        if (existing?.user === user) {
+        if (existing?.user === user && existing.ids === ids && existing.deleteSets === deleteSets) {
             readClientIds(user, userDescription)
             readDeleteSets(user, userDescription)
             return
         }
+        val preservedClientIds = clients
+            .filterValues { mappedUserDescription -> mappedUserDescription == userDescription }
+            .keys
+            .toList()
+        val preservedDeleteSet = dss[userDescription]?.copy()
         existing?.close()
 
         readClientIds(user, userDescription)
         readDeleteSets(user, userDescription)
-        val ids = userArray(user, IDS_KEY)
-        val deleteSets = userArray(user, DELETE_SETS_KEY)
         userBindings[userDescription] = UserBinding(
             user = user,
+            ids = ids,
+            deleteSets = deleteSets,
+            userSubscription = user.observe { event ->
+                if (event.keysChanged.any { key -> key == IDS_KEY || key == DELETE_SETS_KEY }) {
+                    initUser(user, userDescription)
+                }
+            },
             idsSubscription = ids.observe { readClientIds(user, userDescription) },
             deleteSetsSubscription = deleteSets.observe { readDeleteSets(user, userDescription) },
         )
+
+        val existingIds = ids.toArray().mapNotNull { value -> (value as? Number)?.toLong() }.toSet()
+        preservedClientIds.filterNot(existingIds::contains).forEach(ids::push)
+        preservedDeleteSet
+            ?.takeUnless(DeleteSet::isEmpty)
+            ?.let(::encodePermanentDeleteSet)
+            ?.let { encoded -> deleteSets.push(encoded) }
     }
 
     private fun readClientIds(user: YMap, userDescription: String) {
@@ -126,7 +130,7 @@ class PermanentUserData(
     }
 
     private fun readDeleteSets(user: YMap, userDescription: String) {
-        val merged = DeleteSet.empty()
+        val merged = dss[userDescription]?.copy() ?: DeleteSet.empty()
         userArray(user, DELETE_SETS_KEY).forEach { value ->
             if (value is ByteArray) merged.addAll(decodePermanentDeleteSet(value))
         }
@@ -138,10 +142,14 @@ class PermanentUserData(
 
     private data class UserBinding(
         val user: YMap,
+        val ids: YArray,
+        val deleteSets: YArray,
+        val userSubscription: Subscription,
         val idsSubscription: Subscription,
         val deleteSetsSubscription: Subscription,
     ) {
         fun close() {
+            userSubscription.close()
             idsSubscription.close()
             deleteSetsSubscription.close()
         }

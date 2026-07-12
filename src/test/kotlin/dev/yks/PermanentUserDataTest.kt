@@ -77,4 +77,34 @@ class PermanentUserDataTest {
         sourceUserData.close()
         targetUserData.close()
     }
+
+    @Test
+    fun replacingUserOrAttributionArraysPreservesHistoricalMappings() {
+        val doc = YDoc(clientId = 41, gc = false)
+        val permanentUserData = PermanentUserData(doc)
+        permanentUserData.setUserMapping(doc, 41, "alice")
+        val text = doc.getText("body")
+        text.insert(0, "x")
+        val deletedId = getTypeStructs(text).single().id
+        text.delete(0, 1)
+
+        val replacement = doc.createMap()
+        replacement.set("ids", doc.createArray())
+        replacement.set("ds", doc.createArray())
+        doc.getMap("users").set("alice", replacement)
+
+        assertEquals("alice", permanentUserData.getUserByClientId(41))
+        assertEquals("alice", permanentUserData.getUserByDeletedId(deletedId))
+        assertTrue((replacement.get("ids") as YArray).toArray().contains(41L))
+        assertTrue((replacement.get("ds") as YArray).length > 0)
+
+        replacement.set("ids", doc.createArray())
+        replacement.set("ds", doc.createArray())
+
+        assertEquals("alice", permanentUserData.getUserByClientId(41))
+        assertEquals("alice", permanentUserData.getUserByDeletedId(deletedId))
+        assertTrue((replacement.get("ids") as YArray).toArray().contains(41L))
+        assertTrue((replacement.get("ds") as YArray).length > 0)
+        permanentUserData.close()
+    }
 }
