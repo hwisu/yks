@@ -18,7 +18,8 @@
 현재 커밋 이력:
 
 ```text
-HEAD test: add Yrs compatibility oracle
+HEAD ci: install rustfmt for Yrs oracle
+7a37019 test: add Yrs compatibility oracle
 53482f4 chore: license published YKS artifacts
 08cdfd0 ci: update GitHub Actions runtimes
 f9b6563 feat: publish audited Yjs Kotlin package
@@ -516,7 +517,7 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - Yrs 기본 byte-offset, Yrs-only weak/query/sync API와 추가 subdocument option은 Yjs `13.6.31`
   compatibility claim 밖의 의도적 runtime 차이로 문서화
 - CI/publish verify에 다음을 연결:
-  - pinned Rust setup action
+  - pinned Rust setup action과 explicit `rustfmt` component
   - fixture regeneration
   - `cargo fmt --check`와 `cargo test --locked`
   - Kotlin/Yrs interop test
