@@ -16,7 +16,7 @@ for (const name of scenarioNames) {
     Y.applyUpdate(target, Y.encodeStateAsUpdate(source))
     materializeScenario(target, name)
 
-    if (name !== 'subdoc-map' && name !== 'subdoc-array') {
+    if (name !== 'subdoc-map' && name !== 'subdoc-array' && name !== 'subdoc-array-default') {
       assert.deepEqual(target.toJSON(), source.toJSON())
     }
     if (
@@ -36,6 +36,12 @@ for (const name of scenarioNames) {
       assert.equal(child.gc, false)
       assert.equal(child.autoLoad, true)
       assert.deepEqual(child.meta, { role: 'child' })
+    }
+    if (name === 'subdoc-array-default') {
+      const child = target.getArray('subs').get(0)
+      assert.equal(child.guid, 'child')
+      assert.equal(child.shouldLoad, false)
+      assert.equal(child.autoLoad, false)
     }
   })
 }

@@ -6,6 +6,10 @@ fun getStateVector(doc: YDoc): StateVector = doc.stateVector()
 
 fun getStateVector(store: StructStore): StateVector = store.stateVector()
 
+fun getState(store: StructStore, client: Long): Long = store.getClock(client)
+
+fun getState(doc: YDoc, client: Long): Long = getState(doc.store, client)
+
 fun integrityCheck(doc: YDoc) {
     doc.integrityCheck()
 }

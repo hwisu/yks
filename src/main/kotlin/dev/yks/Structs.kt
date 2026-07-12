@@ -21,7 +21,7 @@ open class AbstractStruct(
     open val deleted: Boolean get() = false
     open val isItem: Boolean get() = false
     open val ref: Int? get() = null
-    val end: Long get() = id.clock + length
+    val end: Long get() = checkedClockAdd(id.clock, length, "struct end")
 
     open fun mergeWith(right: AbstractStruct): Boolean = false
 

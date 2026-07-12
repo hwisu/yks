@@ -8,14 +8,15 @@
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
 - 기준 원격 커밋: `origin/main` = `d2e93a6`
-- 이번 커밋 반영 후 `origin/main`보다 1개 커밋 앞섬
+- 이번 커밋 반영 후 `origin/main`보다 2개 커밋 앞섬
 - 2026-07-12 정밀 감사에서 기존 완료 선언과 달리 추가 parity blocker를 확인하여 개선 작업 진행 중
 - 모든 개선 커밋은 구현·회귀 테스트와 이 문서를 함께 갱신함
 
 현재 커밋 이력:
 
 ```text
-HEAD feat: match Yjs sequence conflict ordering
+HEAD fix: close audited Yjs interoperability gaps
+3b40be1 fix: match Yjs sequence conflict ordering
 d2e93a6 docs: finalize Yjs Kotlin implementation handoff
 befbff7 feat: emit standard delete transaction updates
 50b2b2e feat: preserve pending GC update metadata
@@ -271,11 +272,66 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 ### 18. Yjs sequence conflict ordering
 
 - 기존 `origin` child DFS + sibling 정렬을 upstream `Item.integrate`와 같은 전역 conflict scan으로 교체
+- causal dependency를 Kahn queue로 준비하고 실제 left/right linked sequence에 통합해 대형 sequence에서도 반복 list scan을 피함
+- transaction의 parent-before snapshot은 parent/kind별 최초 1회만 캡처하고 monotonic client append는 O(1) store path 사용
 - `rightOrigin`이 서로 다른 origin subtree 사이를 제한하는 경우도 전체 연결 순서에서 처리
 - anchor와 동일 client의 앞 clock이 먼저 통합된 뒤 항목을 배치하도록 causal replay 보장
 - 정밀 감사에서 발견한 5-update 최소 반례를 회귀 테스트로 추가
   - upstream 결과: `[c, base]`
   - Kotlin 결과도 `[c, base]`, pending struct 없음
+- 기존 15,000 nested insertion regression과 500-seed differential을 함께 통과하도록 correctness와 성능을 검증
+
+### 19. 대형 range와 lib0 값 domain
+
+- `ContentDeleted`/GC를 clock 단위 item 수십억 개로 펼치지 않고 단일 range `StoreItem`으로 보존
+- `2^32`, `2^32+1` 길이의 genuine V1/V2 decode, state vector, relay, partial state-vector slicing 검증
+- 대형 pending delete 적용에서 clock 단위 순회를 제거하고 range/struct end overflow를 checked addition으로 통일
+- UTF-16 surrogate pair를 표준 `ContentString`으로 묶어 emoji/non-BMP V1/V2 상호운용 지원
+- lib0/YValue의 `undefined`, signed zero, BigInt64, NaN, ±Infinity 보존
+- JS object key enumeration 순서(정수 index 우선, 나머지는 insertion order) 보존
+- 사용자 formatting key `__yks_text_format`이 private payload로 오인되지 않도록 schema 판별 강화
+- direct default subdocument는 upstream처럼 standard wire로 내보내고 receiver `shouldLoad=false` 의미 검증
+- nested collection 안 subdocument는 표준 ref 9로 표현할 수 없으므로 유실 없이 명시적 private fallback 유지
+
+### 20. merge, pending parent metadata, V2 snapshot
+
+- baseline + incremental `mergeUpdates`/`mergeUpdatesV2`가 union 안의 inherited/nested parent를 해소해 genuine V1/V2 출력
+- standalone V1↔V2 conversion은 anchor가 없는 dependency를 보존하고 genuine incremental wire 유지
+- synthetic root-name prefix 추론을 `UnresolvedYjsParent` 명시 메타데이터로 교체
+- 실제 root 이름이 `__yjs_inherit__:*` 또는 `__yjs_nested__:*`여도 pending으로 오인하지 않음
+- private envelope를 `YKS\x03`으로 올려 unresolved parent를 직렬화하고 v1/v2 backward decode 유지
+- `snapshotContainsUpdateV2`가 genuine V2 decoder를 사용하도록 수정
+
+### 21. 공개 JSON/text/XML semantics
+
+- `YArray.toJSON()`은 list, `YMap.toJSON()`은 plain map, XML `toJSON()`은 XML string 반환
+- `YDoc.toJSON()`도 위 shared-type 결과를 그대로 연결
+- `YText.toString()`과 snapshot string에서 embed를 upstream처럼 제외
+- text insert의 attributes 생략(ambient formatting 상속)과 명시적 empty map(unformatted)을 sentinel로 구분
+- `insertEmbed` attributes 생략은 upstream처럼 unformatted 유지
+- XML element tag lowercase, quoted attributes, JavaScript `String(value)` coercion 규칙 적용
+
+### 22. oracle, fuzz, build gate, CI
+
+- subdocument verifier가 GUID/set만 보지 않고 실제 Y.Text/Y.XmlText ContentDoc placement를 검사
+- delete verifier가 insert-before-delete sequence를 확인해 empty update false positive 차단
+- JS oracle에 verifier regression과 default subdocument scenario 추가
+- upstream Yjs가 생성한 concurrent array/text/map update를 Kotlin과 비교하는 deterministic 500-seed differential test 추가
+- `Gradle check`가 `interopTest`에 의존하도록 연결
+- GitHub Actions에서 Java 21 + Node 22, fixture generation, JS oracle, Gradle check, fixture diff 실행
+
+### 23. update metadata/state export
+
+- `parseUpdateMeta`/`parseUpdateMetaV2`와 `UpdateMeta(from, to)` 추가
+- struct section의 client별 시작/끝 clock을 V1/V2에서 반환하고 delete-only update는 빈 bounds 반환
+- upstream `getState(store, client)`와 document overload 추가
+
+### 24. PermanentUserData
+
+- upstream과 같은 `users -> user map -> ids/ds arrays` shared-type layout 구현
+- `setUserMapping`, `getUserByClientId`, `getUserByDeletedId` 공개 API 추가
+- local transaction delete set 기록, filter, user entry replacement migration, subscription cleanup 지원
+- 두 client mapping과 delete attribution을 standard update로 동기화한 뒤 Kotlin 및 실제 Yjs 13.6.31에서 복원 검증
 
 ## 완료된 작업: XML + subdocument V1
 
@@ -352,13 +408,16 @@ subdoc-duplicate-guid-v1.bin
 마지막 전체 검증:
 
 ```text
-./gradlew test interopTest --no-daemon
+./gradlew clean check --no-daemon
 BUILD SUCCESSFUL
 ```
 
-- 일반 Kotlin tests: 521 passed
-- Kotlin Yjs V1/V2 interop tests: 69 passed
-- JavaScript/Yjs oracle tests: 74 passed
+- 일반 Kotlin tests: 549 passed
+- Kotlin Yjs V1/V2 interop tests: 73 passed
+- JavaScript/Yjs oracle tests: 78 passed
+- deterministic upstream differential: 500 seeds, 0 failures
+- 15,000 nested insertion regression: passed
+- fixture regeneration diff: clean
 - `git diff --check`: passed
 
 검증 명령:
@@ -367,7 +426,7 @@ BUILD SUCCESSFUL
 cd /Volumes/D/yks
 npm run interop:generate
 npm run test:interop
-./gradlew test interopTest --no-daemon
+./gradlew clean check --no-daemon
 git diff --check
 ```
 
@@ -377,13 +436,11 @@ git diff --check
 
 기존의 "semantic/convergence blocker 없음" 선언은 철회함. 이번 커밋에서 핵심 sequence ordering blocker를 수정했으며, 다음 항목은 후속 커밋에서 계속 개선해야 함:
 
-1. 대형 `ContentDeleted`/GC range를 truncation이나 clock 단위 반복 없이 보존
-2. 표준 update API의 private `YKS` fallback 제거 또는 명시적 분리
-3. baseline+incremental `mergeUpdates`/`mergeUpdatesV2`의 genuine wire 보장
-4. emoji, BigInt, undefined, signed zero, NaN/Infinity의 lib0 value parity
-5. nested subdocument, formatting key 충돌, V2 snapshot decoder 수정
-6. `toJSON`, text embed, XML string, detached type 등 공개 API semantics 정렬
-7. automatic GC, 누락 public export, verifier/CI/fuzz coverage 보강
+1. 표준 update API에서 남아 있는 static XML/Kotlin-only extension의 private `YKS` fallback을 명시적으로 분리
+2. detached/preliminary shared type의 동일 instance integration과 owner-before-child clock 의미 구현
+3. map key iteration order, adjacent equal-format delta segmentation 등 남은 공개 API 세부 의미 정렬
+4. map형 `YXmlHook`, typed event/deep-observe contract 등 공개 type surface 보강
+5. transaction cleanup의 automatic GC와 남은 delete-set/public export 보강
 
 아래 항목은 기존 구현의 compatibility 제약 기록이며, 위 blocker를 모두 해결한 뒤 실제 남은 JVM adaptation만 재분류해야 함:
 

@@ -1,25 +1,30 @@
-# Yjs V1 interoperability fixtures
+# Yjs V1/V2 interoperability harness
 
-This harness is the external compatibility oracle for the Kotlin codec. It is
-pinned to stable Yjs 13.6.31 and uses fixed client IDs so committed update bytes
-are deterministic.
+This directory is the external compatibility oracle for the Kotlin update
+codec. It is pinned to Yjs `13.6.31` and uses fixed client IDs so committed
+fixture bytes are deterministic.
 
-Generate the fixtures and run the JavaScript checks:
+Install dependencies, regenerate fixtures, and run the JavaScript checks:
 
 ```sh
-npm install
+npm ci
 npm run interop:generate
 npm run test:interop
 ```
 
-Run the Kotlin-facing compatibility gate:
+The Node suite currently contains 78 tests. This number includes fixture
+semantics, upstream self-roundtrips, and verifier regression tests; it does not
+mean that all 78 tests execute Kotlin code.
+
+Run the Kotlin-facing compatibility gate, or the complete Gradle gate:
 
 ```sh
 ./gradlew interopTest
+./gradlew check
 ```
 
-`interopTest` is deliberately separate from the normal unit-test task. The
-canonical `hello` fixture now passes in both directions.
+`check` depends on `interopTest`, while the plain `test` task excludes tests
+tagged `yjs-interop`.
 
 Validate an update produced by Kotlin:
 
@@ -34,33 +39,72 @@ npm run interop:verify -- update.bin array
 npm run interop:verify -- update.bin map
 npm run interop:verify -- update.bin nested-map
 npm run interop:verify -- update.bin nested-text
+npm run interop:verify -- update.bin nested-map-replace-update
+npm run interop:verify -- update.bin subdoc-array-default
 ```
 
-Kotlin currently emits standard V1 bytes for compatible explicit state exports
-covering unformatted text, arrays, maps, binary values, and owner-first nested
-maps/text. It also relays upstream native `Y.Text` format-marker documents and
-marker-only incremental updates back as standard V1 bytes. Owner-first live XML
-trees and safe direct `Y.Array`/`Y.Map` subdocuments are also emitted as standard
-V1. The harness covers anchor-free incremental nested-map, rich-text, and XML
-updates.
+Validate genuine V2 output directly:
 
-The standard V1 decoder accepts packed text/array content, binary values,
-root and nested maps, inherited map keys, interior origin/right-origin anchors,
-delete sets, GC structs, and out-of-order dependency updates. Dedicated fixtures
-also lock down the protocol distinction between Skip (an unavailable clock gap)
-and GC (stored clock ownership), deleted nested parents, and replacement content
-whose type must not be inferred from an opaque deleted struct. Rich-text fixtures
-cover marker removal, reverse-order delivery, embeds, snapshots, event deltas,
-and restoration to a previous non-null attribute value.
+```sh
+node interop/yjs-v1/verify-update-v2.mjs update-v2.bin array
+node interop/yjs-v1/verify-update-sequence-v2.mjs text-delete base-v2.bin diff-v2.bin
+```
 
-XML fixtures cover element attributes, nested `Y.XmlText`, native text-format
-markers, pre-materialized root elements, and same/cross-client parent delivery in
-either order. Subdocument fixtures cover default and explicit standard options,
-add/load events, relay, and distinct instances that share one GUID.
+The V1 sequence verifier has the equivalent interface:
 
-Live transaction-event updates and content that still needs a richer wire
-model—Kotlin-authored range formatting, static compact XML nodes, pre-populated
-detached XML types, subdocument deletions/nonstandard options, deletes, unsafe
-numeric coercions, or pre-populated detached collection types—continue to use
-the legacy `YKS` envelope. This preserves existing Kotlin behavior while each
-remaining content family is moved behind a cross-language fixture.
+```sh
+node interop/yjs-v1/verify-update-sequence.mjs nested-map-update base.bin diff.bin
+```
+
+## Covered behavior
+
+The committed fixtures and Kotlin interop tests cover both upstream-to-Kotlin
+decoding and Kotlin-to-upstream application for:
+
+- packed text/array content, binary data, maps, and owner-first nested types;
+- lib0 values including `undefined`, null, negative zero, special floating
+  point values, signed 64-bit BigInt values, and object property order;
+- origin/right-origin anchors, inherited parents, out-of-order dependencies,
+  duplicate delivery, and multi-client convergence;
+- rich-text markers, overlapping formatting, embeds, format removal,
+  snapshots, and standard root transaction update events;
+- live XML ownership, attributes, formatted `Y.XmlText`, root
+  pre-materialization, cross-client content, and deletion;
+- direct/default/optioned subdocuments, duplicate GUID instances, lifecycle
+  events, text/XML-text placement, and insert-before-delete sequences;
+- delete sets, GC versus Skip semantics, and large `ContentDeleted`/GC ranges;
+- genuine update V2 streams, format conversion, merge/diff/state-vector
+  operations, and V2 event payloads;
+- baseline plus nested incremental merges, including explicit and inherited
+  parent refs and root names that resemble internal aliases.
+
+Verifier regression tests ensure that empty subdocument-delete sequences and a
+matching GUID stored at the wrong location are rejected.
+
+`generate-differential-fuzz.mjs` additionally creates 500 deterministic seeds
+of concurrent array, text, and map operations across three Yjs clients. The
+Kotlin `YjsDifferentialFuzzTest` applies every shuffled update sequence and
+compares the final state with the upstream oracle.
+
+## Fixture policy
+
+`generate-fixtures.mjs` is the source of generated fixtures. Hand-authored
+Skip/GC bytes are documented next to their generation because they express
+protocol states that normal public Yjs operations do not emit directly. CI
+regenerates fixtures and fails if the working tree changes.
+
+## Scope and remaining gaps
+
+The standard writer is lossless-first. Unsupported Kotlin-only shapes use the
+private `YKS\x03` envelope instead of silently dropping data. JavaScript Yjs
+cannot apply that envelope. Current private cases include compact/static XML,
+root-fragment attributes, pre-populated detached child-before-owner types, and
+nonstandard subdocument options such as `collectionId` or suggestion metadata.
+
+Root XML kind and a root element node name are absent from Yjs wire, so an
+ambiguous receiver must pre-materialize the expected root. `Y.XmlHook` does not
+yet have a fully matching public Kotlin map-style surface.
+
+The fixture scenarios and seeded differential test are not a production-scale
+benchmark or adversarial fuzzer; applications should still add fixtures for
+their own mutation and update-delivery patterns.

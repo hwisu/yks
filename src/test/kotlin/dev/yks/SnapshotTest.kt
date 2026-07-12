@@ -290,7 +290,7 @@ class SnapshotTest {
                 .insertEmbed(mapOf("image" to "one")),
             typeTextToDeltaSnapshot(text, initial),
         )
-        assertEquals("hi\uFFFC", typeTextToStringSnapshot(text, initial))
+        assertEquals("hi", typeTextToStringSnapshot(text, initial))
         assertEquals(listOf("h", "i", mapOf("image" to "one")), typeTextToArraySnapshot(text, initial))
         assertEquals("en", text.getAttribute("lang", initial))
         assertTrue(text.hasAttribute("lang", initial))
@@ -310,7 +310,7 @@ class SnapshotTest {
         assertEquals(listOf("b", "c"), typeArrayToArraySnapshot(array, updated))
         assertEquals("new-list", array.getAttr("role", updated))
         assertEquals(YTextDelta().insert("h").insertEmbed(mapOf("image" to "one")), typeTextToDeltaSnapshot(text, updated))
-        assertEquals("h\uFFFC", typeTextToStringSnapshot(text, updated))
+        assertEquals("h", typeTextToStringSnapshot(text, updated))
         assertEquals(listOf("h", mapOf("image" to "one")), typeTextToArraySnapshot(text, updated))
         assertFalse(text.hasAttr("lang", updated))
         assertEquals(listOf("new"), typeXmlFragmentToJsonSnapshot(xml, updated))

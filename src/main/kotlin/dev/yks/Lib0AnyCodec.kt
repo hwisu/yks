@@ -17,7 +17,8 @@ internal data object Lib0Undefined
 
 internal fun writeLib0Any(encoder: BinaryEncoder, value: Any?) {
     when (value) {
-        Lib0Undefined -> encoder.writeByte(LIB0_UNDEFINED)
+        Lib0Undefined,
+        YValue.Undefined -> encoder.writeByte(LIB0_UNDEFINED)
         null -> encoder.writeByte(LIB0_NULL)
         is Boolean -> encoder.writeByte(if (value) LIB0_TRUE else LIB0_FALSE)
         is Byte,
@@ -29,6 +30,10 @@ internal fun writeLib0Any(encoder: BinaryEncoder, value: Any?) {
         is java.math.BigInteger -> {
             encoder.writeByte(LIB0_BIGINT)
             encoder.writeInt64(value.longValueExact())
+        }
+        is YValue.BigIntNumber -> {
+            encoder.writeByte(LIB0_BIGINT)
+            encoder.writeInt64(value.value.longValueExact())
         }
         is String -> {
             encoder.writeByte(LIB0_STRING)
@@ -104,7 +109,9 @@ private fun String.jsArrayIndex(): Long? {
 internal fun readLib0Any(decoder: BinaryDecoder): Any? = when (val tag = decoder.readByte()) {
     LIB0_UNDEFINED -> Lib0Undefined
     LIB0_NULL -> null
-    LIB0_INTEGER -> decoder.readLib0VarInt()
+    LIB0_INTEGER -> decoder.readLib0VarIntWithSign().let { (value, negative) ->
+        if (value == 0L && negative) -0.0 else value
+    }
     LIB0_FLOAT32 -> decoder.readFloat32().toDouble()
     LIB0_FLOAT64 -> decoder.readFloat64()
     LIB0_BIGINT -> java.math.BigInteger.valueOf(decoder.readInt64())

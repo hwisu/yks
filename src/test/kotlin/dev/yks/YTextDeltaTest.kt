@@ -18,6 +18,39 @@ class YTextDeltaTest {
     }
 
     @Test
+    fun omittedInsertAttributesInheritFormattingWhileExplicitEmptyAttributesClearIt() {
+        val doc = YDoc(clientId = 1)
+        val inherited = doc.getText("inherited")
+        val cleared = doc.getText("cleared")
+        inherited.insert(0, "ab", mapOf("bold" to true))
+        cleared.insert(0, "ab", mapOf("bold" to true))
+
+        inherited.insert(1, "X")
+        cleared.insert(1, "X", emptyMap())
+
+        assertEquals(YTextDelta().insert("aXb", mapOf("bold" to true)), inherited.toDelta())
+        assertEquals(
+            YTextDelta()
+                .insert("a", mapOf("bold" to true))
+                .insert("X")
+                .insert("b", mapOf("bold" to true)),
+            cleared.toDelta(),
+        )
+
+        val embedText = doc.getText("embed")
+        val embed = mapOf("image" to "x")
+        embedText.insert(0, "ab", mapOf("bold" to true))
+        embedText.insertEmbed(1, embed)
+        assertEquals(
+            YTextDelta()
+                .insert("a", mapOf("bold" to true))
+                .insertEmbed(embed)
+                .insert("b", mapOf("bold" to true)),
+            embedText.toDelta(),
+        )
+    }
+
+    @Test
     fun formatAppliesAndClearsAttributesAcrossRanges() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("body")
@@ -105,7 +138,7 @@ class YTextDeltaTest {
         text.insertEmbed(3, mapOf("image" to "hero"), mapOf("alt" to "Hero"), origin = "insert-embed")
         text.deleteText(0, 1, origin = "delete-text")
 
-        assertEquals("bc\uFFFCd", text.toString())
+        assertEquals("bcd", text.toString())
         assertEquals(
             YTextDelta()
                 .insert("bc", mapOf("italic" to true))
@@ -346,7 +379,7 @@ class YTextDeltaTest {
         text.insert(2, "b")
 
         assertEquals(3, text.length)
-        assertEquals("a\uFFFCb", text.toString())
+        assertEquals("ab", text.toString())
         assertEquals(YTextDelta().retain(1).insertEmbed(image, mapOf("alt" to "hero")), events.first())
         assertEquals(
             YTextDelta()
@@ -399,7 +432,7 @@ class YTextDeltaTest {
         insertContentHelper(text, insertPosition, listOf(nested, "!"), mapOf("tail" to true), origin = "helper")
 
         assertEquals(5, insertPosition.index)
-        assertEquals("aX\uFFFC\uFFFC!bc", text.toString())
+        assertEquals("aX!bc", text.toString())
         assertSame(nested, text.get(3))
         assertEquals(
             YTextDelta()
@@ -455,7 +488,7 @@ class YTextDeltaTest {
 
         text.insert(0, listOf("hi", mention, '!', " ok"), mapOf("source" to "mixed"))
 
-        assertEquals("hi\uFFFC! ok", text.toString())
+        assertEquals("hi! ok", text.toString())
         assertEquals(
             YTextDelta()
                 .insert("hi", mapOf("source" to "mixed"))
@@ -511,7 +544,7 @@ class YTextDeltaTest {
         right.applyUpdate(left.encodeStateAsUpdate())
 
         assertEquals(listOf("s", "t", "a", "r", "t", "-", "m", "i", "d", "d", "l", "e", "-", mapOf("kind" to "embed"), "!"), right.getText("body").toArray())
-        assertEquals("start-middle-\uFFFC!", right.getText("body").toString())
+        assertEquals("start-middle-!", right.getText("body").toString())
     }
 
     @Test
@@ -598,7 +631,7 @@ class YTextDeltaTest {
         )
         right.applyUpdate(left.encodeStateAsUpdate())
 
-        assertEquals("before\uFFFCafter", right.getText("body").toString())
+        assertEquals("beforeafter", right.getText("body").toString())
         assertEquals(left.getText("body").toDelta(), right.getText("body").toDelta())
     }
 
@@ -615,7 +648,7 @@ class YTextDeltaTest {
                 .insert("b", mapOf("bold" to true)),
         )
 
-        assertEquals("a\uFFFCb", text.toString())
+        assertEquals("ab", text.toString())
         assertEquals(
             YTextDelta()
                 .insert("a", mapOf("bold" to true))
@@ -633,7 +666,7 @@ class YTextDeltaTest {
 
         text.applyDelta(YTextDelta(listOf(YTextDeltaOp(insert = listOf("hi", mention, '!', " ok")))))
 
-        assertEquals("hi\uFFFC! ok", text.toString())
+        assertEquals("hi! ok", text.toString())
         assertEquals(listOf("h", "i", mention, "!", " ", "o", "k"), text.toArray())
     }
 

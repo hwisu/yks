@@ -157,10 +157,7 @@ class PublicApiParityTest {
         assertSame(root, source.get())
         assertSame(root, source.share[""])
         assertEquals(setOf(""), source.rootNames())
-        assertEquals(mapOf("" to mapOf(
-            "children" to listOf("hello"),
-            "attrs" to mapOf("kind" to "default"),
-        )), source.toJSON())
+        assertEquals(mapOf("" to listOf("hello")), source.toJSON())
 
         val target = createDocFromUpdate(source.encodeStateAsUpdate())
 
@@ -177,9 +174,8 @@ class PublicApiParityTest {
 
         doc.observeAfterTransactions { transaction ->
             if (transaction.origin == "test") {
-                val rootJson = doc.toJSON()[""] as Map<*, *>
-                val children = rootJson["children"] as List<*>
-                renderedSizes.add(children.size)
+                val rootJson = doc.toJSON()[""] as List<*>
+                renderedSizes.add(rootJson.size)
             }
         }
 

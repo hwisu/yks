@@ -12,6 +12,23 @@ if (input == null) {
   throw new Error('usage: npm run interop:verify -- <update.bin> [scenario]')
 }
 
+const embeddedSubdoc = (doc, scenario) => {
+  const visibleContentDoc = type => {
+    for (let item = type._start; item != null; item = item.right) {
+      if (!item.deleted && item.content?.doc instanceof Y.Doc) return item.content.doc
+    }
+    return undefined
+  }
+  if (scenario === 'subdoc-text') {
+    return visibleContentDoc(doc.getText('body'))
+  }
+  const paragraph = doc.getXmlFragment('xml').get(0)
+  assert.ok(paragraph instanceof Y.XmlElement, 'subdocument must be nested in the expected XML element')
+  const text = paragraph.get(0)
+  assert.ok(text instanceof Y.XmlText, 'subdocument must be nested in the expected XML text')
+  return visibleContentDoc(text)
+}
+
 if (scenario === 'subdoc-text' || scenario === 'subdoc-xml-text') {
   const actual = new Y.Doc()
   if (scenario === 'subdoc-text') actual.getText('body')
@@ -20,6 +37,7 @@ if (scenario === 'subdoc-text' || scenario === 'subdoc-xml-text') {
   assert.ok(child instanceof Y.Doc)
   assert.equal(child.guid, scenario === 'subdoc-text' ? 'text-child' : 'xml-child')
   assert.deepEqual([...actual.subdocs], [child])
+  assert.equal(embeddedSubdoc(actual, scenario), child, 'subdocument must be stored at the expected text position')
 } else if (scenario === 'hello') {
   const expected = readHelloExpected()
   const actual = applyAndDescribe(fs.readFileSync(input))
@@ -32,7 +50,7 @@ if (scenario === 'subdoc-text' || scenario === 'subdoc-xml-text') {
   const actual = new Y.Doc()
   Y.applyUpdate(actual, fs.readFileSync(input))
   materializeScenario(actual, scenario)
-  if (scenario !== 'subdoc-map' && scenario !== 'subdoc-array') {
+  if (scenario !== 'subdoc-map' && scenario !== 'subdoc-array' && scenario !== 'subdoc-array-default') {
     assert.deepEqual(actual.toJSON(), expected.toJSON())
   }
   assert.deepEqual(Y.encodeStateVector(actual), Y.encodeStateVector(expected))
@@ -63,5 +81,12 @@ if (scenario === 'subdoc-text' || scenario === 'subdoc-xml-text') {
     assert.equal(child.shouldLoad, true)
     assert.equal(child.autoLoad, true)
     assert.deepEqual(child.meta, { role: 'child' })
+  }
+  if (scenario === 'subdoc-array-default') {
+    const child = actual.getArray('subs').get(0)
+    assert.ok(child instanceof Y.Doc)
+    assert.equal(child.guid, 'child')
+    assert.equal(child.shouldLoad, false)
+    assert.equal(child.autoLoad, false)
   }
 }

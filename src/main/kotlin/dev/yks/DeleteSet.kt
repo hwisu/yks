@@ -6,7 +6,7 @@ data class DeleteRange(val clock: Long, val length: Long) {
         require(length > 0) { "length must be positive" }
     }
 
-    val end: Long get() = clock + length
+    val end: Long = checkedClockAdd(clock, length, "delete range end")
 
     fun contains(clock: Long): Boolean = clock >= this.clock && clock < end
 }

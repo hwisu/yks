@@ -6,6 +6,7 @@ export const scenarioNames = [
   'map',
   'nested-map',
   'nested-map-update',
+  'nested-map-replace-update',
   'nested-text',
   'formatted-text',
   'formatted-embed',
@@ -14,6 +15,7 @@ export const scenarioNames = [
   'xml-formatted',
   'subdoc-map',
   'subdoc-array',
+  'subdoc-array-default',
   'text-delete',
   'xml-delete',
   'subdoc-delete',
@@ -57,6 +59,15 @@ export const createScenarioDocument = name => {
       root.set('profile', profile)
       profile.set('name', 'Ada')
       profile.set('city', 'Seoul')
+      break
+    }
+    case 'nested-map-replace-update': {
+      const root = doc.getMap('root')
+      const profile = new Y.Map()
+      root.set('profile', profile)
+      profile.set('name', 'Ada')
+      profile.set('city', 'Seoul')
+      profile.set('name', 'Grace')
       break
     }
     case 'nested-text': {
@@ -106,6 +117,9 @@ export const createScenarioDocument = name => {
           meta: { role: 'child' },
         }),
       ])
+      break
+    case 'subdoc-array-default':
+      doc.getArray('subs').insert(0, [new Y.Doc({ guid: 'child' })])
       break
     case 'text-delete': {
       const text = doc.getText('body')
@@ -180,6 +194,7 @@ export const materializeScenario = (doc, name) => {
       return doc.getMap('meta')
     case 'nested-map':
     case 'nested-map-update':
+    case 'nested-map-replace-update':
       return doc.getMap('root')
     case 'nested-text':
       return doc.getArray('nodes')
@@ -193,6 +208,7 @@ export const materializeScenario = (doc, name) => {
     case 'subdoc-map':
       return doc.getMap('subs')
     case 'subdoc-array':
+    case 'subdoc-array-default':
       return doc.getArray('subs')
     case 'text-delete':
       return doc.getText('body')

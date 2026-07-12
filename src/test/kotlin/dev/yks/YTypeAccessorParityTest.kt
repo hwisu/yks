@@ -255,7 +255,7 @@ class YTypeAccessorParityTest {
         element.insert(-1, listOf(YXmlText("x")))
 
         assertEquals(listOf("x", "a"), array.toArray())
-        assertEquals("\uFFFCyxa", text.toString())
+        assertEquals("yxa", text.toString())
         assertEquals("xa", xml.toString())
         assertEquals("<p>xa</p>", element.toString())
         assertEquals(listOf<Any?>(null, null, "insert-text", "insert-embed", null), origins)

@@ -1020,7 +1020,9 @@ class YjsV1InteropTest {
 
         val loadOnlySubdoc = YDoc(clientId = 1)
         loadOnlySubdoc.getArray("subs").push(YDoc(guid = "child"))
-        assertLegacyYks(encodeStateAsUpdate(loadOnlySubdoc))
+        val loadOnlyUpdate = encodeStateAsUpdate(loadOnlySubdoc)
+        assertStandardV1(loadOnlyUpdate)
+        assertUpstreamAppliesUpdate(loadOnlyUpdate, "subdoc-array-default")
     }
 
     @Test
@@ -1109,7 +1111,7 @@ class YjsV1InteropTest {
     private fun assertLegacyYks(update: ByteArray) {
         assertTrue(
             update.size >= 4 && update[0] == 'Y'.code.toByte() && update[1] == 'K'.code.toByte() &&
-                update[2] == 'S'.code.toByte() && update[3] in setOf(1.toByte(), 2.toByte()),
+                update[2] == 'S'.code.toByte() && update[3] in setOf(1.toByte(), 2.toByte(), 3.toByte()),
         )
     }
 

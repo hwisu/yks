@@ -1,7 +1,14 @@
 package dev.yks
 
+import java.math.BigInteger
+
 sealed interface YValue {
     fun toAny(): Any?
+
+    /** Distinct from [Null], matching JavaScript/lib0 `undefined`. */
+    data object Undefined : YValue {
+        override fun toAny(): Any = this
+    }
 
     data object Null : YValue {
         override fun toAny(): Any? = null
@@ -16,6 +23,11 @@ sealed interface YValue {
     }
 
     data class DoubleNumber(val value: Double) : YValue {
+        override fun toAny(): Any = value
+    }
+
+    /** A signed integer carried by lib0's 64-bit bigint representation. */
+    data class BigIntNumber(val value: BigInteger) : YValue {
         override fun toAny(): Any = value
     }
 
@@ -72,7 +84,7 @@ sealed interface YValue {
     companion object {
         fun from(value: Any?): YValue = when (value) {
             null -> Null
-            Lib0Undefined -> Null
+            Lib0Undefined -> Undefined
             is YValue -> value
             is AbstractYType -> TypeRef(value.kind, value.name)
             is YDoc -> SubdocRef(
@@ -90,6 +102,7 @@ sealed interface YValue {
             is Short -> LongNumber(value.toLong())
             is Int -> LongNumber(value.toLong())
             is Long -> LongNumber(value)
+            is BigInteger -> BigIntNumber(value)
             is Float -> DoubleNumber(value.toDouble())
             is Double -> DoubleNumber(value)
             is String -> StringValue(value)
@@ -99,7 +112,7 @@ sealed interface YValue {
             is Map<*, *> -> MapValue(value.entries.associate { (key, nested) ->
                 require(key is String) { "YValue map keys must be strings" }
                 key to from(nested)
-            }.toSortedMap())
+            })
             else -> error("unsupported YValue type: ${value::class.qualifiedName}")
         }
     }
@@ -107,6 +120,7 @@ sealed interface YValue {
 
 fun writeYValue(encoder: BinaryEncoder, value: YValue) {
     when (value) {
+        YValue.Undefined -> encoder.writeByte(11)
         YValue.Null -> encoder.writeByte(0)
         is YValue.Bool -> encoder.writeByte(if (value.value) 2 else 1)
         is YValue.LongNumber -> {
@@ -118,6 +132,10 @@ fun writeYValue(encoder: BinaryEncoder, value: YValue) {
             java.lang.Double.doubleToRawLongBits(value.value).let { bits ->
                 repeat(Long.SIZE_BYTES) { index -> encoder.writeByte(((bits ushr (index * 8)) and 0xff).toInt()) }
             }
+        }
+        is YValue.BigIntNumber -> {
+            encoder.writeByte(12)
+            encoder.writeString(value.value.toString())
         }
         is YValue.StringValue -> {
             encoder.writeByte(5)
@@ -135,7 +153,7 @@ fun writeYValue(encoder: BinaryEncoder, value: YValue) {
         is YValue.MapValue -> {
             encoder.writeByte(8)
             encoder.writeVarUInt(value.value.size.toLong())
-            value.value.toSortedMap().forEach { (key, nested) ->
+            value.value.forEach { (key, nested) ->
                 encoder.writeString(key)
                 writeYValue(encoder, nested)
             }
@@ -183,7 +201,7 @@ fun readYValue(decoder: BinaryDecoder): YValue = when (val tag = decoder.readByt
             repeat(size) {
                 put(decoder.readString(), readYValue(decoder))
             }
-        }.toSortedMap())
+        })
     }
     9 -> {
         val ordinal = decoder.readByte()
@@ -200,5 +218,7 @@ fun readYValue(decoder: BinaryDecoder): YValue = when (val tag = decoder.readByt
         meta = readYValue(decoder),
         isSuggestionDoc = decoder.readBoolean(),
     )
+    11 -> YValue.Undefined
+    12 -> YValue.BigIntNumber(decoder.readString().toBigInteger())
     else -> error("unknown YValue tag: $tag")
 }

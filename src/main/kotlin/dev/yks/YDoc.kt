@@ -684,12 +684,30 @@ class YDoc(
     ): List<StoreItem> {
         val items = mutableListOf<StoreItem>()
         idSet.ranges().forEach { (client, range) ->
-            for (clock in range.clock until range.end) {
-                val item = getItem(Id(client, clock))
-                if (item != null && predicate(item)) {
-                    items.add(if (deletedOverride == null) item.copy() else item.copy(deleted = deletedOverride))
+            store.allItems()
+                .filter { item ->
+                    item.id.client == client &&
+                        item.id.clock < range.end &&
+                        range.clock < checkedClockAdd(item.id.clock, item.length) &&
+                        predicate(item)
                 }
-            }
+                .forEach { item ->
+                    val itemEnd = checkedClockAdd(item.id.clock, item.length)
+                    val start = maxOf(item.id.clock, range.clock)
+                    val end = minOf(itemEnd, range.end)
+                    val selected = if (start == item.id.clock && end == itemEnd) {
+                        item.copy()
+                    } else {
+                        val deleted = item.content as? ItemContent.Deleted
+                            ?: error("id range splits unsupported store item at ${item.id}")
+                        item.copy(
+                            id = Id(client, start),
+                            origin = if (item.isGc || start == item.id.clock) item.origin else Id(client, start - 1),
+                            content = deleted.copy(length = end - start),
+                        )
+                    }
+                    items.add(if (deletedOverride == null) selected else selected.copy(deleted = deletedOverride))
+                }
         }
         return items
     }
@@ -781,6 +799,7 @@ class YDoc(
         is Short -> YValue.LongNumber(value.toLong())
         is Int -> YValue.LongNumber(value.toLong())
         is Long -> YValue.LongNumber(value)
+        is java.math.BigInteger -> YValue.BigIntNumber(value)
         is Float -> YValue.DoubleNumber(value.toDouble())
         is Double -> YValue.DoubleNumber(value)
         is String -> YValue.StringValue(value)
@@ -790,7 +809,7 @@ class YDoc(
         is Map<*, *> -> YValue.MapValue(value.entries.associate { (key, nested) ->
             require(key is String) { "YValue map keys must be strings" }
             key to storeAnyValue(nested)
-        }.toSortedMap())
+        })
         else -> error("unsupported YValue type: ${value::class.qualifiedName}")
     }
 
@@ -901,13 +920,13 @@ class YDoc(
     internal fun mapItemOrder(parent: String, key: String): List<StoreItem> {
         val entries = store.mapEntries(parent, key)
         if (entries.isEmpty()) return emptyList()
-        val knownIds = entries.map { item -> item.id }.toSet()
         val remaining = entries.sortedBy { item -> item.id }.toMutableList()
         val ordered = mutableListOf<StoreItem>()
 
         while (remaining.isNotEmpty()) {
             val nextIndex = remaining.indexOfFirst { item ->
-                item.origin == null || item.origin !in knownIds || ordered.any { existing -> existing.id == item.origin }
+                val owner = item.origin?.let { origin -> entries.firstOrNull { existing -> existing.containsClockId(origin) } }
+                owner == null || ordered.any { existing -> existing.id == owner.id }
             }.takeIf { index -> index >= 0 } ?: 0
             insertMapItem(ordered, remaining.removeAt(nextIndex))
         }
@@ -917,16 +936,16 @@ class YDoc(
 
     private fun insertMapItem(ordered: MutableList<StoreItem>, item: StoreItem) {
         var leftIndex = item.origin?.let { origin ->
-            ordered.indexOfFirst { existing -> existing.id == origin }.takeIf { index -> index >= 0 }
+            ordered.indexOfFirst { existing -> existing.containsClockId(origin) }.takeIf { index -> index >= 0 }
         } ?: -1
         var scanIndex = leftIndex + 1
-        val conflictingItems = linkedSetOf<Id>()
-        val itemsBeforeOrigin = linkedSetOf<Id>()
+        val conflictingItems = linkedSetOf<StoreItem>()
+        val itemsBeforeOrigin = linkedSetOf<StoreItem>()
 
         while (scanIndex < ordered.size) {
             val other = ordered[scanIndex]
-            itemsBeforeOrigin.add(other.id)
-            conflictingItems.add(other.id)
+            itemsBeforeOrigin.add(other)
+            conflictingItems.add(other)
             when {
                 compareIDs(item.origin, other.origin) -> {
                     if (other.id.client < item.id.client) {
@@ -936,8 +955,8 @@ class YDoc(
                         break
                     }
                 }
-                other.origin != null && other.origin in itemsBeforeOrigin -> {
-                    if (other.origin !in conflictingItems) {
+                other.origin != null && itemsBeforeOrigin.any { before -> before.containsClockId(other.origin) } -> {
+                    if (conflictingItems.none { conflicting -> conflicting.containsClockId(other.origin) }) {
                         leftIndex = scanIndex
                         conflictingItems.clear()
                     }
@@ -1007,7 +1026,7 @@ class YDoc(
         textItemsAtSnapshot(type, snapshot).joinToString(separator = "") { item ->
             when (val content = item.content) {
                 is ItemContent.Text -> content.value
-                is ItemContent.TextEmbed -> "\uFFFC"
+                is ItemContent.TextEmbed -> ""
                 else -> ""
             }
         }
@@ -1160,13 +1179,25 @@ class YDoc(
         transact {
             val restoredByOriginal = mutableMapOf<Id, Id>()
             val restoredPairs = mutableListOf<Pair<StoreItem, StoreItem>>()
+            val previousRestoredByParent = mutableMapOf<Pair<String, String?>, Pair<Int, Id>>()
             sortedItems.forEach { original ->
                 val source = original.item
                 val mapOrigin = source.parentSub?.let { key -> currentMapItem(source.parent, key)?.id }
+                val sourcePosition = originalPositions[source.id]
+                val parentKey = source.parent to source.parentSub
+                val contiguousOrigin = if (source.parentSub == null && sourcePosition != null) {
+                    previousRestoredByParent[parentKey]
+                        ?.takeIf { (previousPosition, _) -> sourcePosition == previousPosition + 1 }
+                        ?.second
+                } else {
+                    null
+                }
                 val item = StoreItem(
                     id = nextId(),
                     origin = if (source.parentSub != null) {
                         mapOrigin
+                    } else if (contiguousOrigin != null) {
+                        contiguousOrigin
                     } else if (source.content is ItemContent.NativeTextFormat) {
                         source.origin?.let { restoredByOriginal[it] } ?: source.origin?.let(::followRedone)
                     } else if (original.anchorAfterOriginal) {
@@ -1176,6 +1207,8 @@ class YDoc(
                     },
                     rightOrigin = if (source.parentSub != null) {
                         null
+                    } else if (contiguousOrigin != null) {
+                        inferRightOrigin(source)
                     } else if (source.content is ItemContent.NativeTextFormat) {
                         source.rightOrigin?.let { restoredByOriginal[it] } ?: source.rightOrigin?.let(::followRedone)
                     } else if (original.anchorAfterOriginal) {
@@ -1193,6 +1226,9 @@ class YDoc(
                 redoneByOriginal[source.id] = item.id
                 restoredPairs.add(source to item)
                 restored.add(item)
+                if (sourcePosition != null) {
+                    previousRestoredByParent[parentKey] = sourcePosition to item.id
+                }
                 currentTransaction?.addedItems?.add(item)
                 currentTransaction?.changedParents?.add(item.parent)
             }
@@ -1260,11 +1296,13 @@ class YDoc(
         val expanded = deleteSet.copy()
         val queue = ArrayDeque<StoreItem>()
         deleteSet.clients.forEach { (client, ranges) ->
-            ranges.forEach { range ->
-                for (clock in range.clock until range.end) {
-                    store.getStoreItem(Id(client, clock))?.let(queue::add)
+            store.allItems()
+                .filter { item ->
+                    item.id.client == client && ranges.any { range ->
+                        item.id.clock < range.end && range.clock < checkedClockAdd(item.id.clock, item.length)
+                    }
                 }
-            }
+                .forEach(queue::add)
         }
 
         val visited = linkedSetOf<Id>()
@@ -1339,39 +1377,42 @@ class YDoc(
         if (gcAnchor != null) {
             return item.asRemoteGc()
         }
-        item.parent.yjsNestedParentIdOrNull()?.let { parentItemId ->
-            val parentItem = store.getStoreItem(parentItemId) ?: return item
-            if (parentItem.isGc) return item.asRemoteGc()
-            val ref = parentItem.content.directTypeRef() ?: return item
-            val kind = if (item.parentSub != null) RootKind.Map else ref.kind
-            return item.copy(
-                parent = ref.name,
-                content = item.content.withRemoteParentKind(kind),
-                deleted = item.deleted || parentItem.deleted,
-            )
-        }
-        val anchorId = item.parent.yjsInheritedParentIdOrNull()
-            ?: return knownParentKinds()[item.parent]?.let { kind ->
+        when (val unresolved = item.unresolvedParent) {
+            is UnresolvedYjsParent.Nested -> {
+                val parentItem = store.getStoreItem(unresolved.id) ?: return item
+                if (parentItem.isGc) return item.asRemoteGc()
+                val ref = parentItem.content.directTypeRef() ?: return item
+                val kind = if (item.parentSub != null) RootKind.Map else ref.kind
+                return item.copy(
+                    parent = ref.name,
+                    content = item.content.withRemoteParentKind(kind),
+                    deleted = item.deleted || parentItem.deleted,
+                    unresolvedParent = null,
+                )
+            }
+            is UnresolvedYjsParent.Inherit -> {
+                val anchor = store.getStoreItem(unresolved.id) ?: return item
+                if (anchor.isGc) return item.asRemoteGc()
+                val inheritedKind = when {
+                    anchor.parentSub != null -> RootKind.Map
+                    anchor.content is ItemContent.Deleted -> item.content.kind
+                    else -> anchor.content.kind
+                }
+                return item.copy(
+                    parent = anchor.parent,
+                    parentSub = anchor.parentSub,
+                    content = item.content.withRemoteParentKind(inheritedKind),
+                    unresolvedParent = null,
+                )
+            }
+            null -> return knownParentKinds()[item.parent]?.let { kind ->
                 item.copy(
                     content = item.content.withRemoteParentKind(
                         if (item.parentSub != null) RootKind.Map else kind,
                     ),
                 )
             } ?: item
-        val anchor = store.getStoreItem(anchorId) ?: return item
-        if (anchor.isGc) {
-            return item.asRemoteGc()
         }
-        val inheritedKind = when {
-            item.parentSub != null -> RootKind.Map
-            anchor.content is ItemContent.Deleted -> item.content.kind
-            else -> anchor.content.kind
-        }
-        return item.copy(
-            parent = anchor.parent,
-            parentSub = anchor.parentSub,
-            content = item.content.withRemoteParentKind(inheritedKind),
-        )
     }
 
     private fun deletePreviousMapCurrentIfSuperseded(item: StoreItem, previousMapCurrent: StoreItem?) {
@@ -1385,7 +1426,7 @@ class YDoc(
 
     private fun canIntegrate(item: StoreItem): Boolean {
         val textFormat = item.content as? ItemContent.TextFormat
-        if (item.parent.yjsNestedParentIdOrNull() != null || item.parent.yjsInheritedParentIdOrNull() != null) {
+        if (item.unresolvedParent != null) {
             return false
         }
         return (!item.requiresClockContinuity || item.id.clock == store.getClock(item.id.client)) &&
@@ -1402,7 +1443,8 @@ class YDoc(
     private fun shouldReapplyTextFormatsAfter(item: StoreItem): Boolean =
         item.content.isTextFormatControl() ||
             item.content.isTextCountable() &&
-            sequence(item.parent).any { candidate ->
+            store.allItems().any { candidate ->
+                candidate.parent == item.parent &&
                 !candidate.deleted && candidate.content is ItemContent.NativeTextFormat
             }
 
@@ -1504,7 +1546,7 @@ class YDoc(
             }
             item.origin?.let(::recordIfMissing)
             item.rightOrigin?.let(::recordIfMissing)
-            item.parent.yjsNestedParentIdOrNull()?.let(::recordIfMissing)
+            item.unresolvedParent?.id?.let(::recordIfMissing)
             (item.content as? ItemContent.TextFormat)?.target?.let(::recordIfMissing)
         }
         return missing.toSortedMap()
@@ -1573,7 +1615,6 @@ class YDoc(
                 store.parentKinds(),
                 allowV1 = transaction.addedItems.all { item ->
                     !item.parent.startsWith("__yks_nested__:") &&
-                        !item.parent.startsWith("__yjs_nested__:") &&
                         item.content !is ItemContent.XmlType &&
                         (item.content as? ItemContent.Value)?.value !is YValue.TypeRef &&
                         (item.content as? ItemContent.MapEntry)?.value !is YValue.TypeRef
@@ -1815,6 +1856,13 @@ class YDoc(
 
     private fun captureParentBefore(parent: String, kindHint: RootKind) {
         val transaction = currentTransaction ?: return
+        val existing = transaction.beforeParents[parent]
+        if (
+            (kindHint == RootKind.Map && existing?.mapSnapshot() != null) ||
+            (kindHint != RootKind.Map && existing?.sequenceSnapshot()?.kind == kindHint)
+        ) {
+            return
+        }
         val captured = when (kindHint) {
             RootKind.Map -> ParentSnapshot.MapSnapshot(visibleMap(parent))
             RootKind.Array,
@@ -1824,7 +1872,6 @@ class YDoc(
             RootKind.XmlHook,
             RootKind.XmlText -> ParentSnapshot.SequenceSnapshot(kindHint, visibleSequence(parent))
         }
-        val existing = transaction.beforeParents[parent]
         transaction.beforeParents[parent] = existing?.merge(captured) ?: captured
     }
 
@@ -2357,8 +2404,15 @@ class YDoc(
 
     private fun restorePositions(items: Iterable<RestoreItem>): Map<Id, Int> {
         val positions = mutableMapOf<Id, Int>()
-        items.map { it.item.parent }.distinct().forEach { parent ->
-            sequence(parent).forEachIndexed { index, item -> positions[item.id] = index }
+        items.groupBy { restore -> restore.item.parent }.forEach { (parent, restores) ->
+            val restoredIds = restores.mapTo(hashSetOf()) { restore -> restore.item.id }
+            var position = 0
+            sequence(parent).forEach { item ->
+                if (!item.deleted || item.id in restoredIds) {
+                    if (item.id in restoredIds) positions[item.id] = position
+                    position++
+                }
+            }
         }
         return positions
     }
@@ -2638,22 +2692,6 @@ internal fun ItemContent.directTypeRef(): YValue.TypeRef? = when (this) {
     is ItemContent.Deleted -> null
 }
 
-private fun String.yjsNestedParentIdOrNull(): Id? {
-    val prefix = "__yjs_nested__:"
-    if (!startsWith(prefix)) return null
-    val parts = removePrefix(prefix).split(':')
-    if (parts.size != 2) return null
-    return Id(parts[0].toLongOrNull() ?: return null, parts[1].toLongOrNull() ?: return null)
-}
-
-private fun String.yjsInheritedParentIdOrNull(): Id? {
-    val prefix = "__yjs_inherit__:"
-    if (!startsWith(prefix)) return null
-    val parts = removePrefix(prefix).split(':')
-    if (parts.size != 2) return null
-    return Id(parts[0].toLongOrNull() ?: return null, parts[1].toLongOrNull() ?: return null)
-}
-
 private fun ItemContent.withRemoteParentKind(kind: RootKind): ItemContent = when (this) {
     is ItemContent.Value -> when (kind) {
         RootKind.Map -> ItemContent.MapEntry(value)
@@ -2669,7 +2707,7 @@ private fun ItemContent.withRemoteParentKind(kind: RootKind): ItemContent = when
     is ItemContent.NativeTextFormat -> copy(kind = kind)
     is ItemContent.XmlNode -> copy(kind = kind)
     is ItemContent.XmlType -> copy(kind = kind)
-    is ItemContent.Deleted -> ItemContent.Deleted(kind)
+    is ItemContent.Deleted -> copy(kind = kind)
 }
 
 private fun StoreItem.asRemoteGc(): StoreItem = copy(
@@ -2677,10 +2715,16 @@ private fun StoreItem.asRemoteGc(): StoreItem = copy(
     rightOrigin = null,
     parent = "__yjs_gc__:${id.client}",
     parentSub = null,
-    content = ItemContent.Deleted(content.kind),
+    content = ItemContent.Deleted(content.kind, length),
     deleted = true,
     isGc = true,
+    unresolvedParent = null,
 )
+
+private fun StoreItem.containsClockId(id: Id): Boolean =
+    id.client == this.id.client &&
+        id.clock >= this.id.clock &&
+        id.clock < checkedClockAdd(this.id.clock, length)
 
 private val textFormatApplicationOrder: Comparator<StoreItem> =
     compareByDescending<StoreItem> { it.id.client }.thenBy { it.id.clock }

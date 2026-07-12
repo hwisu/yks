@@ -685,28 +685,7 @@ fun intersectUpdateWithContentIdsV2(update: ByteArray, contentIds: ContentIds): 
 
 fun mergeUpdates(updates: List<ByteArray>): ByteArray {
     if (updates.size == 1) return updates.single()
-    val items = linkedMapOf<Id, StoreItem>()
-    val deleteSet = DeleteSet.empty()
-    updates.forEach { update ->
-        val decoded = UpdateCodec.decode(update)
-        decoded.items.forEach { item ->
-            val existing = items[item.id]
-            if (existing == null) {
-                items[item.id] = item
-            } else if (item.deleted) {
-                existing.deleted = true
-            }
-        }
-        deleteSet.addAll(decoded.deleteSet)
-    }
-    deleteSet.clients.forEach { (client, ranges) ->
-        ranges.forEach { range ->
-            items.values
-                .filter { it.id.client == client && range.contains(it.id.clock) }
-                .forEach { it.deleted = true }
-        }
-    }
-    return UpdateCodec.encode(DocumentUpdate(items.values.toList(), deleteSet))
+    return mergeDecodedUpdates(updates.map(UpdateCodec::decode), UpdateCodec::encode)
 }
 
 fun mergeUpdatesV2(updates: List<ByteArray>): ByteArray {
@@ -717,15 +696,28 @@ fun mergeUpdatesV2(updates: List<ByteArray>): ByteArray {
 fun diffUpdate(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
     val stateVector = decodeStateVector(encodedStateVector)
     val decoded = UpdateCodec.decode(update)
-    val filtered = decoded.items.filter { it.id.clock >= (stateVector[it.id.client] ?: 0) }
+    val filtered = decoded.items.mapNotNull { item -> item.sliceFromClock(stateVector[item.id.client] ?: 0) }
     return UpdateCodec.encode(DocumentUpdate(filtered, decoded.deleteSet))
 }
 
 fun diffUpdateV2(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
     val stateVector = decodeStateVector(encodedStateVector)
     val decoded = UpdateCodec.decodeV2(update)
-    val filtered = decoded.items.filter { it.id.clock >= (stateVector[it.id.client] ?: 0) }
+    val filtered = decoded.items.mapNotNull { item -> item.sliceFromClock(stateVector[item.id.client] ?: 0) }
     return UpdateCodec.encodeV2(DocumentUpdate(filtered, decoded.deleteSet))
+}
+
+private fun StoreItem.sliceFromClock(targetClock: Long): StoreItem? {
+    val end = checkedClockAdd(id.clock, length)
+    if (end <= targetClock) return null
+    if (id.clock >= targetClock) return this
+    val deleted = content as? ItemContent.Deleted
+        ?: error("state vector splits unsupported update item at $id:$targetClock")
+    return copy(
+        id = Id(id.client, targetClock),
+        origin = if (isGc) null else Id(id.client, targetClock - 1),
+        content = deleted.copy(length = end - targetClock),
+    )
 }
 
 fun encodeStateVectorFromUpdate(update: ByteArray): ByteArray {
@@ -765,7 +757,111 @@ private fun mergeDecodedUpdates(
                 .forEach { it.deleted = true }
         }
     }
-    return encode(DocumentUpdate(items.values.toList(), deleteSet))
+    val parentItemIds = updates.fold(linkedMapOf<String, Id>()) { merged, update ->
+        merged.apply { putAll(update.parentItemIds) }
+    }
+    val parentKinds = updates.fold(linkedMapOf<String, RootKind>()) { merged, update ->
+        merged.apply { putAll(update.parentKinds) }
+    }
+    return encode(
+        DocumentUpdate(
+            items = items.values.toList().resolveSyntheticParentsFromUnion(),
+            deleteSet = deleteSet,
+            parentItemIds = parentItemIds,
+            parentKinds = parentKinds,
+        ),
+    )
+}
+
+/**
+ * A standalone incremental Yjs update may inherit its parent from an origin
+ * that is only present in an earlier update. The decoder preserves that
+ * unresolved relationship as a synthetic parent name. Once updates are
+ * merged, resolve only aliases whose anchor is present in the merged union so
+ * the result can be emitted as a genuine standard update. Aliases without an
+ * anchor deliberately remain untouched for standalone format conversion.
+ */
+private fun List<StoreItem>.resolveSyntheticParentsFromUnion(): List<StoreItem> {
+    if (none { item -> item.unresolvedParent != null }) return this
+
+    val itemsByClient = groupBy { item -> item.id.client }
+        .mapValues { (_, items) -> items.sortedBy { item -> item.id.clock } }
+    val resolved = mutableMapOf<Id, StoreItem>()
+
+    fun containing(id: Id): StoreItem? {
+        val clientItems = itemsByClient[id.client] ?: return null
+        var low = 0
+        var high = clientItems.lastIndex
+        var candidate: StoreItem? = null
+        while (low <= high) {
+            val middle = (low + high) ushr 1
+            val item = clientItems[middle]
+            if (item.id.clock <= id.clock) {
+                candidate = item
+                low = middle + 1
+            } else {
+                high = middle - 1
+            }
+        }
+        return candidate?.takeIf { item -> id.clock < checkedClockAdd(item.id.clock, item.length) }
+    }
+
+    fun resolve(item: StoreItem, seen: Set<Id> = emptySet()): StoreItem {
+        resolved[item.id]?.let { return it }
+        val unresolved = item.unresolvedParent ?: return item
+        if (item.id in seen) return item
+
+        val next = when (unresolved) {
+            is UnresolvedYjsParent.Nested -> {
+                val owner = containing(unresolved.id) ?: return item
+                val ownerRef = owner.content.directTypeRef() ?: return item
+                item.copy(
+                    parent = ownerRef.name,
+                    content = item.content.withResolvedParentKind(ownerRef.kind),
+                    unresolvedParent = null,
+                )
+            }
+            is UnresolvedYjsParent.Inherit -> {
+                val anchor = containing(unresolved.id) ?: return item
+                val resolvedAnchor = resolve(anchor, seen + item.id)
+                if (resolvedAnchor.unresolvedParent != null) return item
+                val parentSub = resolvedAnchor.parentSub
+                val kind = when {
+                    parentSub != null -> RootKind.Map
+                    resolvedAnchor.content is ItemContent.Deleted -> item.content.kind
+                    else -> resolvedAnchor.content.kind
+                }
+                item.copy(
+                    parent = resolvedAnchor.parent,
+                    parentSub = parentSub,
+                    content = item.content.withResolvedParentKind(kind),
+                    unresolvedParent = null,
+                )
+            }
+        }
+        resolved[item.id] = next
+        return next
+    }
+
+    return map { item -> resolve(item) }
+}
+
+private fun ItemContent.withResolvedParentKind(kind: RootKind): ItemContent = when (this) {
+    is ItemContent.Value -> when (kind) {
+        RootKind.Map -> ItemContent.MapEntry(value)
+        RootKind.Array -> this
+        RootKind.Text,
+        RootKind.XmlText -> ItemContent.TextEmbed(value, kind = kind)
+        else -> this
+    }
+    is ItemContent.MapEntry -> if (kind == RootKind.Map) this else ItemContent.Value(value)
+    is ItemContent.Text -> copy(kind = kind)
+    is ItemContent.TextEmbed -> copy(kind = kind)
+    is ItemContent.TextFormat -> copy(kind = kind)
+    is ItemContent.NativeTextFormat -> copy(kind = kind)
+    is ItemContent.XmlNode -> copy(kind = kind)
+    is ItemContent.XmlType -> copy(kind = kind)
+    is ItemContent.Deleted -> copy(kind = kind)
 }
 
 private fun StoreItem.toDecodedStruct(): DecodedUpdateStruct = DecodedUpdateStruct(
@@ -784,7 +880,7 @@ private fun List<StoreItem>.contiguousClockFromZero(): Long {
     var clock = 0L
     for (item in sortedBy { it.id.clock }) {
         if (item.id.clock != clock) break
-        clock = item.id.clock + item.length
+        clock = checkedClockAdd(item.id.clock, item.length)
     }
     return clock
 }
@@ -830,6 +926,20 @@ private fun DecodedUpdateStruct.slice(offset: Long, offsetEnd: Long): DecodedUpd
 
 private fun DecodedUpdateStruct.toStoreItems(original: StoreItem? = null): List<StoreItem> {
     require(length > 0) { "local update structs must have positive length" }
+    if (content is ContentDeleted) {
+        require(content.len == length) { "deleted content length ${content.len} does not match struct length $length" }
+        return listOf(
+            StoreItem(
+                id = id,
+                origin = origin,
+                rightOrigin = rightOrigin,
+                parent = parent,
+                parentSub = parentSub,
+                content = ItemContent.Deleted(kind, length),
+                deleted = true,
+            ),
+        )
+    }
     val contents = content.toItemContents(kind, original?.content)
     require(contents.size.toLong() == length) {
         "local update content length ${contents.size} does not match struct length $length"
@@ -862,10 +972,8 @@ private fun AbstractContent.toItemContents(kind: RootKind, original: ItemContent
         }
     }
 
-private fun ContentDeleted.toDeletedItemContents(kind: RootKind): List<ItemContent> {
-    require(len <= Int.MAX_VALUE) { "deleted content length is too large" }
-    return List(len.toInt()) { ItemContent.Deleted(kind) }
-}
+private fun ContentDeleted.toDeletedItemContents(kind: RootKind): List<ItemContent> =
+    listOf(ItemContent.Deleted(kind, len))
 
 private fun AbstractContent.toTextItemContents(
     kind: RootKind,
@@ -982,10 +1090,12 @@ private class UpdateObfuscator(
     }
 
     private fun obfuscate(value: YValue): YValue = when (value) {
+        YValue.Undefined -> YValue.Undefined
         YValue.Null -> YValue.Null
         is YValue.Bool -> YValue.Bool(false)
         is YValue.LongNumber -> YValue.LongNumber(0L)
         is YValue.DoubleNumber -> YValue.DoubleNumber(0.0)
+        is YValue.BigIntNumber -> YValue.BigIntNumber(java.math.BigInteger.ZERO)
         is YValue.StringValue -> YValue.StringValue(value.value.obfuscatedString())
         is YValue.BinaryValue -> YValue.BinaryValue(ByteArray(value.bytes().size))
         is YValue.ListValue -> YValue.ListValue(value.value.map(::obfuscate))
@@ -1017,7 +1127,7 @@ private class UpdateObfuscator(
     }
 
     private fun obfuscateValues(values: Map<String, YValue>): Map<String, YValue> =
-        values.mapValues { (_, value) -> obfuscate(value) }.toSortedMap()
+        values.mapValues { (_, value) -> obfuscate(value) }
 
     private fun obfuscateFormatting(values: Map<String, YValue>): Map<String, YValue> =
         values.entries.associate { (key, value) ->

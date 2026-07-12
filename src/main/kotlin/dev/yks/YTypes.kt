@@ -26,6 +26,15 @@ val `$ydoc`: (Any?) -> Boolean = { value -> value is YDoc }
 
 typealias Attribution = Map<String, Any?>
 
+/**
+ * Distinguishes an omitted Y.Text attribute argument from an explicitly supplied empty map.
+ *
+ * Upstream Yjs inherits the formatting at the insertion point when the argument is omitted,
+ * while `{}` explicitly inserts unformatted content. Keeping a private sentinel preserves the
+ * existing non-null public parameter type and its default-argument ABI.
+ */
+private object UnspecifiedTextAttributes : Map<String, Any?> by emptyMap()
+
 fun warnPrematureAccess() {
     System.err.println("Invalid access: Add Yjs type to a document before reading data.")
 }
@@ -564,10 +573,7 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         .filter { it.content is ItemContent.Value }
         .map { doc.valueToJson((it.content as ItemContent.Value).value) }
 
-    override fun toJSON(): Map<String, Any?> = yTypeJsonObject(
-        children = toList().map(::toYTypeJsonValue),
-        attrs = getAttrs().mapValues { (_, value) -> toYTypeJsonValue(value) },
-    )
+    override fun toJSON(): List<Any?> = toList().map(::toYTypeJsonValue)
 
     companion object {
         fun from(values: Iterable<Any?>, doc: YDoc = YDoc(), name: String = ""): YArray {
@@ -596,7 +602,7 @@ open class YText internal constructor(
 ) : AbstractYType(doc, name, kind), Iterable<Any?> {
     constructor() : this(YDoc(), "")
 
-    constructor(text: String, attributes: Map<String, Any?> = emptyMap()) : this() {
+    constructor(text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) : this() {
         insert(0, text, attributes)
     }
 
@@ -608,53 +614,78 @@ open class YText internal constructor(
 
     val attrSize: Int get() = getAttrs().size
 
-    fun insert(index: Int, text: String, attributes: Map<String, Any?> = emptyMap()) {
+    fun insert(index: Int, text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
         if (text.isEmpty()) return
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
         doc.transact {
-            val normalized = normalizeTextAttributes(attributes)
-            insertAttributedTextEntries(start, text.map { ItemContent.Text(it.toString(), normalized, kind = kind) }, normalized)
+            val normalized = attributes.normalizeOptionalTextAttributes()
+            val baseAttributes = normalized.orEmpty()
+            insertAttributedTextEntries(
+                start,
+                text.map { ItemContent.Text(it.toString(), baseAttributes, kind = kind) },
+                normalized,
+            )
         }
     }
 
-    fun insertText(index: Int, text: String, attributes: Map<String, Any?> = emptyMap(), origin: Any? = null) {
+    fun insertText(
+        index: Int,
+        text: String,
+        attributes: Map<String, Any?> = UnspecifiedTextAttributes,
+        origin: Any? = null,
+    ) {
         if (text.isEmpty()) return
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
         doc.transact(origin = origin) {
-            val normalized = normalizeTextAttributes(attributes)
-            insertAttributedTextEntries(start, text.map { ItemContent.Text(it.toString(), normalized, kind = kind) }, normalized)
+            val normalized = attributes.normalizeOptionalTextAttributes()
+            val baseAttributes = normalized.orEmpty()
+            insertAttributedTextEntries(
+                start,
+                text.map { ItemContent.Text(it.toString(), baseAttributes, kind = kind) },
+                normalized,
+            )
         }
     }
 
-    fun insert(index: Int, values: List<Any?>, attributes: Map<String, Any?> = emptyMap()) {
+    fun insert(
+        index: Int,
+        values: List<Any?>,
+        attributes: Map<String, Any?> = UnspecifiedTextAttributes,
+    ) {
         if (values.isEmpty()) return
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
         doc.transact {
-            val normalized = normalizeTextAttributes(attributes)
+            val normalized = attributes.normalizeOptionalTextAttributes()
+            val baseAttributes = normalized.orEmpty()
             val entries = values.flatMap { value ->
                 when (value) {
-                    is String -> value.map { ItemContent.Text(it.toString(), normalized, kind = kind) }
-                    is Char -> listOf(ItemContent.Text(value.toString(), normalized, kind = kind))
+                    is String -> value.map { ItemContent.Text(it.toString(), baseAttributes, kind = kind) }
+                    is Char -> listOf(ItemContent.Text(value.toString(), baseAttributes, kind = kind))
                     null -> error("text embeds must not be null")
-                    else -> listOf(ItemContent.TextEmbed(doc.storeValue(value, parent = name), normalized, kind = kind))
+                    else -> listOf(ItemContent.TextEmbed(doc.storeValue(value, parent = name), baseAttributes, kind = kind))
                 }
             }
             insertAttributedTextEntries(start, entries, normalized)
         }
     }
 
-    fun insertEmbed(index: Int, embed: Any?, attributes: Map<String, Any?> = emptyMap()) {
+    fun insertEmbed(
+        index: Int,
+        embed: Any?,
+        attributes: Map<String, Any?> = emptyMap(),
+    ) {
         require(embed != null) { "embed must not be null" }
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
         doc.transact {
+            val normalized = normalizeTextAttributes(attributes)
             insertAttributedTextEntries(
                 start,
-                listOf(ItemContent.TextEmbed(doc.storeValue(embed, parent = name), normalizeTextAttributes(attributes), kind = kind)),
-                normalizeTextAttributes(attributes),
+                listOf(ItemContent.TextEmbed(doc.storeValue(embed, parent = name), normalized, kind = kind)),
+                normalized,
             )
         }
     }
@@ -664,19 +695,20 @@ open class YText internal constructor(
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
         doc.transact(origin = origin) {
+            val normalized = normalizeTextAttributes(attributes)
             insertAttributedTextEntries(
                 start,
-                listOf(ItemContent.TextEmbed(doc.storeValue(embed, parent = name), normalizeTextAttributes(attributes), kind = kind)),
-                normalizeTextAttributes(attributes),
+                listOf(ItemContent.TextEmbed(doc.storeValue(embed, parent = name), normalized, kind = kind)),
+                normalized,
             )
         }
     }
 
-    fun push(text: String, attributes: Map<String, Any?> = emptyMap()) {
+    fun push(text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
         insert(length, text, attributes)
     }
 
-    fun push(values: List<Any?>, attributes: Map<String, Any?> = emptyMap()) {
+    fun push(values: List<Any?>, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
         insert(length, values, attributes)
     }
 
@@ -684,11 +716,11 @@ open class YText internal constructor(
         push(values.toList())
     }
 
-    fun unshift(text: String, attributes: Map<String, Any?> = emptyMap()) {
+    fun unshift(text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
         insert(0, text, attributes)
     }
 
-    fun unshift(values: List<Any?>, attributes: Map<String, Any?> = emptyMap()) {
+    fun unshift(values: List<Any?>, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
         insert(0, values, attributes)
     }
 
@@ -958,7 +990,7 @@ open class YText internal constructor(
         .joinToString(separator = "") { item ->
             when (val content = item.content) {
                 is ItemContent.Text -> content.value
-                is ItemContent.TextEmbed -> "\uFFFC"
+                is ItemContent.TextEmbed -> ""
                 else -> ""
             }
         }
@@ -1014,9 +1046,9 @@ open class YText internal constructor(
     private fun insertAttributedTextEntries(
         index: Int,
         entries: List<ItemContent>,
-        attributes: Map<String, YValue>,
+        attributes: Map<String, YValue>?,
     ) {
-        if (attributes.isEmpty()) {
+        if (attributes == null) {
             insertTextEntries(index, entries)
             return
         }
@@ -1355,9 +1387,7 @@ class YMap internal constructor(doc: YDoc, name: String) :
 
     override fun toJson(): Map<String, Any?> = doc.visibleMap(name).mapValues { (_, value) -> doc.valueToJson(value) }
 
-    override fun toJSON(): Map<String, Any?> = yTypeJsonObject(
-        attrs = toMap().mapValues { (_, value) -> toYTypeJsonValue(value) },
-    )
+    override fun toJSON(): Map<String, Any?> = toMap().mapValues { (_, value) -> toYTypeJsonValue(value) }
 
     fun clone(targetDoc: YDoc = doc): YMap {
         return targetDoc.createMap().also { cloned ->
@@ -1402,6 +1432,9 @@ internal fun yTypeJsonObject(
     if (children.isNotEmpty()) json["children"] = children
     if (attrs.isNotEmpty()) json["attrs"] = attrs.toSortedMap()
 }
+
+private fun Map<String, Any?>.normalizeOptionalTextAttributes(): Map<String, YValue>? =
+    if (this === UnspecifiedTextAttributes) null else normalizeTextAttributes(this)
 
 internal fun toYTypeJsonValue(value: Any?): Any? = when (value) {
     is AbstractYType -> value.toJSON()

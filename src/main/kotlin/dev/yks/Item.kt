@@ -1,5 +1,13 @@
 package dev.yks
 
+internal sealed interface UnresolvedYjsParent {
+    val id: Id
+
+    data class Nested(override val id: Id) : UnresolvedYjsParent
+
+    data class Inherit(override val id: Id) : UnresolvedYjsParent
+}
+
 internal data class StoreItem(
     val id: Id,
     val origin: Id?,
@@ -10,8 +18,9 @@ internal data class StoreItem(
     var deleted: Boolean = false,
     val requiresClockContinuity: Boolean = false,
     val isGc: Boolean = false,
+    val unresolvedParent: UnresolvedYjsParent? = null,
 ) {
-    val length: Long get() = 1
+    val length: Long get() = (content as? ItemContent.Deleted)?.length ?: 1
 }
 
 internal sealed class ItemContent {
@@ -103,7 +112,14 @@ internal sealed class ItemContent {
         }
     }
 
-    data class Deleted(override val kind: RootKind) : ItemContent()
+    data class Deleted(
+        override val kind: RootKind,
+        val length: Long = 1,
+    ) : ItemContent() {
+        init {
+            require(length > 0) { "deleted content length must be positive" }
+        }
+    }
 }
 
 internal fun ItemContent.isCountable(): Boolean = when (this) {

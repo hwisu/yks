@@ -66,31 +66,17 @@ class YTypeApiAliasTest {
         assertEquals(text.toJson(), text.toJSON())
         assertEquals(listOf(mapOf("nodeName" to "p", "attributes" to emptyMap<String, Any?>(), "children" to listOf("hello"))), xml.toJson())
 
-        val nestedJson = mapOf("attrs" to mapOf("name" to "Ada"))
+        val nestedJson = mapOf("name" to "Ada")
+        assertEquals(listOf("a", "b", nestedJson), array.toJSON())
         assertEquals(
             mapOf(
-                "children" to listOf("a", "b", nestedJson),
-                "attrs" to mapOf("kind" to "list"),
-            ),
-            array.toJSON(),
-        )
-        assertEquals(
-            mapOf(
-                "attrs" to mapOf(
-                    "count" to 2L,
-                    "profile" to nestedJson,
-                    "title" to "hello",
-                ),
+                "count" to 2L,
+                "profile" to nestedJson,
+                "title" to "hello",
             ),
             map.toJSON(),
         )
-        assertEquals(
-            mapOf(
-                "children" to listOf(mapOf("name" to "p", "children" to listOf("hello"))),
-                "attrs" to mapOf("lang" to "en"),
-            ),
-            xml.toJSON(),
-        )
+        assertEquals("<xml lang=\"en\"><p>hello</p></xml>", xml.toJSON())
         assertEquals(
             mapOf(
                 "array" to array.toJSON(),

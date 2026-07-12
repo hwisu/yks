@@ -405,9 +405,13 @@ class DiffRenderer(
         }
 
         acceptedInserts.ranges().forEach { (client, range) ->
-            for (clock in range.clock until range.end) {
-                nextDoc.getItem(Id(client, clock))?.let(::enqueueRefs)
-            }
+            nextDoc.store.allItems()
+                .filter { item ->
+                    item.id.client == client &&
+                        item.id.clock < range.end &&
+                        range.clock < checkedClockAdd(item.id.clock, item.length)
+                }
+                .forEach(::enqueueRefs)
         }
 
         val seenParents = linkedSetOf<String>()
@@ -539,10 +543,12 @@ private fun YValue.nestedTypeRefs(): List<YValue.TypeRef> = when (this) {
     is YValue.TypeRef -> listOf(this)
     is YValue.ListValue -> value.flatMap { item -> item.nestedTypeRefs() }
     is YValue.MapValue -> value.values.flatMap { item -> item.nestedTypeRefs() }
+    YValue.Undefined,
     YValue.Null,
     is YValue.Bool,
     is YValue.LongNumber,
     is YValue.DoubleNumber,
+    is YValue.BigIntNumber,
     is YValue.StringValue,
     is YValue.BinaryValue,
     is YValue.SubdocRef -> emptyList()

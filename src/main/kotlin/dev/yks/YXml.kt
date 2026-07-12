@@ -324,17 +324,14 @@ class YXmlElementType internal constructor(
         "children" to toNodeList().map { it.toJson() },
     )
 
-    override fun toJSON(): Map<String, Any?> = yTypeJsonObject(
-        name = nodeName,
-        children = toArray().map(::toYTypeJsonValue),
-        attrs = getAttrs().mapValues { (_, value) -> toYTypeJsonValue(value) },
-    )
+    override fun toJSON(): String = toString()
 
     fun toString(forceTag: Boolean): String {
+        val tagName = nodeName.lowercase()
         val attrs = xmlAttrsToString(getAttrs())
         val body = toNodeList().joinToString(separator = "") { it.toString() }
-        if (body.isEmpty()) return "<$nodeName$attrs></$nodeName>"
-        return "<$nodeName$attrs>$body</$nodeName>"
+        if (body.isEmpty()) return "<$tagName$attrs></$tagName>"
+        return "<$tagName$attrs>$body</$tagName>"
     }
 
     override fun toString(): String = toString(forceTag = false)
@@ -418,11 +415,7 @@ class YXmlElement(val nodeName: String) : YXmlNode(), Iterable<YXmlNode> {
 
     fun setAttr(name: String, value: Any?) {
         require(name.isNotBlank()) { "attribute name must not be blank" }
-        if (value == null) {
-            attributes.remove(name)
-        } else {
-            attributes[name] = YValue.from(value)
-        }
+        attributes[name] = YValue.from(value)
     }
 
     fun setAttribute(name: String, value: Any?) {
@@ -620,12 +613,13 @@ class YXmlElement(val nodeName: String) : YXmlNode(), Iterable<YXmlNode> {
     )
 
     fun toString(forceTag: Boolean): String {
+        val tagName = nodeName.lowercase()
         val attrs = xmlAttrsToString(getAttrs())
         val body = children.joinToString(separator = "") { it.toString() }
         if (body.isEmpty()) {
-            return "<$nodeName$attrs></$nodeName>"
+            return "<$tagName$attrs></$tagName>"
         }
-        return "<$nodeName$attrs>$body</$nodeName>"
+        return "<$tagName$attrs>$body</$tagName>"
     }
 
     override fun toString(): String = toString(forceTag = false)
@@ -938,10 +932,7 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
 
     override fun toJson(): List<Any?> = toNodeList().map { it.toJson() }
 
-    override fun toJSON(): Map<String, Any?> = yTypeJsonObject(
-        children = toArray().map(::toYTypeJsonValue),
-        attrs = getAttrs().mapValues { (_, value) -> toYTypeJsonValue(value) },
-    )
+    override fun toJSON(): String = toString()
 
     fun toString(forceTag: Boolean): String =
         renderXmlFragmentString(name, getAttrs(), toNodeList(), forceTag = forceTag)
@@ -1184,13 +1175,51 @@ internal fun renderXmlFragmentString(
 
 internal fun xmlAttrsToString(attrs: Map<String, Any?>): String =
     attrs.toSortedMap().entries.joinToString(separator = "") { (name, value) ->
-        " $name=${xmlAttrValueToString(value)}"
+        " $name=\"${xmlAttrValueToString(value)}\""
     }
 
 internal fun xmlAttrValueToString(value: Any?): String = when (value) {
-    is YXmlElement -> value.toString(forceTag = true)
-    is YXmlFragment -> value.toString(forceTag = true)
-    else -> toJsonLiteral(value)
+    null -> "null"
+    is String -> value
+    is Char -> value.toString()
+    is Boolean -> value.toString()
+    is Byte -> value.toString()
+    is Short -> value.toString()
+    is Int -> value.toString()
+    is Long -> value.toString()
+    is java.math.BigInteger -> value.toString()
+    is Float -> value.toDouble().toYjsNumberString()
+    is Double -> value.toYjsNumberString()
+    is ByteArray -> value.joinToString(separator = ",") { byte -> byte.toUByte().toString() }
+    is List<*> -> value.joinToString(separator = ",") { nested -> nested?.let(::xmlAttrValueToString).orEmpty() }
+    is Array<*> -> value.joinToString(separator = ",") { nested -> nested?.let(::xmlAttrValueToString).orEmpty() }
+    is Map<*, *> -> "[object Object]"
+    is YText -> value.toString()
+    is YXmlElementType -> value.toString()
+    is YXmlFragment -> value.toString()
+    is YXmlNode -> value.toString()
+    is AbstractYType,
+    is YDoc -> "[object Object]"
+    else -> value.toString()
+}
+
+private fun Double.toYjsNumberString(): String {
+    if (isNaN()) return "NaN"
+    if (this == Double.POSITIVE_INFINITY) return "Infinity"
+    if (this == Double.NEGATIVE_INFINITY) return "-Infinity"
+    if (this == 0.0) return "0"
+
+    val magnitude = kotlin.math.abs(this)
+    if (magnitude >= 1e-6 && magnitude < 1e21) {
+        return java.math.BigDecimal.valueOf(this).stripTrailingZeros().toPlainString()
+    }
+
+    val value = java.lang.Double.toString(this)
+        .lowercase()
+        .replace(".0e", "e")
+    val exponentIndex = value.indexOf('e')
+    if (exponentIndex < 0 || value.getOrNull(exponentIndex + 1) in listOf('+', '-')) return value
+    return value.substring(0, exponentIndex + 1) + "+" + value.substring(exponentIndex + 1)
 }
 
 private fun renderXmlText(text: String, attributes: Map<String, Any?>): String {

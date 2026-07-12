@@ -7,6 +7,16 @@ import kotlin.test.assertFalse
 
 class StateVectorTest {
     @Test
+    fun getStateReturnsTheNextClientClock() {
+        val doc = YDoc(clientId = 7)
+        doc.getText("body").insert(0, "ab")
+
+        assertEquals(2L, getState(doc, 7))
+        assertEquals(2L, getState(doc.store, 7))
+        assertEquals(0L, getState(doc.store, 8))
+    }
+
+    @Test
     fun lowLevelStateVectorBinaryHelpersRoundTrip() {
         val stateVector = mapOf(3L to 9L, 1L to 2L)
         val encoder = BinaryEncoder()

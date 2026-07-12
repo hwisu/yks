@@ -65,8 +65,37 @@ class YXmlTest {
 
         fragment.setAttrs(mapOf("title" to "A&B\"", "lang" to "en", "count" to 2, "enabled" to true))
 
-        assertEquals("<xml count=2 enabled=true lang=\"en\" title=\"A&B\\\"\"><p></p></xml>", fragment.toString())
-        assertEquals("<xml count=2 enabled=true lang=\"en\" title=\"A&B\\\"\"><p></p></xml>", fragment.toString(forceTag = true))
+        assertEquals("<xml count=\"2\" enabled=\"true\" lang=\"en\" title=\"A&B\"\"><p></p></xml>", fragment.toString())
+        assertEquals(
+            "<xml count=\"2\" enabled=\"true\" lang=\"en\" title=\"A&B\"\"><p></p></xml>",
+            fragment.toString(forceTag = true),
+        )
+    }
+
+    @Test
+    fun xmlElementRenderingLowercasesTagsAndUsesJavaScriptAttributeCoercion() {
+        val static = YXmlElement("DiV").setAttrs(
+            mapOf(
+                "array" to listOf("a", null, true),
+                "bytes" to byteArrayOf(1, -1),
+                "data" to mapOf("id" to 1),
+                "nil" to null,
+                "zero" to -0.0,
+            ),
+        )
+        val doc = YDoc(clientId = 1)
+        val fragment = doc.getXmlFragment("xml")
+        val live = doc.createXmlElement("SECTION").setAttrs(mapOf("count" to 2.0, "enabled" to true))
+        fragment.push(live)
+
+        assertTrue(static.hasAttribute("nil"))
+        assertEquals(
+            "<div array=\"a,,true\" bytes=\"1,255\" data=\"[object Object]\" nil=\"null\" zero=\"0\"></div>",
+            static.toString(),
+        )
+        assertEquals("<section count=\"2\" enabled=\"true\"></section>", live.toString())
+        assertEquals("<section count=\"2\" enabled=\"true\"></section>", live.toJSON())
+        assertEquals("<section count=\"2\" enabled=\"true\"></section>", fragment.toJSON())
     }
 
     @Test
@@ -141,7 +170,7 @@ class YXmlTest {
         val sliced = element.slice(1)
         (sliced[0] as YXmlElement).setAttr("changed", true)
 
-        assertEquals("<b changed=true></b><c></c>", sliced.joinToString(separator = ""))
+        assertEquals("<b changed=\"true\"></b><c></c>", sliced.joinToString(separator = ""))
         assertEquals("<div><a></a><b></b><c></c></div>", element.toString())
         assertEquals("<a></a><b></b>", element.slice(0, -1).joinToString(separator = ""))
     }
@@ -232,8 +261,8 @@ class YXmlTest {
             ),
         )
 
-        assertEquals("<a></a><B></B>c<d></d>", fragment.toString())
-        assertEquals("<a></a><B></B>c<d></d>", fragment.toDelta().single().insert!!.joinToString(separator = ""))
+        assertEquals("<a></a><b></b>c<d></d>", fragment.toString())
+        assertEquals("<a></a><b></b>c<d></d>", fragment.toDelta().single().insert!!.joinToString(separator = ""))
     }
 
     @Test

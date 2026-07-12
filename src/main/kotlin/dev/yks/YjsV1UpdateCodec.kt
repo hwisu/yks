@@ -12,7 +12,7 @@ internal object UpdateCodec {
         .toByteArray()
 
     fun encodeV2(update: DocumentUpdate): ByteArray {
-        if (!update.allowV1 || !update.isSupportedV1Update()) return LegacyUpdateCodec.encode(update)
+        if (!update.allowV1 || !update.isSupportedStandardUpdate(isV2 = true)) return LegacyUpdateCodec.encode(update)
         val encoder = UpdateEncoderV2()
         encoder.forceV2Envelope()
         val itemsByClient = update.items
@@ -35,7 +35,13 @@ internal object UpdateCodec {
                         encoder.writeInfo(structSkipRefNumber)
                         encoder.restEncoder.writeVarUInt(struct.length)
                     }
-                    is EncodedStruct.Item -> writeItemV2(encoder, struct.item, parentItems)
+                    is EncodedStruct.Item -> if (struct.item.isGc) {
+                        encoder.writeInfo(structGCRefNumber)
+                        encoder.writeLen(struct.item.length)
+                    } else {
+                        writeItemV2(encoder, struct.item, parentItems)
+                    }
+                    is EncodedStruct.PackedText -> writePackedTextV2(encoder, struct, parentItems)
                 }
             }
         }
@@ -44,7 +50,7 @@ internal object UpdateCodec {
     }
 
     fun write(encoder: BinaryEncoder, update: DocumentUpdate): BinaryEncoder {
-        if (!update.allowV1 || !update.isSupportedV1Update()) {
+        if (!update.allowV1 || !update.isSupportedStandardUpdate(isV2 = false)) {
             return LegacyUpdateCodec.write(encoder, update)
         }
         return writeV1(encoder, update)
@@ -71,7 +77,13 @@ internal object UpdateCodec {
                         encoder.writeByte(structSkipRefNumber)
                         encoder.writeVarUInt(struct.length)
                     }
-                    is EncodedStruct.Item -> writeItem(encoder, struct.item, parentItems)
+                    is EncodedStruct.Item -> if (struct.item.isGc) {
+                        encoder.writeByte(structGCRefNumber)
+                        encoder.writeVarUInt(struct.item.length)
+                    } else {
+                        writeItem(encoder, struct.item, parentItems)
+                    }
+                    is EncodedStruct.PackedText -> writePackedText(encoder, struct, parentItems)
                 }
             }
         }
@@ -221,7 +233,8 @@ internal object UpdateCodec {
         item.origin?.let(encoder::writeId)
         item.rightOrigin?.let(encoder::writeId)
         if (item.origin == null && item.rightOrigin == null) {
-            val parentItem = parentItems[item.parent]
+            val parentItem = (item.unresolvedParent as? UnresolvedYjsParent.Nested)?.id
+                ?: parentItems[item.parent]
             encoder.writeVarUInt(if (parentItem == null) 1 else 0)
             if (parentItem == null) {
                 encoder.writeString(item.parent)
@@ -247,12 +260,59 @@ internal object UpdateCodec {
         item.origin?.let(encoder::writeLeftID)
         item.rightOrigin?.let(encoder::writeRightID)
         if (item.origin == null && item.rightOrigin == null) {
-            val parentItem = parentItems[item.parent]
+            val parentItem = (item.unresolvedParent as? UnresolvedYjsParent.Nested)?.id
+                ?: parentItems[item.parent]
             encoder.writeParentInfo(parentItem == null)
             if (parentItem == null) encoder.writeString(item.parent) else encoder.writeLeftID(parentItem)
             item.parentSub?.let(encoder::writeString)
         }
         writeContentV2(encoder, item.content)
+    }
+
+    private fun writePackedText(
+        encoder: BinaryEncoder,
+        packed: EncodedStruct.PackedText,
+        parentItems: Map<String, Id>,
+    ) {
+        val item = packed.first
+        val info = contentStringRefNumber or
+            (if (item.origin != null) INFO_HAS_ORIGIN else 0) or
+            (if (item.rightOrigin != null) INFO_HAS_RIGHT_ORIGIN else 0) or
+            (if (item.parentSub != null) INFO_HAS_PARENT_SUB else 0)
+        encoder.writeByte(info)
+        item.origin?.let(encoder::writeId)
+        item.rightOrigin?.let(encoder::writeId)
+        if (item.origin == null && item.rightOrigin == null) {
+            val parentItem = (item.unresolvedParent as? UnresolvedYjsParent.Nested)?.id
+                ?: parentItems[item.parent]
+            encoder.writeVarUInt(if (parentItem == null) 1 else 0)
+            if (parentItem == null) encoder.writeString(item.parent) else encoder.writeId(parentItem)
+            item.parentSub?.let(encoder::writeString)
+        }
+        encoder.writeString(packed.value)
+    }
+
+    private fun writePackedTextV2(
+        encoder: UpdateEncoderV2,
+        packed: EncodedStruct.PackedText,
+        parentItems: Map<String, Id>,
+    ) {
+        val item = packed.first
+        val info = contentStringRefNumber or
+            (if (item.origin != null) INFO_HAS_ORIGIN else 0) or
+            (if (item.rightOrigin != null) INFO_HAS_RIGHT_ORIGIN else 0) or
+            (if (item.parentSub != null) INFO_HAS_PARENT_SUB else 0)
+        encoder.writeInfo(info)
+        item.origin?.let(encoder::writeLeftID)
+        item.rightOrigin?.let(encoder::writeRightID)
+        if (item.origin == null && item.rightOrigin == null) {
+            val parentItem = (item.unresolvedParent as? UnresolvedYjsParent.Nested)?.id
+                ?: parentItems[item.parent]
+            encoder.writeParentInfo(parentItem == null)
+            if (parentItem == null) encoder.writeString(item.parent) else encoder.writeLeftID(parentItem)
+            item.parentSub?.let(encoder::writeString)
+        }
+        encoder.writeString(packed.value)
     }
 
     private fun writeContent(encoder: BinaryEncoder, content: ItemContent) {
@@ -278,7 +338,7 @@ internal object UpdateCodec {
                 writeLib0Any(encoder, content.value.toEventJson())
             }
             is ItemContent.XmlType -> writeTypeContent(encoder, content.ref.kind, content.nodeName)
-            is ItemContent.Deleted -> encoder.writeVarUInt(1)
+            is ItemContent.Deleted -> encoder.writeVarUInt(content.length)
         }
     }
 
@@ -305,7 +365,7 @@ internal object UpdateCodec {
                 encoder.writeAny(content.value.toEventJson())
             }
             is ItemContent.XmlType -> writeTypeContentV2(encoder, content.ref.kind, content.nodeName)
-            is ItemContent.Deleted -> encoder.writeLen(1)
+            is ItemContent.Deleted -> encoder.writeLen(content.length)
         }
     }
 
@@ -459,11 +519,10 @@ internal object UpdateCodec {
     }
 }
 
-private fun DocumentUpdate.isSupportedV1Update(): Boolean {
+private fun DocumentUpdate.isSupportedStandardUpdate(isV2: Boolean): Boolean {
     if (items.isEmpty()) return true
     val clients = items.groupBy { item -> item.id.client }
     if (clients.keys.any { client -> client !in 0..9_007_199_254_740_992L }) return false
-    val ids = items.mapTo(hashSetOf()) { item -> item.id }
     val parentItems = parentItemIds + items.mapNotNull { item ->
         item.content.directTypeRef()?.name?.let { name -> name to item.id }
     }.toMap()
@@ -472,19 +531,20 @@ private fun DocumentUpdate.isSupportedV1Update(): Boolean {
     }.toMap()
     return clients.values.all { clientItems ->
         val sorted = clientItems.sortedBy { item -> item.id.clock }
+        if (!sorted.hasValidTextSurrogatePairs()) return@all false
         val startClock = sorted.first().id.clock
         var expectedClock = startClock
         if (sorted.any { item ->
                 val contiguous = item.id.clock == expectedClock
-                expectedClock = item.id.clock + item.length
+                expectedClock = checkedClockAdd(item.id.clock, item.length)
                 !contiguous
             }
         ) return@all false
         sorted.all { item ->
-            item.content.isSupportedV1Content() &&
+            item.content.isSupportedStandardContent(isV2) &&
                 item.hasCompatibleV1ParentKind(items, parentKinds) &&
-                (startClock > 0 || item.origin == null || item.origin in ids) &&
-                (startClock > 0 || item.rightOrigin == null || item.rightOrigin in ids) &&
+                (startClock > 0 || item.origin == null || items.containsId(item.origin)) &&
+                (startClock > 0 || item.rightOrigin == null || items.containsId(item.rightOrigin)) &&
                 item.hasResolvableV1Parent(parentItems) &&
                 item.hasConsistentInheritedMetadata(items)
         }
@@ -494,7 +554,7 @@ private fun DocumentUpdate.isSupportedV1Update(): Boolean {
 private fun StoreItem.hasResolvableV1Parent(parentItems: Map<String, Id>): Boolean {
     val parentItemId = parentItems[parent]
     if (parentItemId == null) {
-        return !parent.startsWith("__yks_nested__:") && !parent.startsWith("__yjs_nested__:")
+        return unresolvedParent != null || !parent.startsWith("__yks_nested__:")
     }
     // A nested type must be introduced before content can target it on Yjs wire.
     return parentItemId.client != id.client || parentItemId.clock < id.clock
@@ -502,9 +562,16 @@ private fun StoreItem.hasResolvableV1Parent(parentItems: Map<String, Id>): Boole
 
 private fun StoreItem.hasConsistentInheritedMetadata(items: List<StoreItem>): Boolean {
     val anchor = origin ?: rightOrigin ?: return true
-    val anchorItem = items.firstOrNull { candidate -> candidate.id == anchor } ?: return true
+    val anchorItem = items.firstOrNull { candidate -> candidate.containsId(anchor) } ?: return true
     return anchorItem.parent == parent && anchorItem.parentSub == parentSub
 }
+
+private fun List<StoreItem>.containsId(id: Id): Boolean = any { item -> item.containsId(id) }
+
+private fun StoreItem.containsId(id: Id): Boolean =
+    id.client == this.id.client &&
+        id.clock >= this.id.clock &&
+        id.clock < checkedClockAdd(this.id.clock, length)
 
 private fun StoreItem.hasCompatibleV1ParentKind(
     items: List<StoreItem>,
@@ -538,32 +605,36 @@ private fun StoreItem.hasCompatibleV1ParentKind(
                         item.content is ItemContent.XmlType && item.content.kind == content.kind
                     })
         }
+        is ItemContent.Deleted -> true
         else -> false
     }
 }
 
-private fun ItemContent.isSupportedV1Content(): Boolean = when (this) {
-    is ItemContent.Value -> kind == RootKind.Array && value.isSupportedV1Value(topLevel = true)
-    is ItemContent.MapEntry -> value.isSupportedV1Value(topLevel = true)
+private fun ItemContent.isSupportedStandardContent(isV2: Boolean): Boolean = when (this) {
+    is ItemContent.Value -> kind == RootKind.Array && value.isSupportedAnyValue(topLevel = true)
+    is ItemContent.MapEntry -> value.isSupportedAnyValue(topLevel = true)
     is ItemContent.Text ->
         kind in setOf(RootKind.Text, RootKind.XmlText) &&
-            !Character.isSurrogate(value.single()) &&
             baseAttributes.isEmpty()
     is ItemContent.TextEmbed ->
         kind in setOf(RootKind.Text, RootKind.XmlText) &&
             baseAttributes.isEmpty() &&
-            value.isSupportedV1Value(topLevel = false)
+            if (value is YValue.SubdocRef) value.isSupportedAnyValue(topLevel = true)
+            else if (isV2) value.isSupportedAnyValue(topLevel = false)
+            else value.isSupportedJsonValue()
     is ItemContent.TextFormat -> false
     is ItemContent.NativeTextFormat ->
-        kind in setOf(RootKind.Text, RootKind.XmlText) && value.isSupportedV1Value(topLevel = false)
+        kind in setOf(RootKind.Text, RootKind.XmlText) &&
+            if (isV2) value.isSupportedAnyValue(topLevel = false) else value.isSupportedJsonValue()
     is ItemContent.XmlNode -> false
     is ItemContent.XmlType ->
         kind in setOf(RootKind.XmlFragment, RootKind.XmlElement, RootKind.XmlHook) &&
             ref.kind in setOf(RootKind.XmlElement, RootKind.XmlHook, RootKind.XmlText)
-    is ItemContent.Deleted -> false
+    is ItemContent.Deleted -> true
 }
 
-private fun YValue.isSupportedV1Value(topLevel: Boolean): Boolean = when (this) {
+private fun YValue.isSupportedAnyValue(topLevel: Boolean): Boolean = when (this) {
+    YValue.Undefined,
     YValue.Null,
     is YValue.Bool,
     is YValue.StringValue,
@@ -571,25 +642,52 @@ private fun YValue.isSupportedV1Value(topLevel: Boolean): Boolean = when (this) 
     is YValue.LongNumber -> value.toDouble().let { number ->
         kotlin.math.abs(number) <= 9_007_199_254_740_992.0 && number.toLong() == value
     }
-    is YValue.DoubleNumber -> value.isFinite() && value % 1.0 != 0.0
-    is YValue.ListValue -> value.all { nested -> nested.isSupportedV1Value(topLevel = false) }
-    is YValue.MapValue -> value.values.all { nested -> nested.isSupportedV1Value(topLevel = false) }
+    is YValue.DoubleNumber -> true
+    is YValue.BigIntNumber -> runCatching { value.longValueExact() }.isSuccess
+    is YValue.ListValue -> value.all { nested -> nested.isSupportedAnyValue(topLevel = false) }
+    is YValue.MapValue -> value.values.all { nested -> nested.isSupportedAnyValue(topLevel = false) }
     is YValue.TypeRef -> topLevel && kind in setOf(RootKind.Array, RootKind.Map, RootKind.Text)
     is YValue.SubdocRef ->
-        collectionId == null &&
+        topLevel &&
+            collectionId == null &&
             !isSuggestionDoc &&
-            (!shouldLoad || autoLoad) &&
-            meta.isSupportedV1Value(topLevel = false)
+            meta.isSupportedAnyValue(topLevel = false)
+}
+
+private fun YValue.isSupportedJsonValue(): Boolean = when (this) {
+    YValue.Undefined,
+    is YValue.BigIntNumber,
+    is YValue.BinaryValue,
+    is YValue.TypeRef,
+    is YValue.SubdocRef -> false
+    YValue.Null,
+    is YValue.Bool,
+    is YValue.LongNumber,
+    is YValue.StringValue -> true
+    is YValue.DoubleNumber -> value.isFinite()
+    is YValue.ListValue -> value.all(YValue::isSupportedJsonValue)
+    is YValue.MapValue -> value.values.all(YValue::isSupportedJsonValue)
 }
 
 private sealed interface EncodedStruct {
     val clock: Long
+    val length: Long
 
     data class Item(val item: StoreItem) : EncodedStruct {
         override val clock: Long get() = item.id.clock
+        override val length: Long get() = item.length
     }
 
-    data class Skip(override val clock: Long, val length: Long) : EncodedStruct
+    data class PackedText(
+        val first: StoreItem,
+        val second: StoreItem,
+    ) : EncodedStruct {
+        override val clock: Long get() = first.id.clock
+        override val length: Long = 2
+        val value: String get() = (first.content as ItemContent.Text).value + (second.content as ItemContent.Text).value
+    }
+
+    data class Skip(override val clock: Long, override val length: Long) : EncodedStruct
 }
 
 private sealed interface ParentReference {
@@ -627,16 +725,69 @@ private sealed interface WireContent {
 private fun List<StoreItem>.withClockSkips(): List<EncodedStruct> {
     val result = mutableListOf<EncodedStruct>()
     var nextClock = first().id.clock
-    forEach { item ->
+    var index = 0
+    while (index < size) {
+        val item = this[index]
         if (item.id.clock > nextClock) {
             result.add(EncodedStruct.Skip(nextClock, item.id.clock - nextClock))
         }
         if (item.id.clock >= nextClock) {
-            result.add(EncodedStruct.Item(item))
-            nextClock = item.id.clock + item.length
+            val next = getOrNull(index + 1)
+            val encoded = if (next != null && item.canPackTextWith(next)) {
+                index++
+                EncodedStruct.PackedText(item, next)
+            } else {
+                EncodedStruct.Item(item)
+            }
+            result.add(encoded)
+            nextClock = checkedClockAdd(encoded.clock, encoded.length)
         }
+        index++
     }
     return result
+}
+
+private fun List<StoreItem>.hasValidTextSurrogatePairs(): Boolean {
+    var index = 0
+    while (index < size) {
+        val item = this[index]
+        val text = item.content as? ItemContent.Text
+        if (text == null) {
+            index++
+            continue
+        }
+        val char = text.value.single()
+        when {
+            char.isHighSurrogate() -> {
+                val next = getOrNull(index + 1) ?: return false
+                if (!item.canPackTextWith(next)) return false
+                index += 2
+            }
+            char.isLowSurrogate() -> return false
+            else -> index++
+        }
+    }
+    return true
+}
+
+private fun StoreItem.canPackTextWith(right: StoreItem): Boolean {
+    val leftContent = content as? ItemContent.Text ?: return false
+    val rightContent = right.content as? ItemContent.Text ?: return false
+    return leftContent.value.single().isHighSurrogate() &&
+        rightContent.value.single().isLowSurrogate() &&
+        right.id.client == id.client &&
+        right.id.clock == checkedClockAdd(id.clock, 1) &&
+        right.origin == id &&
+        right.rightOrigin == rightOrigin &&
+        right.parent == parent &&
+        right.parentSub == parentSub &&
+        right.deleted == deleted &&
+        right.isGc == isGc &&
+        right.requiresClockContinuity == requiresClockContinuity &&
+        right.unresolvedParent == unresolvedParent &&
+        rightContent.kind == leftContent.kind &&
+        rightContent.attributes == leftContent.attributes &&
+        rightContent.baseAttributes == leftContent.baseAttributes
 }
 
 private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
@@ -718,16 +869,45 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
         listOfNotNull(item.origin, item.rightOrigin).any { anchorId -> containing(anchorId)?.isGc == true } ||
         ((item.parent as? ParentReference.Nested)?.let { reference -> containing(reference.id)?.isGc } == true)
 
+    fun unresolvedParent(item: DecodedWireItem, seen: Set<Id> = emptySet()): UnresolvedYjsParent? {
+        check(item.id !in seen) { "cyclic Yjs unresolved parent reference at ${item.id}" }
+        return when (val reference = item.parent) {
+            is ParentReference.Root -> null
+            is ParentReference.Nested -> if (containing(reference.id) == null) {
+                UnresolvedYjsParent.Nested(reference.id)
+            } else {
+                null
+            }
+            is ParentReference.Inherit -> {
+                val anchor = containing(reference.id) ?: return UnresolvedYjsParent.Inherit(reference.id)
+                if (unresolvedParent(anchor, seen + item.id) == null) null
+                else UnresolvedYjsParent.Inherit(reference.id)
+            }
+        }
+    }
+
     return flatMap { item ->
         val isGc = resolvesToGc(item)
         val parent = if (isGc) gcParentName(item.id.client) else resolveParent(item)
         val parentSub = if (isGc) null else resolveParentSub(item)
         val kind = if (isGc) RootKind.Array else resolveKind(item)
-        val contents = if (isGc) {
-            List(item.content.length.toDecodedCount("GC length")) { ItemContent.Deleted(kind) }
-        } else {
-            item.content.toItemContents(kind)
+        if (isGc || item.content is WireContent.Deleted) {
+            return@flatMap listOf(
+                StoreItem(
+                    id = item.id,
+                    origin = item.origin,
+                    rightOrigin = item.rightOrigin,
+                    parent = parent,
+                    parentSub = parentSub,
+                    content = ItemContent.Deleted(kind, item.content.length),
+                    deleted = true,
+                    requiresClockContinuity = true,
+                    isGc = isGc,
+                    unresolvedParent = if (isGc) null else unresolvedParent(item),
+                ),
+            )
         }
+        val contents = item.content.toItemContents(kind)
         contents.mapIndexed { index, content ->
             StoreItem(
                 id = Id(item.id.client, checkedClockAdd(item.id.clock, index.toLong())),
@@ -743,6 +923,7 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
                 deleted = isGc || item.content is WireContent.Deleted,
                 requiresClockContinuity = true,
                 isGc = isGc,
+                unresolvedParent = if (isGc) null else unresolvedParent(item),
             )
         }
     }
@@ -756,8 +937,11 @@ private fun WireContent.inferRootKind(parentSub: String?): RootKind = when {
 }
 
 private fun WireContent.toItemContents(kind: RootKind): List<ItemContent> = when (this) {
-    is WireContent.Deleted -> List(length.toInt()) { ItemContent.Deleted(kind) }
-    is WireContent.StringContent -> value.map { char -> ItemContent.Text(char.toString(), kind = kind) }
+    is WireContent.Deleted -> listOf(ItemContent.Deleted(kind, length))
+    is WireContent.StringContent -> {
+        value.length.toLong().toDecodedCount("text UTF-16 length")
+        value.map { char -> ItemContent.Text(char.toString(), kind = kind) }
+    }
     is WireContent.Embed -> listOf(ItemContent.TextEmbed(YValue.from(value), kind = kind))
     is WireContent.Format -> listOf(toItemContent(kind))
     is WireContent.Binary -> listOf(value.toSequenceContent(kind))
@@ -774,29 +958,8 @@ private fun WireContent.toItemContents(kind: RootKind): List<ItemContent> = when
     is WireContent.Doc -> listOf(options.toSubdocValue(guid, instanceId).toSequenceContent(kind))
 }
 
-private fun WireContent.Format.toItemContent(kind: RootKind): ItemContent {
-    if (key != "__yks_text_format") {
-        return ItemContent.NativeTextFormat(key, YValue.from(value), kind)
-    }
-    val data = value as? Map<*, *> ?: error("invalid YKS text format payload")
-    val target = data["target"] as? Map<*, *> ?: error("text format target is missing")
-    fun number(name: String, source: Map<*, *> = data): Long =
-        (source[name] as? Number)?.toLong() ?: error("text format $name is missing")
-    fun attributes(name: String): Map<String, YValue> = (data[name] as? Map<*, *>).orEmpty().entries.associate { (key, value) ->
-        key.toString() to YValue.from(value)
-    }.toSortedMap()
-    val before = (data["beforeAttributes"] as? List<*>).orEmpty().map { raw ->
-        (raw as? Map<*, *>).orEmpty().entries.associate { (key, value) -> key.toString() to YValue.from(value) }.toSortedMap()
-    }
-    return ItemContent.TextFormat(
-        target = Id(number("client", target), number("clock", target)),
-        length = number("length"),
-        attributes = attributes("attributes"),
-        afterAttributes = attributes("afterAttributes"),
-        beforeAttributes = before,
-        kind = kind,
-    )
-}
+private fun WireContent.Format.toItemContent(kind: RootKind): ItemContent =
+    ItemContent.NativeTextFormat(key, YValue.from(value), kind)
 
 private fun Any?.toSequenceContent(kind: RootKind): ItemContent {
     val value = YValue.from(this)
@@ -879,4 +1042,4 @@ private fun gcParentName(client: Long): String = "__yjs_gc__:$client"
 
 private fun ByteArray.hasLegacyMagic(): Boolean =
     size >= 4 && this[0] == 'Y'.code.toByte() && this[1] == 'K'.code.toByte() &&
-        this[2] == 'S'.code.toByte() && (this[3] == 1.toByte() || this[3] == 2.toByte())
+        this[2] == 'S'.code.toByte() && this[3] in setOf(1.toByte(), 2.toByte(), 3.toByte())

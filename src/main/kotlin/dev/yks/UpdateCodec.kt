@@ -1,6 +1,6 @@
 package dev.yks
 
-private val updateMagicV2 = byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 2)
+private val updateMagicV3 = byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 3)
 
 internal data class DocumentUpdate(
     val items: List<StoreItem>,
@@ -20,7 +20,7 @@ internal object LegacyUpdateCodec {
     }
 
     fun write(encoder: BinaryEncoder, update: DocumentUpdate): BinaryEncoder {
-        updateMagicV2.forEach { encoder.writeByte(it.toInt()) }
+        updateMagicV3.forEach { encoder.writeByte(it.toInt()) }
         encoder.writeVarUInt(update.items.size.toLong())
         update.items.sortedWith(compareBy<StoreItem> { it.id.client }.thenBy { it.id.clock }).forEach { item ->
             writeItem(encoder, item)
@@ -37,11 +37,11 @@ internal object LegacyUpdateCodec {
             "unsupported update format"
         }
         val version = decoder.readByte()
-        check(version == 1 || version == 2) { "unsupported legacy update version: $version" }
+        check(version in 1..3) { "unsupported legacy update version: $version" }
         val itemCount = decoder.readVarUInt().toDecodedCount()
         val items = buildList {
             repeat(itemCount) {
-                add(readItem(decoder, hasStructMetadata = version >= 2))
+                add(readItem(decoder, version))
             }
         }
         val deleteSet = readDeleteSet(decoder)
@@ -60,6 +60,19 @@ internal object LegacyUpdateCodec {
         encoder.writeBoolean(item.deleted)
         encoder.writeBoolean(item.requiresClockContinuity)
         encoder.writeBoolean(item.isGc)
+        when (val unresolved = item.unresolvedParent) {
+            null -> encoder.writeByte(0)
+            is UnresolvedYjsParent.Nested -> {
+                encoder.writeByte(1)
+                encoder.writeVarUInt(unresolved.id.client)
+                encoder.writeVarUInt(unresolved.id.clock)
+            }
+            is UnresolvedYjsParent.Inherit -> {
+                encoder.writeByte(2)
+                encoder.writeVarUInt(unresolved.id.client)
+                encoder.writeVarUInt(unresolved.id.clock)
+            }
+        }
         when (val content = item.content) {
             is ItemContent.Value -> {
                 encoder.writeByte(0)
@@ -102,8 +115,9 @@ internal object LegacyUpdateCodec {
                 writeAttributes(encoder, content.baseAttributes)
             }
             is ItemContent.Deleted -> {
-                encoder.writeByte(5)
+                encoder.writeByte(if (content.length == 1L) 5 else 13)
                 writeRootKind(encoder, content.kind)
+                if (content.length != 1L) encoder.writeVarUInt(content.length)
             }
             is ItemContent.TextFormat -> {
                 if (content.kind == RootKind.Text) {
@@ -134,15 +148,25 @@ internal object LegacyUpdateCodec {
         }
     }
 
-    private fun readItem(decoder: BinaryDecoder, hasStructMetadata: Boolean): StoreItem {
+    private fun readItem(decoder: BinaryDecoder, version: Int): StoreItem {
         val id = Id(decoder.readVarUInt(), decoder.readVarUInt())
         val origin = readNullableId(decoder)
         val rightOrigin = readNullableId(decoder)
         val parent = decoder.readString()
         val parentSub = if (decoder.readBoolean()) decoder.readString() else null
         val deleted = decoder.readBoolean()
-        val requiresClockContinuity = hasStructMetadata && decoder.readBoolean()
-        val isGc = hasStructMetadata && decoder.readBoolean()
+        val requiresClockContinuity = version >= 2 && decoder.readBoolean()
+        val isGc = version >= 2 && decoder.readBoolean()
+        val unresolvedParent = if (version >= 3) {
+            when (val tag = decoder.readByte()) {
+                0 -> null
+                1 -> UnresolvedYjsParent.Nested(Id(decoder.readVarUInt(), decoder.readVarUInt()))
+                2 -> UnresolvedYjsParent.Inherit(Id(decoder.readVarUInt(), decoder.readVarUInt()))
+                else -> error("unknown unresolved parent tag: $tag")
+            }
+        } else {
+            null
+        }
         val content = when (val tag = decoder.readByte()) {
             0 -> ItemContent.Value(readYValue(decoder))
             1 -> {
@@ -205,6 +229,7 @@ internal object LegacyUpdateCodec {
                     kind = kind,
                 )
             }
+            13 -> ItemContent.Deleted(readRootKind(decoder), decoder.readVarUInt())
             else -> error("unknown item content tag: $tag")
         }
         return StoreItem(
@@ -217,6 +242,7 @@ internal object LegacyUpdateCodec {
             deleted,
             requiresClockContinuity = requiresClockContinuity,
             isGc = isGc,
+            unresolvedParent = unresolvedParent,
         )
     }
 

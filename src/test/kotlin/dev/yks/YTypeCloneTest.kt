@@ -65,7 +65,7 @@ class YTypeCloneTest {
         clonedText.format(2, 1, mapOf("alt" to "clone"))
 
         assertEquals(
-            mapOf("root" to mapOf("body" to "hi\uFFFC", "meta" to mapOf("count" to 1L, "items" to listOf("a", "b")))),
+            mapOf("root" to mapOf("body" to "hi", "meta" to mapOf("count" to 1L, "items" to listOf("a", "b")))),
             target.toJson(),
         )
         assertEquals(mapOf("count" to 1L, "items" to listOf("a")), source.getMap("meta").toJson())

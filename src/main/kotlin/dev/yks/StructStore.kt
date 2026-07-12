@@ -37,11 +37,25 @@ class StructStore(private val owner: YDoc? = null) {
 
     internal fun add(item: StoreItem): Boolean {
         val structs = clientItems.getOrPut(item.id.client) { mutableListOf() }
-        if (structs.any { it.id.clock == item.id.clock }) {
-            return false
+        if (structs.isEmpty() || structs.last().endClock() <= item.id.clock) {
+            structs.add(item)
+            return true
         }
-        structs.add(item)
-        structs.sortBy { it.id.clock }
+        val itemEnd = item.endClock()
+        var low = 0
+        var high = structs.size
+        while (low < high) {
+            val middle = (low + high) ushr 1
+            if (structs[middle].id.clock < item.id.clock) low = middle + 1 else high = middle
+        }
+        val insertionIndex = low
+        val left = structs.getOrNull(insertionIndex - 1)
+        val right = structs.getOrNull(insertionIndex)
+        if (
+            (left != null && item.id.clock < left.endClock()) ||
+            (right != null && right.id.clock < itemEnd)
+        ) return false
+        structs.add(insertionIndex, item)
         return true
     }
 
@@ -59,18 +73,18 @@ class StructStore(private val owner: YDoc? = null) {
     }
 
     internal fun getStoreItem(id: Id): StoreItem? =
-        clientItems[id.client]?.firstOrNull { id.clock >= it.id.clock && id.clock < it.id.clock + it.length }
+        clientItems[id.client]?.firstOrNull { id.clock >= it.id.clock && id.clock < it.endClock() }
 
     internal fun contains(id: Id): Boolean = getStoreItem(id) != null
 
     internal fun collectItemContent(id: Id): StoreItem? {
         val structs = clientItems[id.client] ?: return null
-        val index = structs.indexOfFirst { item -> id.clock >= item.id.clock && id.clock < item.id.clock + item.length }
+        val index = structs.indexOfFirst { item -> id.clock >= item.id.clock && id.clock < item.endClock() }
         if (index < 0) return null
         val item = structs[index]
         if (!item.deleted) return null
         if (item.content is ItemContent.Deleted) return null
-        val collected = item.copy(content = ItemContent.Deleted(item.content.kind))
+        val collected = item.copy(content = ItemContent.Deleted(item.content.kind, item.length))
         structs[index] = collected
         return collected
     }
@@ -86,13 +100,13 @@ class StructStore(private val owner: YDoc? = null) {
 
     fun getClock(client: Long): Long {
         val structs = clientItems[client] ?: return 0
-        return structs.maxOfOrNull { it.id.clock + it.length } ?: 0
+        return structs.maxOfOrNull(StoreItem::endClock) ?: 0
     }
 
     fun stateVector(): StateVector {
         val state = linkedMapOf<Long, Long>()
         clientItems.forEach { (client, structs) ->
-            val clock = structs.maxOfOrNull { it.id.clock + it.length } ?: 0
+            val clock = structs.maxOfOrNull(StoreItem::endClock) ?: 0
             if (clock > 0) state[client] = clock
         }
         skips.clients.forEach { (client, ranges) ->
@@ -106,7 +120,7 @@ class StructStore(private val owner: YDoc? = null) {
             for (index in 1 until structs.size) {
                 val left = structs[index - 1]
                 val right = structs[index]
-                check(left.id.clock + left.length == right.id.clock) {
+                check(left.endClock() == right.id.clock) {
                     "StructStore failed integrity check"
                 }
             }
@@ -122,8 +136,21 @@ class StructStore(private val owner: YDoc? = null) {
 
     internal fun parentKinds(): Map<String, RootKind> = owner?.knownParentKinds().orEmpty()
 
-    internal fun itemsSince(stateVector: StateVector): List<StoreItem> = allItems().filter { item ->
-        item.id.clock >= (stateVector[item.id.client] ?: 0)
+    internal fun itemsSince(stateVector: StateVector): List<StoreItem> = allItems().mapNotNull { item ->
+        val targetClock = stateVector[item.id.client] ?: 0
+        when {
+            item.endClock() <= targetClock -> null
+            item.id.clock >= targetClock -> item
+            item.content is ItemContent.Deleted -> {
+                val remaining = item.endClock() - targetClock
+                item.copy(
+                    id = Id(item.id.client, targetClock),
+                    origin = if (item.isGc) null else Id(item.id.client, targetClock - 1),
+                    content = item.content.copy(length = remaining),
+                )
+            }
+            else -> error("state vector splits unsupported store item at ${item.id}:$targetClock")
+        }
     }
 
     internal fun markDeleted(deleteSet: DeleteSet): Boolean {
@@ -156,70 +183,127 @@ class StructStore(private val owner: YDoc? = null) {
         // Rebuild the linked sequence using the same conflict scan as Item.integrate in Yjs.
         // A simple origin-child traversal is insufficient: an item's rightOrigin may constrain
         // it relative to items from a different origin subtree.
-        val itemIds = items.mapTo(hashSetOf()) { item -> item.id }
-        val remaining = items.sortedBy { item -> item.id }.toMutableList()
-        val ordered = mutableListOf<StoreItem>()
-        val integratedIds = hashSetOf<Id>()
+        val nodes = items.map(::SequenceNode)
+        val nodesByClient = nodes.groupBy { node -> node.item.id.client }
+            .mapValues { (_, clientNodes) -> clientNodes.sortedBy { node -> node.item.id.clock } }
+
+        fun findNode(id: Id?): SequenceNode? {
+            if (id == null) return null
+            val clientNodes = nodesByClient[id.client] ?: return null
+            var low = 0
+            var high = clientNodes.lastIndex
+            var candidate: SequenceNode? = null
+            while (low <= high) {
+                val middle = (low + high) ushr 1
+                val node = clientNodes[middle]
+                if (node.item.id.clock <= id.clock) {
+                    candidate = node
+                    low = middle + 1
+                } else {
+                    high = middle - 1
+                }
+            }
+            return candidate?.takeIf { node -> node.item.contains(id) }
+        }
+
+        val dependencies = nodes.associateWith { linkedSetOf<SequenceNode>() }
+        val dependents = nodes.associateWith { linkedSetOf<SequenceNode>() }
+        fun dependsOn(node: SequenceNode, dependency: SequenceNode?) {
+            if (dependency == null || dependency === node || !dependencies.getValue(node).add(dependency)) return
+            dependents.getValue(dependency).add(node)
+        }
+        nodesByClient.values.forEach { clientNodes ->
+            for (index in 1 until clientNodes.size) dependsOn(clientNodes[index], clientNodes[index - 1])
+        }
+        nodes.forEach { node ->
+            dependsOn(node, findNode(node.item.origin))
+            dependsOn(node, findNode(node.item.rightOrigin))
+        }
+
+        val remaining = nodes.toMutableSet()
+        val integrated = hashSetOf<SequenceNode>()
+        val indegrees = dependencies.mapValuesTo(mutableMapOf()) { (_, values) -> values.size }
+        val ready = java.util.PriorityQueue(compareBy<SequenceNode> { node -> node.item.id })
+        nodes.filterTo(ready) { node -> indegrees.getValue(node) == 0 }
+        var start: SequenceNode? = null
 
         while (remaining.isNotEmpty()) {
-            val nextIndex = remaining.indexOfFirst { item ->
-                val anchorsIntegrated =
-                    (item.origin !in itemIds || item.origin in integratedIds) &&
-                        (item.rightOrigin !in itemIds || item.rightOrigin in integratedIds)
-                val earlierClientItemsIntegrated = items.none { candidate ->
-                    candidate.id.client == item.id.client &&
-                        candidate.id.clock < item.id.clock &&
-                        candidate.id !in integratedIds
-                }
-                anchorsIntegrated && earlierClientItemsIntegrated
+            var node = ready.poll()
+            while (node != null && node !in remaining) node = ready.poll()
+            if (node == null) {
+                // Valid Yjs updates are acyclic. Keep malformed/private legacy data deterministic
+                // instead of looping forever if it contains a dependency cycle.
+                node = remaining.minBy { candidate -> candidate.item.id }
             }
-            // Valid Yjs updates are acyclic. Keep malformed/private legacy data deterministic
-            // instead of looping forever if it contains a dependency cycle.
-            val item = remaining.removeAt(if (nextIndex >= 0) nextIndex else 0)
-            insertSequenceItem(ordered, item)
-            integratedIds.add(item.id)
+
+            val item = node.item
+            var left = findNode(item.origin)?.takeIf { anchor -> anchor in integrated }
+            val right = findNode(item.rightOrigin)?.takeIf { anchor -> anchor in integrated }
+            var other = if (left != null) left.right else start
+            val conflictingItems = hashSetOf<SequenceNode>()
+            val itemsBeforeOrigin = hashSetOf<SequenceNode>()
+            val scanned = hashSetOf<SequenceNode>()
+
+            while (other != null && other !== right) {
+                check(scanned.add(other)) { "cycle while integrating ${item.id} in $parent" }
+                itemsBeforeOrigin.add(other)
+                conflictingItems.add(other)
+                when {
+                    compareIDs(item.origin, other.item.origin) -> {
+                        if (other.item.id.client < item.id.client) {
+                            left = other
+                            conflictingItems.clear()
+                        } else if (compareIDs(item.rightOrigin, other.item.rightOrigin)) {
+                            break
+                        }
+                    }
+                    other.item.origin != null && findNode(other.item.origin) in itemsBeforeOrigin -> {
+                        if (findNode(other.item.origin) !in conflictingItems) {
+                            left = other
+                            conflictingItems.clear()
+                        }
+                    }
+                    else -> break
+                }
+                other = other.right
+            }
+
+            val actualRight = if (left != null) left.right else start
+            node.left = left
+            node.right = actualRight
+            if (left == null) start = node else left.right = node
+            actualRight?.left = node
+
+            remaining.remove(node)
+            integrated.add(node)
+            dependents.getValue(node).forEach { dependent ->
+                val next = indegrees.getValue(dependent) - 1
+                indegrees[dependent] = next
+                if (next == 0 && dependent in remaining) ready.add(dependent)
+            }
         }
-        return ordered
+
+        return buildList(items.size) {
+            val seen = hashSetOf<SequenceNode>()
+            var current = start
+            while (current != null && seen.add(current)) {
+                add(current.item)
+                current = current.right
+            }
+        }
     }
 
     internal fun mapEntries(parent: String, key: String): List<StoreItem> = allItems()
         .filter { it.parent == parent && it.parentSub == key }
         .sortedWith(compareBy<StoreItem> { it.id.clock }.thenBy { it.id.client })
 
-    private fun insertSequenceItem(ordered: MutableList<StoreItem>, item: StoreItem) {
-        var leftIndex = item.origin?.let { origin ->
-            ordered.indexOfFirst { existing -> existing.id == origin }.takeIf { index -> index >= 0 }
-        } ?: -1
-        var scanIndex = leftIndex + 1
-        val conflictingItems = hashSetOf<Id>()
-        val itemsBeforeOrigin = hashSetOf<Id>()
-
-        while (scanIndex < ordered.size) {
-            val other = ordered[scanIndex]
-            if (compareIDs(other.id, item.rightOrigin)) break
-
-            itemsBeforeOrigin.add(other.id)
-            conflictingItems.add(other.id)
-            when {
-                compareIDs(item.origin, other.origin) -> {
-                    if (other.id.client < item.id.client) {
-                        leftIndex = scanIndex
-                        conflictingItems.clear()
-                    } else if (compareIDs(item.rightOrigin, other.rightOrigin)) {
-                        break
-                    }
-                }
-                other.origin != null && other.origin in itemsBeforeOrigin -> {
-                    if (other.origin !in conflictingItems) {
-                        leftIndex = scanIndex
-                        conflictingItems.clear()
-                    }
-                }
-                else -> break
-            }
-            scanIndex++
-        }
-
-        ordered.add(leftIndex + 1, item)
-    }
+    private fun StoreItem.contains(id: Id): Boolean =
+        id.client == this.id.client && id.clock >= this.id.clock && id.clock < endClock()
 }
+
+private class SequenceNode(val item: StoreItem) {
+    var left: SequenceNode? = null
+    var right: SequenceNode? = null
+}
+
+private fun StoreItem.endClock(): Long = checkedClockAdd(id.clock, length, "store item end")

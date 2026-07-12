@@ -68,12 +68,15 @@ private fun decodeSnapshotWithDecoder(decoder: IdSetDecoderV1): Snapshot {
     return createSnapshot(deleteSet, stateVector)
 }
 
-fun snapshotContainsUpdate(snapshot: Snapshot, update: ByteArray): Boolean = snapshotContainsUpdateV2(snapshot, update)
+fun snapshotContainsUpdate(snapshot: Snapshot, update: ByteArray): Boolean =
+    snapshotContainsDecodedUpdate(snapshot, UpdateCodec.decode(update))
 
-fun snapshotContainsUpdateV2(snapshot: Snapshot, update: ByteArray): Boolean {
-    val decoded = UpdateCodec.decode(update)
+fun snapshotContainsUpdateV2(snapshot: Snapshot, update: ByteArray): Boolean =
+    snapshotContainsDecodedUpdate(snapshot, UpdateCodec.decodeV2(update))
+
+private fun snapshotContainsDecodedUpdate(snapshot: Snapshot, decoded: DocumentUpdate): Boolean {
     val structsCovered = decoded.items.all { item ->
-        (snapshot.sv[item.id.client] ?: 0) >= item.id.clock + item.length
+        (snapshot.sv[item.id.client] ?: 0) >= checkedClockAdd(item.id.clock, item.length)
     }
     if (!structsCovered) return false
 

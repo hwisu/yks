@@ -549,7 +549,7 @@ internal fun ItemContent.toContent(doc: YDoc): AbstractContent = when (this) {
     is ItemContent.MapEntry -> value.toContent(doc)
     is ItemContent.XmlNode -> ContentAny(listOf(value.toEventJson()))
     is ItemContent.XmlType -> ContentType(doc.typeFromXmlType(this))
-    is ItemContent.Deleted -> ContentDeleted(1)
+    is ItemContent.Deleted -> ContentDeleted(length)
 }
 
 private fun YValue.toContent(doc: YDoc): AbstractContent {
