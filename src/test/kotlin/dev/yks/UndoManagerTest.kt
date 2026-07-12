@@ -540,7 +540,7 @@ class UndoManagerTest {
 
     @Test
     fun publicUndoRedoStacksAcceptIdSetStackItems() {
-        val doc = YDoc(clientId = 1)
+        val doc = YDoc(clientId = 1, gc = false)
         val text = doc.getText("body")
         text.insert(0, "abc")
         val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
@@ -972,7 +972,7 @@ class UndoManagerTest {
 
     @Test
     fun undoContentIdsRestoresSelectedDeletedContent() {
-        val doc = YDoc(clientId = 1)
+        val doc = YDoc(clientId = 1, gc = false)
         val text = doc.getText("body")
         text.insert(0, "abc")
         text.delete(1)

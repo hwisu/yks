@@ -717,8 +717,10 @@ class YTextDeltaTest {
         assertEquals(leftText.toDelta(), rightText.toDelta())
         assertEquals(
             YTextDelta()
-                .insert("abc", mapOf("bold" to true))
-                .insert("de"),
+                .insert("ab", mapOf("bold" to true))
+                .insertSegment("c", mapOf("bold" to true))
+                .insert("d")
+                .insertSegment("e"),
             rightText.toDelta(),
         )
         assertEquals(

@@ -137,25 +137,25 @@ class YTypeApiAliasTest {
         assertEquals("hello", returned)
         assertEquals(3, map.attrSize)
         assertEquals(setOf("count", "enabled", "title"), map.attrKeys())
-        assertEquals(listOf(2L, true, "hello"), map.attrValues().toList())
+        assertEquals(listOf("hello", true, 2L), map.attrValues().toList())
         assertEquals(
-            listOf("count=2", "enabled=true", "title=hello"),
+            listOf("title=hello", "enabled=true", "count=2"),
             map.attrEntries().map { "${it.key}=${it.value}" },
         )
         assertEquals(
-            listOf("count:2", "enabled:true", "title:hello"),
+            listOf("title:hello", "enabled:true", "count:2"),
             buildList { map.forEach { value, key -> add("$key:$value") } },
         )
         assertEquals(
-            listOf("count", "enabled", "title"),
+            listOf("title", "enabled", "count"),
             map.mapAttrs { _, key -> key },
         )
         assertEquals(
-            listOf("count", "enabled", "title"),
+            listOf("title", "enabled", "count"),
             map.map { it.key },
         )
         assertEquals(
-            listOf("count:2", "enabled:true", "title:hello"),
+            listOf("title:hello", "enabled:true", "count:2"),
             buildList { map.forEachAttr { value, key -> add("$key:$value") } },
         )
         map.setAttr("remove", "me")

@@ -125,10 +125,10 @@ class RendererTest {
 
     @Test
     fun diffRendererTracksInsertedAndDeletedRangesAndCanAcceptAllChanges() {
-        val prev = YDoc(clientId = 1)
+        val prev = YDoc(clientId = 1, gc = false)
         val prevText = prev.getText("body")
         prevText.insert(0, "ab")
-        val next = cloneDoc(prev).also { it.clientId = 2 }
+        val next = cloneDoc(prev, YDocOptions(clientId = 2, gc = false))
         val nextText = next.getText("body")
         nextText.delete(0)
         nextText.insert(1, "c")

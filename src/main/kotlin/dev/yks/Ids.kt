@@ -6,7 +6,7 @@ data class IdRange(val clock: Long, val len: Long) {
         require(len >= 0) { "len must be non-negative" }
     }
 
-    val end: Long get() = clock + len
+    val end: Long get() = checkedClockAdd(clock, len, "id range end")
 
     val attrs: List<ContentAttribute> get() = emptyList()
 
@@ -270,6 +270,7 @@ fun _intersectSets(left: IdSet, right: IdSet): IdSet = intersectSets(left, right
 fun _intersectSets(left: IdSet, right: IdMap): IdSet = intersectSets(left, right)
 
 fun writeIdSet(encoder: BinaryEncoder, idSet: IdSet) {
+    requireYjsSafeIdSet(idSet)
     val clients = idSet.clients.filterValues { it.isNotEmpty() }.toSortedMap(compareByDescending { it })
     encoder.writeVarUInt(clients.size.toLong())
     clients.forEach { (client, ranges) ->
@@ -283,6 +284,7 @@ fun writeIdSet(encoder: BinaryEncoder, idSet: IdSet) {
 }
 
 fun writeIdSet(encoder: IdSetEncoderV1, idSet: IdSet) {
+    requireYjsSafeIdSet(idSet)
     val clients = idSet.clients.filterValues { it.isNotEmpty() }.toSortedMap(compareByDescending { it })
     encoder.restEncoder.writeVarUInt(clients.size.toLong())
     clients.forEach { (client, ranges) ->
@@ -292,6 +294,23 @@ fun writeIdSet(encoder: IdSetEncoderV1, idSet: IdSet) {
         ranges.forEach { range ->
             encoder.writeIdSetClock(range.clock)
             encoder.writeIdSetLen(range.len)
+        }
+    }
+}
+
+internal fun requireYjsSafeIdSet(idSet: IdSet) {
+    idSet.ranges().forEach { (client, range) ->
+        require(client.isYjsSafeVarUint()) {
+            "id-set client must be a JavaScript safe unsigned integer: $client"
+        }
+        require(range.clock.isYjsSafeVarUint()) {
+            "id-set clock must be a JavaScript safe unsigned integer: ${range.clock}"
+        }
+        require(range.len.isYjsSafeVarUint()) {
+            "id-set length must be a JavaScript safe unsigned integer: ${range.len}"
+        }
+        require(range.end <= YJS_MAX_SAFE_INTEGER) {
+            "id-set range end must be a JavaScript safe unsigned integer: ${range.end}"
         }
     }
 }

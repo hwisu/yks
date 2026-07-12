@@ -44,6 +44,8 @@ fun encodeSnapshot(snapshot: Snapshot): ByteArray =
     encodeSnapshotV2(snapshot, IdSetEncoderV1())
 
 fun encodeSnapshotV2(snapshot: Snapshot, encoder: IdSetEncoderV1 = IdSetEncoderV2()): ByteArray {
+    requireYjsSafeIdSet(snapshot.ds)
+    requireYjsSafeStateVector(snapshot.sv)
     writeIdSet(encoder, snapshot.ds)
     writeStateVector(encoder, snapshot.sv)
     return encoder.toByteArray()

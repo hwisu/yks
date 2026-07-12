@@ -78,6 +78,18 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun appliesMapBackedXmlHookProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 2, gc = false)
+
+        applyUpdate(doc, fixture("xml-hook-v1"))
+
+        val hook = doc.getXmlFragment("xml").getType(0) as YXmlHook
+        assertEquals("Widget", hook.hookName)
+        assertEquals(mapOf("x" to 1L, "nested" to mapOf("ok" to true)), hook.toJSON())
+        assertEquals("[object Object]", doc.getXmlFragment("xml").toString())
+    }
+
+    @Test
     fun appliesSubdocumentUpdateV2ProducedByUpstreamYjs() {
         val doc = YDoc(clientId = 2, gc = false)
         applyUpdateV2(doc, fixture("subdoc-array-v2"))
@@ -689,6 +701,20 @@ class YjsV1InteropTest {
 
         assertStandardV1(update)
         assertUpstreamAppliesUpdate(update, "xml-formatted")
+    }
+
+    @Test
+    fun upstreamYjsAppliesMapBackedXmlHookAuthoredByKotlin() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val hook = doc.createXmlHook("Widget")
+        doc.getXmlFragment("xml").push(hook)
+        hook.set("x", 1)
+        hook.set("nested", linkedMapOf("ok" to true))
+
+        val update = encodeStateAsUpdate(doc)
+
+        assertStandardV1(update)
+        assertUpstreamAppliesUpdate(update, "xml-hook")
     }
 
     @Test

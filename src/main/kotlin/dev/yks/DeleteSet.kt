@@ -31,7 +31,13 @@ class DeleteSet internal constructor(
 
     fun contains(id: Id): Boolean = clients[id.client]?.any { it.contains(id.clock) } == true
 
+    fun hasId(id: Id): Boolean = contains(id)
+
     fun rangesFor(client: Long): List<DeleteRange> = clients[client].orEmpty()
+
+    fun ranges(): List<Pair<Long, IdRange>> = clients
+        .toSortedMap()
+        .flatMap { (client, ranges) -> ranges.map { range -> client to IdRange(range.clock, range.length) } }
 
     fun toIdSet(): IdSet {
         val idSet = createIdSet()
@@ -74,8 +80,25 @@ class DeleteSet internal constructor(
     }
 }
 
+fun createDeleteSet(): DeleteSet = DeleteSet.empty()
+
+fun createDeleteSetFromStructStore(store: StructStore): DeleteSet = store.deleteSet()
+
+fun createDeleteSetFromStructStore(doc: YDoc): DeleteSet = createDeleteSetFromStructStore(doc.store)
+
+fun equalDeleteSets(left: DeleteSet, right: DeleteSet): Boolean = left.structurallyEquals(right)
+
+fun mergeDeleteSets(deleteSets: List<DeleteSet>): DeleteSet = createDeleteSet().also { merged ->
+    deleteSets.forEach(merged::addAll)
+}
+
+fun isDeleted(deleteSet: DeleteSet, id: Id): Boolean = deleteSet.contains(id)
+
+fun isDeleted(deleteSet: DeleteSet, client: Long, clock: Long): Boolean =
+    isDeleted(deleteSet, Id(client, clock))
+
 fun IdSet.toDeleteSet(): DeleteSet {
-    val deleteSet = DeleteSet.empty()
+    val deleteSet = createDeleteSet()
     ranges().forEach { (client, range) ->
         deleteSet.add(Id(client, range.clock), range.len)
     }

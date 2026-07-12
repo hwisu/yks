@@ -195,6 +195,24 @@ for (const names of permutations([
   })
 }
 
+for (const names of permutations([
+  'concurrent-format-base-v1',
+  'text-format-boundary-long-v1',
+  'text-format-boundary-short-v1',
+])) {
+  test(`native format boundaries stay visible in delta order ${names.join(', ')}`, () => {
+    const doc = new Y.Doc({ gc: false })
+    for (const name of names) Y.applyUpdate(doc, fixture(name))
+    assert.deepEqual(doc.getText('body').toDelta(), [
+      { insert: 'a' },
+      { insert: 'b', attributes: { italic: 'x' } },
+      { insert: 'c' },
+      { insert: 'd' },
+    ])
+    assert.equal(doc.store.pendingStructs, null)
+  })
+}
+
 const assertXml = (doc, expected = '<p class="intro">hi</p>') => {
   const fragment = doc.getXmlFragment('xml')
   assert.equal(fragment.toString(), expected)
@@ -318,6 +336,22 @@ for (const names of [
     assert.deepEqual(apply(names, 'map').getMap('meta').toJSON(), { first: 1, second: 2 })
   })
 }
+
+test('map iteration follows first integration order while merged updates have canonical wire order', () => {
+  const oneThenTwo = new Y.Doc({ gc: false })
+  Y.applyUpdate(oneThenTwo, fixture('map-order-client-one-v1'))
+  Y.applyUpdate(oneThenTwo, fixture('map-order-client-two-v1'))
+  assert.deepEqual([...oneThenTwo.getMap('ordered').keys()], ['z', 'a'])
+
+  const twoThenOne = new Y.Doc({ gc: false })
+  Y.applyUpdate(twoThenOne, fixture('map-order-client-two-v1'))
+  Y.applyUpdate(twoThenOne, fixture('map-order-client-one-v1'))
+  assert.deepEqual([...twoThenOne.getMap('ordered').keys()], ['a', 'z'])
+
+  const merged = new Y.Doc({ gc: false })
+  Y.applyUpdate(merged, fixture('map-order-merged-v1'))
+  assert.deepEqual([...merged.getMap('ordered').keys()], ['a', 'z'])
+})
 
 test('full map fixture includes the replacement and delete set', () => {
   assert.deepEqual(apply(['map-full-v1'], 'map').getMap('meta').toJSON(), { title: 'new' })

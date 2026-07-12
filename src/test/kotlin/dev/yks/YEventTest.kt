@@ -10,7 +10,7 @@ import kotlin.test.assertTrue
 class YEventTest {
     @Test
     fun arrayObserverReceivesRetainDeleteInsertDelta() {
-        val doc = YDoc(clientId = 1)
+        val doc = YDoc(clientId = 1, gc = false)
         val array = doc.getArray("items")
         val events = mutableListOf<YEvent>()
         array.observe { events.add(it) }
@@ -385,7 +385,7 @@ class YEventTest {
 
     @Test
     fun eventDeepDeltaRendersClaimedContentInsertedAndDeletedInSameTransaction() {
-        val doc = YDoc(clientId = 1)
+        val doc = YDoc(clientId = 1, gc = false)
         val array = doc.getArray("items")
         val renderer = TwosetRenderer(
             inserts = createIdMap(),

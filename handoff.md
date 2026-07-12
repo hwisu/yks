@@ -8,14 +8,15 @@
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
 - 기준 원격 커밋: `origin/main` = `d2e93a6`
-- 이번 커밋 반영 후 `origin/main`보다 3개 커밋 앞섬
+- 이번 커밋 반영 후 `origin/main`보다 4개 커밋 앞섬
 - 2026-07-12 정밀 감사에서 기존 완료 선언과 달리 추가 parity blocker를 확인하여 개선 작업 진행 중
 - 모든 개선 커밋은 구현·회귀 테스트와 이 문서를 함께 갱신함
 
 현재 커밋 이력:
 
 ```text
-HEAD fix: harden Yjs update metadata and range merging
+HEAD fix: align Yjs cleanup map and XML semantics
+cada05a fix: harden Yjs update metadata and range merging
 92e2908 fix: close audited Yjs interoperability gaps
 3b40be1 fix: match Yjs sequence conflict ordering
 d2e93a6 docs: finalize Yjs Kotlin implementation handoff
@@ -346,6 +347,38 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - private zig-zag varint가 `Long.MIN_VALUE..Long.MAX_VALUE` 전체를 무손실 기록하도록 unsigned bit emission 수정
 - `PermanentUserData`가 user map 또는 `ids`/`ds` array 교체·삭제 뒤에도 기존 client/delete 귀속을 누적 보존하고 새 shared array로 이관
 
+### 26. automatic GC와 DeleteSet 공개 surface
+
+- upstream transaction lifecycle과 같이 direct/deep/`afterTransaction` observer 뒤, `afterTransactionCleanup` 앞에서 automatic GC 수행
+- `gc`, `gcFilter`, `keepItem`을 존중하며 transaction update는 GC 전에 캡처해 relay 가능성을 보존
+- `UndoManager`가 delete capture와 undo/redo delete를 GC 전에 keep하도록 보강
+- GC가 content를 `ContentDeleted`로 교체해도 Item의 구조적 countable flag를 보존해 relative position과 attributed renderer 의미 유지
+- `iterateStructsByIdSet`을 range/store 기반으로 바꿔 대형 range의 clock 단위 순회 제거
+- 공개 API 추가/정렬:
+  - `createDeleteSet`, `createDeleteSetFromStructStore`
+  - `equalDeleteSets`, `mergeDeleteSets`, `isDeleted`
+  - `iterateDeletedStructs`
+- state vector, IdSet, snapshot V1/V2 writer가 JS safe integer 범위를 넘는 좌표/end를 명시적으로 거부
+
+### 27. map order와 native format boundary
+
+- `YMap` iterator/keys/values/entries/forEach는 각 document의 최초 key integration 순서를 유지
+  - update/delete/reinsert는 기존 key slot 유지
+  - remote update 적용 순서에 따른 document-local 순서와 `mergeUpdates` canonical wire 순서를 upstream fixture로 각각 검증
+- `YMap.toJSON()`/`toJson()`은 plain JavaScript object처럼 array-index key를 먼저 숫자 오름차순으로 열거
+- visible native `ContentFormat` marker마다 `YText.toDelta()` segment를 flush하고, 같은 attributes라도 builder가 다시 합치지 않도록 boundary-preserving op 추가
+- snapshot delta와 clone에서도 같은 segmentation 보존
+
+### 28. YXmlText coercion과 map-backed YXmlHook
+
+- `YXmlTextType` embed/format 값을 JS String/property enumeration 규칙으로 렌더링
+  - object `[object Object]`, array/ByteArray index attributes, null/undefined/Boolean/number coercion 검증
+- 실제 `YMap` subclass인 `YXmlHook` 추가
+  - `hookName`, map API, `toJSON`, `[object Object]` 문자열 의미
+  - type-ref 5 V1/V2 read/write, `YDoc.createXmlHook`, clone/materialization 지원
+  - hook 내부 변경은 map snapshot/event/delta 의미 사용
+- private envelope는 unresolved-parent metadata가 있을 때만 V3를 쓰고, 그 외 payload는 rolling-upgrade 호환 V2 유지
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -425,9 +458,9 @@ subdoc-duplicate-guid-v1.bin
 BUILD SUCCESSFUL
 ```
 
-- 일반 Kotlin tests: 553 passed
-- Kotlin Yjs V1/V2 interop tests: 73 passed
-- JavaScript/Yjs oracle tests: 78 passed
+- 일반 Kotlin tests: 567 passed
+- Kotlin Yjs V1/V2 interop tests: 77 passed
+- JavaScript/Yjs oracle tests: 88 passed
 - deterministic upstream differential: 500 seeds, 0 failures
 - 15,000 nested insertion regression: passed
 - fixture regeneration diff: clean
@@ -451,9 +484,8 @@ git diff --check
 
 1. 표준 update API에서 남아 있는 static XML/Kotlin-only extension의 private `YKS` fallback을 명시적으로 분리
 2. detached/preliminary shared type의 동일 instance integration과 owner-before-child clock 의미 구현
-3. map key iteration order, adjacent equal-format delta segmentation 등 남은 공개 API 세부 의미 정렬
-4. map형 `YXmlHook`, typed event/deep-observe contract 등 공개 type surface 보강
-5. transaction cleanup의 automatic GC와 남은 delete-set/public export 보강
+3. typed event/deep-observe contract 등 공개 type surface 보강
+4. unopened remote root의 `YDoc.toJSON` materialization과 XML snapshot formatting 세부 의미 정렬
 
 아래 항목은 기존 구현의 compatibility 제약 기록이며, 위 blocker를 모두 해결한 뒤 실제 남은 JVM adaptation만 재분류해야 함:
 

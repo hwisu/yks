@@ -19,6 +19,7 @@ fun integrityCheck(store: StructStore) {
 }
 
 fun writeStateVector(encoder: BinaryEncoder, stateVector: StateVector): BinaryEncoder {
+    requireYjsSafeStateVector(stateVector)
     encoder.writeVarUInt(stateVector.size.toLong())
     stateVector.toSortedMap(compareByDescending { it }).forEach { (client, clock) ->
         encoder.writeVarUInt(client)
@@ -28,12 +29,24 @@ fun writeStateVector(encoder: BinaryEncoder, stateVector: StateVector): BinaryEn
 }
 
 fun writeStateVector(encoder: IdSetEncoderV1, stateVector: StateVector): IdSetEncoderV1 {
+    requireYjsSafeStateVector(stateVector)
     encoder.restEncoder.writeVarUInt(stateVector.size.toLong())
     stateVector.toSortedMap(compareByDescending { it }).forEach { (client, clock) ->
         encoder.restEncoder.writeVarUInt(client)
         encoder.restEncoder.writeVarUInt(clock)
     }
     return encoder
+}
+
+internal fun requireYjsSafeStateVector(stateVector: StateVector) {
+    stateVector.forEach { (client, clock) ->
+        require(client.isYjsSafeVarUint()) {
+            "state-vector client must be a JavaScript safe unsigned integer: $client"
+        }
+        require(clock.isYjsSafeVarUint()) {
+            "state-vector clock must be a JavaScript safe unsigned integer: $clock"
+        }
+    }
 }
 
 fun writeDocumentStateVector(encoder: BinaryEncoder, doc: YDoc): BinaryEncoder =

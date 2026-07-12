@@ -13,6 +13,7 @@ export const scenarioNames = [
   'partial-formatted-text',
   'xml',
   'xml-formatted',
+  'xml-hook',
   'subdoc-map',
   'subdoc-array',
   'subdoc-array-default',
@@ -103,6 +104,13 @@ export const createScenarioDocument = name => {
       const text = new Y.XmlText()
       paragraph.insert(0, [text])
       text.insert(0, 'hi', { strong: { level: '1' } })
+      break
+    }
+    case 'xml-hook': {
+      const hook = new Y.XmlHook('Widget')
+      doc.getXmlFragment('xml').insert(0, [hook])
+      hook.set('x', 1)
+      hook.set('nested', { ok: true })
       break
     }
     case 'subdoc-map':
@@ -204,6 +212,7 @@ export const materializeScenario = (doc, name) => {
       return doc.getText('body')
     case 'xml':
     case 'xml-formatted':
+    case 'xml-hook':
       return doc.getXmlFragment('xml')
     case 'subdoc-map':
       return doc.getMap('subs')

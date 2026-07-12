@@ -68,6 +68,12 @@ if (scenario === 'subdoc-text' || scenario === 'subdoc-xml-text') {
   if (scenario === 'nested-text') {
     assert.ok(actual.getArray('nodes').get(0) instanceof Y.Text)
   }
+  if (scenario === 'xml-hook') {
+    const hook = actual.getXmlFragment('xml').get(0)
+    assert.ok(hook instanceof Y.XmlHook)
+    assert.equal(hook.hookName, 'Widget')
+    assert.deepEqual(hook.toJSON(), { x: 1, nested: { ok: true } })
+  }
   if (scenario === 'subdoc-map') {
     const child = actual.getMap('subs').get('child')
     assert.ok(child instanceof Y.Doc)

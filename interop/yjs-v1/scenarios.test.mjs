@@ -43,5 +43,11 @@ for (const name of scenarioNames) {
       assert.equal(child.shouldLoad, false)
       assert.equal(child.autoLoad, false)
     }
+    if (name === 'xml-hook') {
+      const hook = target.getXmlFragment('xml').get(0)
+      assert.ok(hook instanceof Y.XmlHook)
+      assert.equal(hook.hookName, 'Widget')
+      assert.deepEqual(hook.toJSON(), { x: 1, nested: { ok: true } })
+    }
   })
 }

@@ -27,6 +27,14 @@ class YTextDelta(ops: List<YTextDeltaOp> = emptyList()) {
         return this
     }
 
+    /** Adds a string op without coalescing it with the previous op. */
+    internal fun insertSegment(text: String, attributes: Map<String, Any?> = emptyMap()): YTextDelta {
+        if (text.isNotEmpty()) {
+            mutableOps.add(YTextDeltaOp(insert = text, attributes = normalizePublicAttributes(attributes)))
+        }
+        return this
+    }
+
     fun insert(values: List<Any?>, attributes: Map<String, Any?> = emptyMap()): YTextDelta {
         if (values.isEmpty()) return this
         val normalized = normalizePublicAttributes(attributes)

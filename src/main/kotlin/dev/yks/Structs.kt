@@ -81,6 +81,7 @@ data class ItemStruct(
     val parentSub: String?,
     val kind: RootKind,
     val content: AbstractContent,
+    val countable: Boolean = content.isCountable(),
 ) : AbstractStruct(id, length) {
     override val isItem: Boolean get() = true
 }
@@ -328,14 +329,8 @@ fun iterateStructsByIdSet(
     idSet: IdSet,
     action: (struct: ItemStruct, offset: Long, length: Long) -> Unit,
 ) {
-    idSet.ranges().forEach { (client, range) ->
-        var clock = range.clock
-        while (clock < range.end) {
-            doc.getItem(Id(client, clock))?.let { item ->
-                action(item.toItemStruct(doc), 0, item.length)
-            }
-            clock++
-        }
+    doc.itemsForIdSet(idSet).forEach { item ->
+        action(item.toItemStruct(doc), 0, item.length)
     }
 }
 
@@ -379,24 +374,50 @@ fun iterateStructsByIdSetWithoutSplits(
     }
 }
 
+fun iterateDeletedStructs(
+    doc: YDoc,
+    deleteSet: DeleteSet,
+    action: (AbstractStruct) -> Unit,
+) {
+    iterateStructsByIdSet(doc, deleteSet.toIdSet()) { struct, _, _ -> action(struct) }
+}
+
+fun iterateDeletedStructs(
+    transaction: YTransaction,
+    deleteSet: DeleteSet,
+    action: (AbstractStruct) -> Unit,
+) {
+    iterateDeletedStructs(transaction.doc, deleteSet, action)
+}
+
 fun gcIdSet(
     doc: YDoc,
     idSet: IdSet,
     gcFilter: (AbstractStruct) -> Boolean = doc.gcFilter,
 ): IdSet {
-    val collected = createIdSet()
+    var collected = createIdSet()
     doc.transact {
-        iterateStructsByIdSet(doc, idSet) { struct, _, _ ->
-            if (
-                struct.deleted &&
-                struct.content !is ContentDeleted &&
-                !doc.isItemKept(struct.id) &&
-                gcFilter(struct)
-            ) {
-                doc.store.getStoreItem(struct.id)?.let { item ->
-                    collectDeletedItemContent(doc, item, collected)
-                }
-            }
+        collected = collectGarbageNow(doc, idSet, gcFilter)
+    }
+    return collected
+}
+
+internal fun collectGarbageNow(
+    doc: YDoc,
+    idSet: IdSet,
+    gcFilter: (AbstractStruct) -> Boolean = doc.gcFilter,
+): IdSet {
+    val collected = createIdSet()
+    iterateStructsByIdSet(doc, idSet) { selected, _, _ ->
+        val item = doc.store.getStoreItem(selected.id) ?: return@iterateStructsByIdSet
+        val struct = item.toItemStruct(doc)
+        if (
+            item.deleted &&
+            item.content !is ItemContent.Deleted &&
+            !doc.isItemKept(item.id) &&
+            gcFilter(struct)
+        ) {
+            collectDeletedItemContent(doc, item, collected)
         }
     }
     return collected
@@ -465,4 +486,5 @@ internal fun StoreItem.toItemStruct(doc: YDoc): ItemStruct =
         parentSub = parentSub,
         kind = content.kind,
         content = content.toContent(doc),
+        countable = countable,
     )

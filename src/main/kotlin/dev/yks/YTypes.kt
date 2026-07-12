@@ -908,20 +908,28 @@ open class YText internal constructor(
 
         fun flush() {
             if (pendingText.isNotEmpty()) {
-                delta.insert(pendingText.toString(), pendingAttributes.orEmpty())
+                delta.insertSegment(pendingText.toString(), pendingAttributes.orEmpty())
                 pendingText = StringBuilder()
             }
         }
 
-        textItems().forEach { item ->
-            val attributes = textAttributesToPublic(item.content.textAttributes())
-            if (pendingAttributes != null && pendingAttributes != attributes) {
+        doc.sequence(name).forEach { item ->
+            if (item.deleted || item.content.kind != kind) return@forEach
+            if (item.content is ItemContent.NativeTextFormat) {
+                // Upstream Y.Text.toDelta packs pending text at every visible ContentFormat
+                // marker, even when the marker leaves the effective attributes unchanged.
                 flush()
+                return@forEach
             }
-            pendingAttributes = attributes
             when (val content = item.content) {
-                is ItemContent.Text -> pendingText.append(content.value)
+                is ItemContent.Text -> {
+                    val attributes = textAttributesToPublic(content.textAttributes())
+                    if (pendingAttributes != null && pendingAttributes != attributes) flush()
+                    pendingAttributes = attributes
+                    pendingText.append(content.value)
+                }
                 is ItemContent.TextEmbed -> {
+                    val attributes = textAttributesToPublic(content.textAttributes())
                     flush()
                     delta.insertEmbed(doc.valueToAny(content.value), attributes)
                     pendingAttributes = null
@@ -1207,7 +1215,7 @@ internal fun YTextDelta.cloneInto(targetDoc: YDoc): YTextDelta {
     ops.forEach { op ->
         val attrs = op.attributes.mapValues { (_, value) -> value.cloneValueInto(targetDoc) }
         when {
-            op.insert is String -> cloned.insert(op.insert, attrs)
+            op.insert is String -> cloned.insertSegment(op.insert, attrs)
             op.insert != null -> cloned.insertEmbed(op.insert.cloneValueInto(targetDoc), attrs)
             op.retain != null -> cloned.retain(op.retain, attrs)
             op.delete != null -> cloned.delete(op.delete)
@@ -1216,8 +1224,12 @@ internal fun YTextDelta.cloneInto(targetDoc: YDoc): YTextDelta {
     return cloned
 }
 
-class YMap internal constructor(doc: YDoc, name: String) :
-    AbstractYType(doc, name, RootKind.Map),
+open class YMap internal constructor(
+    doc: YDoc,
+    name: String,
+    kind: RootKind = RootKind.Map,
+) :
+    AbstractYType(doc, name, kind),
     Iterable<Map.Entry<String, Any?>> {
     constructor() : this(YDoc(), "")
 
@@ -1227,6 +1239,12 @@ class YMap internal constructor(doc: YDoc, name: String) :
 
     constructor(entries: Iterable<Pair<String, Any?>>) : this() {
         setAttrs(entries.toMap())
+    }
+
+    init {
+        require(kind == RootKind.Map || kind == RootKind.XmlHook) {
+            "YMap kind must be a map or XML hook"
+        }
     }
 
     val size: Int get() = doc.visibleMap(name).size
@@ -1255,7 +1273,7 @@ class YMap internal constructor(doc: YDoc, name: String) :
 
     fun setAttrs(values: Map<String, Any?>): YMap {
         doc.transact {
-            values.toSortedMap().forEach { (key, value) -> set(key, value) }
+            values.forEach { (key, value) -> set(key, value) }
         }
         return this
     }
@@ -1331,7 +1349,7 @@ class YMap internal constructor(doc: YDoc, name: String) :
 
     fun toDelta(): YMapDelta {
         val delta = YMapDelta()
-        toMap().toSortedMap().forEach { (key, value) -> delta.setAttr(key, value) }
+        toMap().forEach { (key, value) -> delta.setAttr(key, value) }
         return delta
     }
 
@@ -1385,11 +1403,15 @@ class YMap internal constructor(doc: YDoc, name: String) :
 
     fun getAttrs(snapshot: Snapshot): Map<String, Any?> = toMap(snapshot)
 
-    override fun toJson(): Map<String, Any?> = doc.visibleMap(name).mapValues { (_, value) -> doc.valueToJson(value) }
+    override fun toJson(): Map<String, Any?> = doc.visibleMap(name)
+        .mapValues { (_, value) -> doc.valueToJson(value) }
+        .inJavaScriptObjectKeyOrder()
 
-    override fun toJSON(): Map<String, Any?> = toMap().mapValues { (_, value) -> toYTypeJsonValue(value) }
+    override fun toJSON(): Map<String, Any?> = toMap()
+        .mapValues { (_, value) -> toYTypeJsonValue(value) }
+        .inJavaScriptObjectKeyOrder()
 
-    fun clone(targetDoc: YDoc = doc): YMap {
+    open fun clone(targetDoc: YDoc = doc): YMap {
         return targetDoc.createMap().also { cloned ->
             cloned.setAttrs(toMap().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
         }
@@ -1404,6 +1426,28 @@ class YMap internal constructor(doc: YDoc, name: String) :
             return doc.getMap(name).also { it.applyDeltaDeep(delta) }
         }
     }
+}
+
+/**
+ * JavaScript objects enumerate array-index property names before other strings. Y.Map itself
+ * iterates its backing Map in insertion order, but Y.Map#toJSON returns a plain object.
+ */
+private fun <T> Map<String, T>.inJavaScriptObjectKeyOrder(): Map<String, T> {
+    val result = linkedMapOf<String, T>()
+    entries.asSequence()
+        .mapNotNull { entry -> entry.key.toJavaScriptArrayIndexOrNull()?.let { index -> index to entry } }
+        .sortedBy { (index, _) -> index }
+        .forEach { (_, entry) -> result[entry.key] = entry.value }
+    entries.forEach { entry ->
+        if (entry.key.toJavaScriptArrayIndexOrNull() == null) result[entry.key] = entry.value
+    }
+    return result
+}
+
+private fun String.toJavaScriptArrayIndexOrNull(): Long? {
+    if (isEmpty() || (length > 1 && first() == '0') || any { char -> char !in '0'..'9' }) return null
+    val value = toLongOrNull() ?: return null
+    return value.takeIf { index -> index <= 4_294_967_294L && index.toString() == this }
 }
 
 internal fun Any?.cloneValueInto(targetDoc: YDoc): Any? = when (this) {

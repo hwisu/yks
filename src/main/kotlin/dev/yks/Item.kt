@@ -19,6 +19,8 @@ internal data class StoreItem(
     val requiresClockContinuity: Boolean = false,
     val isGc: Boolean = false,
     val unresolvedParent: UnresolvedYjsParent? = null,
+    /** Item.countable is structural metadata and survives replacing content during GC. */
+    val countable: Boolean = content.isCountable(),
 ) {
     val length: Long get() = (content as? ItemContent.Deleted)?.length ?: 1
 }

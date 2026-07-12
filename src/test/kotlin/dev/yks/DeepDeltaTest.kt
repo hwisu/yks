@@ -636,9 +636,9 @@ class DeepDeltaTest {
 
     @Test
     fun diffDocsToDeltaRendersDeletedXmlTypeAttrsWithDeleteAttribution() {
-        val previous = YDoc(clientId = 1)
+        val previous = YDoc(clientId = 1, gc = false)
         previous.getXmlFragment("xml").setAttr("id", "C")
-        val next = cloneDoc(previous).also { it.clientId = 2 }
+        val next = cloneDoc(previous).also { it.clientId = 2; it.gc = false }
 
         next.getXmlFragment("xml").deleteAttr("id")
         val diff = diffDocsToDelta(previous, next)
@@ -846,9 +846,9 @@ class DeepDeltaTest {
 
     @Test
     fun diffDocsToDeltaRendersArraySequenceDeleteAttributions() {
-        val previous = YDoc(clientId = 1)
+        val previous = YDoc(clientId = 1, gc = false)
         previous.getArray("items").push("a")
-        val next = cloneDoc(previous).also { it.clientId = 2 }
+        val next = cloneDoc(previous).also { it.clientId = 2; it.gc = false }
 
         next.getArray("items").delete(0)
         val diff = diffDocsToDelta(previous, next)

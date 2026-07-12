@@ -13,7 +13,7 @@ import kotlin.test.assertTrue
 class UpdateApiTest {
     @Test
     fun topLevelApplyAndEncodeHelpersMirrorDocumentMethods() {
-        val source = YDoc(clientId = 1)
+        val source = YDoc(clientId = 1, gc = false)
         source.getText("body").insert(0, "hi")
 
         val target = YDoc(clientId = 2)
@@ -465,7 +465,7 @@ class UpdateApiTest {
 
     @Test
     fun convertUpdateFormatTransformsDecodedStructsAndPreservesMetadata() {
-        val source = YDoc(clientId = 1)
+        val source = YDoc(clientId = 1, gc = false)
         val text = source.getText("body")
         text.insert(0, "ab", mapOf("bold" to true))
         text.delete(1)
@@ -522,7 +522,7 @@ class UpdateApiTest {
 
     @Test
     fun obfuscateUpdatePreservesStructureAndDeleteSetWhileReplacingContent() {
-        val source = YDoc(clientId = 1)
+        val source = YDoc(clientId = 1, gc = false)
         val text = source.getText("body")
         text.insert(0, "secret", mapOf("author" to "alice", "bold" to true))
         text.delete(1)
@@ -669,7 +669,7 @@ class UpdateApiTest {
 
     @Test
     fun logUpdateSummarizesStructsAndDeleteSet() {
-        val source = YDoc(clientId = 1)
+        val source = YDoc(clientId = 1, gc = false)
         val text = source.getText("body")
         text.insert(0, "ab")
         text.delete(0)

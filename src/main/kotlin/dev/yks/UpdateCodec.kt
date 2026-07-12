@@ -1,6 +1,6 @@
 package dev.yks
 
-private val updateMagicV3 = byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte(), 3)
+private val updateMagicPrefix = byteArrayOf('Y'.code.toByte(), 'K'.code.toByte(), 'S'.code.toByte())
 
 internal data class DocumentUpdate(
     val items: List<StoreItem>,
@@ -20,10 +20,12 @@ internal object LegacyUpdateCodec {
     }
 
     fun write(encoder: BinaryEncoder, update: DocumentUpdate): BinaryEncoder {
-        updateMagicV3.forEach { encoder.writeByte(it.toInt()) }
+        val version = if (update.items.any { item -> item.unresolvedParent != null }) 3 else 2
+        updateMagicPrefix.forEach { encoder.writeByte(it.toInt()) }
+        encoder.writeByte(version)
         encoder.writeVarUInt(update.items.size.toLong())
         update.items.sortedWith(compareBy<StoreItem> { it.id.client }.thenBy { it.id.clock }).forEach { item ->
-            writeItem(encoder, item)
+            writeItem(encoder, item, version)
         }
         writeDeleteSet(encoder, update.deleteSet)
         return encoder
@@ -49,7 +51,7 @@ internal object LegacyUpdateCodec {
         return DocumentUpdate(items, deleteSet)
     }
 
-    private fun writeItem(encoder: BinaryEncoder, item: StoreItem) {
+    private fun writeItem(encoder: BinaryEncoder, item: StoreItem, version: Int) {
         encoder.writeVarUInt(item.id.client)
         encoder.writeVarUInt(item.id.clock)
         writeNullableId(encoder, item.origin)
@@ -60,17 +62,19 @@ internal object LegacyUpdateCodec {
         encoder.writeBoolean(item.deleted)
         encoder.writeBoolean(item.requiresClockContinuity)
         encoder.writeBoolean(item.isGc)
-        when (val unresolved = item.unresolvedParent) {
-            null -> encoder.writeByte(0)
-            is UnresolvedYjsParent.Nested -> {
-                encoder.writeByte(1)
-                encoder.writeVarUInt(unresolved.id.client)
-                encoder.writeVarUInt(unresolved.id.clock)
-            }
-            is UnresolvedYjsParent.Inherit -> {
-                encoder.writeByte(2)
-                encoder.writeVarUInt(unresolved.id.client)
-                encoder.writeVarUInt(unresolved.id.clock)
+        if (version >= 3) {
+            when (val unresolved = item.unresolvedParent) {
+                null -> encoder.writeByte(0)
+                is UnresolvedYjsParent.Nested -> {
+                    encoder.writeByte(1)
+                    encoder.writeVarUInt(unresolved.id.client)
+                    encoder.writeVarUInt(unresolved.id.clock)
+                }
+                is UnresolvedYjsParent.Inherit -> {
+                    encoder.writeByte(2)
+                    encoder.writeVarUInt(unresolved.id.client)
+                    encoder.writeVarUInt(unresolved.id.clock)
+                }
             }
         }
         when (val content = item.content) {

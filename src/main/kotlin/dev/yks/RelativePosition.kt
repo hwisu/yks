@@ -33,7 +33,7 @@ fun createRelativePositionFromTypeIndex(
     renderer: AbstractRenderer = baseRenderer,
 ): RelativePosition {
     require(index >= 0) { "index must be non-negative" }
-    val items = type.doc.sequence(type.name).filter { it.content.kind == type.kind && it.content.isCountable() }
+    val items = type.doc.sequence(type.name).filter { it.content.kind == type.kind && it.countable }
 
     var remaining = index
     if (assoc < 0) {
@@ -76,7 +76,7 @@ fun createAbsolutePositionFromRelativePosition(
         }
         val item = doc.getItem(anchorId) ?: return null
         val type = doc.typeForParent(item.parent) ?: return null
-        val ordered = doc.sequence(item.parent).filter { it.content.kind == type.kind && it.content.isCountable() }
+        val ordered = doc.sequence(item.parent).filter { it.content.kind == type.kind && it.countable }
         val rawIndex = ordered.indexOfFirst { it.id == anchorId }
         if (rawIndex < 0) return null
         val visibleBefore = ordered
@@ -102,7 +102,7 @@ fun createAbsolutePositionFromRelativePosition(
         0
     } else {
             doc.sequence(type.name)
-            .filter { it.content.kind == type.kind && it.content.isCountable() }
+            .filter { it.content.kind == type.kind && it.countable }
             .sumOf { item -> rendererContentLength(renderer, item.toItemStruct(doc)) }
             .toInt()
     }

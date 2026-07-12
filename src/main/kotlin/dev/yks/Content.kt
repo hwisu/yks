@@ -512,14 +512,14 @@ fun readYType(decoder: UpdateContentDecoder, doc: YDoc = YDoc()): AbstractYType 
         YMapRefID -> doc.createMap()
         YTextRefID -> doc.createText()
         YXmlFragmentRefID -> doc.createXmlFragment()
-        YXmlElementRefID,
-        YXmlHookRefID -> {
+        YXmlElementRefID -> {
             val nodeName = decoder.readKey()
             doc.createXmlElementType(
                 nodeName = nodeName,
-                kind = if (typeRef == YXmlHookRefID) RootKind.XmlHook else RootKind.XmlElement,
+                kind = RootKind.XmlElement,
             )
         }
+        YXmlHookRefID -> doc.createXmlHook(decoder.readKey())
         YXmlTextRefID -> doc.createXmlTextType()
         else -> error("unknown type ref: $typeRef")
     }
@@ -527,8 +527,10 @@ fun readYType(decoder: UpdateContentDecoder, doc: YDoc = YDoc()): AbstractYType 
 
 fun writeYType(encoder: UpdateContentEncoder, type: AbstractYType): UpdateContentEncoder {
     encoder.writeTypeRef(type.typeRef)
-    if (type is YXmlElementType) {
-        encoder.writeKey(type.nodeName)
+    when (type) {
+        is YXmlElementType -> encoder.writeKey(type.nodeName)
+        is YXmlHook -> encoder.writeKey(type.hookName)
+        else -> Unit
     }
     return encoder
 }

@@ -321,7 +321,7 @@ class YXmlElementType internal constructor(
     override fun toJson(): Map<String, Any?> = linkedMapOf(
         "nodeName" to nodeName,
         "attributes" to getAttrs(),
-        "children" to toNodeList().map { it.toJson() },
+        "children" to xmlItems().map { item -> item.content.toXmlEventJson(doc) },
     )
 
     override fun toJSON(): String = toString()
@@ -329,7 +329,7 @@ class YXmlElementType internal constructor(
     fun toString(forceTag: Boolean): String {
         val tagName = nodeName.lowercase()
         val attrs = xmlAttrsToString(getAttrs())
-        val body = toNodeList().joinToString(separator = "") { it.toString() }
+        val body = xmlItems().joinToString(separator = "") { item -> item.content.toXmlString(doc) }
         if (body.isEmpty()) return "<$tagName$attrs></$tagName>"
         return "<$tagName$attrs>$body</$tagName>"
     }
@@ -392,9 +392,34 @@ class YXmlTextType internal constructor(
         when (val insert = op.insert) {
             is String -> renderXmlText(insert, op.attributes)
             null -> ""
-            else -> "\uFFFC"
+            else -> renderXmlText(xmlAttrValueToString(insert), op.attributes)
         }
     }
+}
+
+/**
+ * A map-backed XML hook, matching `Y.XmlHook` in upstream Yjs.
+ *
+ * Hooks are XML children on the wire (type ref 5), but their content model is a Y.Map rather
+ * than an XML child sequence. Rendering an unbound hook therefore uses JavaScript's ordinary
+ * object string representation, while [toJSON] exposes its map properties.
+ */
+class YXmlHook internal constructor(
+    doc: YDoc,
+    name: String,
+    val hookName: String,
+) : YMap(doc, name, RootKind.XmlHook) {
+    constructor(hookName: String) : this(YDoc(), "", hookName)
+
+    init {
+        require(hookName.isNotBlank()) { "XML hook name must not be blank" }
+    }
+
+    override fun clone(targetDoc: YDoc): YXmlHook = targetDoc.createXmlHook(hookName).also { cloned ->
+        cloned.setAttrs(toMap().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
+    }
+
+    override fun toString(): String = "[object Object]"
 }
 
 class YXmlElement(val nodeName: String) : YXmlNode(), Iterable<YXmlNode> {
@@ -930,12 +955,12 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
         }
     }
 
-    override fun toJson(): List<Any?> = toNodeList().map { it.toJson() }
+    override fun toJson(): List<Any?> = xmlItems().map { item -> item.content.toXmlEventJson(doc) }
 
     override fun toJSON(): String = toString()
 
     fun toString(forceTag: Boolean): String =
-        renderXmlFragmentString(name, getAttrs(), toNodeList(), forceTag = forceTag)
+        renderXmlFragmentString(name, getAttrs(), toArray(), forceTag = forceTag)
 
     override fun toString(): String = toString(forceTag = false)
 
@@ -1047,13 +1072,24 @@ internal fun YXmlNodeValue.toNode(): YXmlNode = when (this) {
 
 internal fun AbstractYType.xmlNodeNameOrEmpty(): String = when (this) {
     is YXmlElementType -> nodeName
+    is YXmlHook -> hookName
     else -> ""
 }
 
 internal fun ItemContent.isXmlSequenceChild(): Boolean =
     this is ItemContent.XmlNode || this is ItemContent.XmlType
 
-internal fun ItemContent.toXmlEventJson(doc: YDoc): Any? = toXmlNode(doc).toJson()
+internal fun ItemContent.toXmlEventJson(doc: YDoc): Any? = when (this) {
+    is ItemContent.XmlNode -> value.toNode().toJson()
+    is ItemContent.XmlType -> doc.typeFromXmlType(this).toJson()
+    else -> error("item content is not an XML child: ${this::class.simpleName}")
+}
+
+internal fun ItemContent.toXmlString(doc: YDoc): String = when (this) {
+    is ItemContent.XmlNode -> value.toNode().toString()
+    is ItemContent.XmlType -> doc.typeFromXmlType(this).toString()
+    else -> error("item content is not an XML child: ${this::class.simpleName}")
+}
 
 internal fun ItemContent.toXmlChild(doc: YDoc): Any? = when (this) {
     is ItemContent.XmlNode -> value.toNode()
@@ -1067,6 +1103,7 @@ internal fun ItemContent.toXmlNode(doc: YDoc): YXmlNode = when (this) {
         is YText -> YXmlText(type.toString())
         is YXmlElementType -> type.toNode()
         is YXmlTextType -> YXmlText(type.toString())
+        is YXmlHook -> YXmlText(type.toString())
         else -> error("unsupported XML fragment type child: ${type::class.simpleName}")
     }
     else -> error("item content is not an XML fragment child: ${this::class.simpleName}")
@@ -1160,7 +1197,7 @@ private fun xmlNodeFromJsonMap(value: Map<*, *>): YXmlElement {
 internal fun renderXmlFragmentString(
     name: String,
     attrs: Map<String, Any?>,
-    nodes: List<YXmlNode>,
+    nodes: List<Any?>,
     forceTag: Boolean = false,
 ): String {
     val body = nodes.joinToString(separator = "") { it.toString() }
@@ -1180,6 +1217,8 @@ internal fun xmlAttrsToString(attrs: Map<String, Any?>): String =
 
 internal fun xmlAttrValueToString(value: Any?): String = when (value) {
     null -> "null"
+    Lib0Undefined,
+    YValue.Undefined -> "undefined"
     is String -> value
     is Char -> value.toString()
     is Boolean -> value.toString()
@@ -1191,8 +1230,8 @@ internal fun xmlAttrValueToString(value: Any?): String = when (value) {
     is Float -> value.toDouble().toYjsNumberString()
     is Double -> value.toYjsNumberString()
     is ByteArray -> value.joinToString(separator = ",") { byte -> byte.toUByte().toString() }
-    is List<*> -> value.joinToString(separator = ",") { nested -> nested?.let(::xmlAttrValueToString).orEmpty() }
-    is Array<*> -> value.joinToString(separator = ",") { nested -> nested?.let(::xmlAttrValueToString).orEmpty() }
+    is List<*> -> value.joinToString(separator = ",", transform = ::xmlArrayEntryToString)
+    is Array<*> -> value.joinToString(separator = ",", transform = ::xmlArrayEntryToString)
     is Map<*, *> -> "[object Object]"
     is YText -> value.toString()
     is YXmlElementType -> value.toString()
@@ -1201,6 +1240,13 @@ internal fun xmlAttrValueToString(value: Any?): String = when (value) {
     is AbstractYType,
     is YDoc -> "[object Object]"
     else -> value.toString()
+}
+
+private fun xmlArrayEntryToString(value: Any?): String = when (value) {
+    null,
+    Lib0Undefined,
+    YValue.Undefined -> ""
+    else -> xmlAttrValueToString(value)
 }
 
 private fun Double.toYjsNumberString(): String {
@@ -1236,7 +1282,20 @@ private fun xmlFormatAttrsToString(value: Any?): String = when (value) {
     is Map<*, *> -> value.entries
         .filter { (key, _) -> key is String }
         .sortedBy { (key, _) -> key as String }
-        .joinToString(separator = "") { (key, attrValue) -> " $key=\"$attrValue\"" }
-    is String -> value.mapIndexed { index, char -> " $index=\"$char\"" }.joinToString(separator = "")
+        .joinToString(separator = "") { (key, attrValue) ->
+            " $key=\"${xmlAttrValueToString(attrValue)}\""
+        }
+    is String -> value.mapIndexed { index, char ->
+        " $index=\"${xmlAttrValueToString(char)}\""
+    }.joinToString(separator = "")
+    is List<*> -> value.mapIndexed { index, nested ->
+        " $index=\"${xmlAttrValueToString(nested)}\""
+    }.joinToString(separator = "")
+    is Array<*> -> value.mapIndexed { index, nested ->
+        " $index=\"${xmlAttrValueToString(nested)}\""
+    }.joinToString(separator = "")
+    is ByteArray -> value.mapIndexed { index, byte ->
+        " $index=\"${byte.toUByte()}\""
+    }.joinToString(separator = "")
     else -> ""
 }

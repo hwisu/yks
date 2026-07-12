@@ -221,7 +221,7 @@ class SnapshotTest {
 
     @Test
     fun typeMapSnapshotHelpersReadHistoricalKeyValues() {
-        val doc = YDoc(clientId = 1)
+        val doc = YDoc(clientId = 1, gc = false)
         val map = doc.getMap("meta")
         map.setAttr("title", "old")
         map.setAttr("nullable", null)
@@ -256,7 +256,7 @@ class SnapshotTest {
 
     @Test
     fun sequenceSnapshotHelpersReadHistoricalArrayTextAndXml() {
-        val doc = YDoc(clientId = 1)
+        val doc = YDoc(clientId = 1, gc = false)
         val array = doc.getArray("items")
         val text = doc.getText("body")
         val xml = doc.getXmlFragment("xml")
@@ -339,7 +339,7 @@ class SnapshotTest {
 
     @Test
     fun xmlSnapshotsReadHistoricalLiveXmlElementAndTextChildren() {
-        val doc = YDoc(clientId = 1)
+        val doc = YDoc(clientId = 1, gc = false)
         val xml = doc.getXmlFragment("xml")
         val paragraph = doc.createXmlElement("p")
         val text = doc.createText()
@@ -371,7 +371,7 @@ class SnapshotTest {
 
     @Test
     fun xmlSnapshotsReadHistoricalLiveXmlTextChildren() {
-        val doc = YDoc(clientId = 1)
+        val doc = YDoc(clientId = 1, gc = false)
         val xml = doc.getXmlFragment("xml")
         val text = doc.createXmlText()
         text.insert(0, "old", mapOf("bold" to true))
@@ -396,7 +396,7 @@ class SnapshotTest {
 
     @Test
     fun xmlSnapshotDeltaPreservesFormattedStaticTextLikeUpstream() {
-        val doc = YDoc(clientId = 1)
+        val doc = YDoc(clientId = 1, gc = false)
         val xml = doc.getXmlFragment("xml")
         val emphasized = mapOf<String, Any?>("em" to emptyMap<String, Any?>())
         val emphasizedStrong = mapOf<String, Any?>(

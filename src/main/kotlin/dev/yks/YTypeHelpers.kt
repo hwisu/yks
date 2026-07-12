@@ -58,7 +58,7 @@ fun createItemTextListPosition(
     renderer: AbstractRenderer = baseRenderer,
 ): ItemTextListPosition {
     require(index >= 0) { "index must be non-negative" }
-    val visible = getTypeStructs(type).filter { item -> !item.deleted && item.content.isCountable() }
+    val visible = getTypeStructs(type).filter { item -> !item.deleted && item.countable }
     require(index <= visible.size) { "index is out of bounds" }
     return ItemTextListPosition(
         left = visible.getOrNull(index - 1),
@@ -75,7 +75,7 @@ fun findMarker(type: AbstractYType, index: Int): ArraySearchMarker? {
     if (index == 0) return null
 
     val visible = getTypeStructs(type)
-        .filter { item -> !item.deleted && item.content.isCountable() }
+        .filter { item -> !item.deleted && item.countable }
     if (visible.isEmpty()) return null
 
     val markerIndex = minOf(index, visible.size - 1)
@@ -227,7 +227,7 @@ fun typeListInsertGenericsAfter(type: AbstractYType, referenceItem: Item?, conte
         val position = structs.indexOfFirst { it.id == referenceItem.id }
         require(position >= 0) { "reference item must belong to the parent type" }
         structs.take(position + 1)
-            .filter { item -> !item.deleted && item.content.isCountable() }
+            .filter { item -> !item.deleted && item.countable }
             .sumOf { item -> item.length.toInt() }
     }
     typeListInsertGenerics(type, index, content)
@@ -280,7 +280,7 @@ internal fun renderedSequenceIndexToVisibleIndex(
     var rendered = 0
     var visible = 0
     type.doc.sequence(type.name)
-        .filter { item -> item.content.kind == type.kind && item.content.isCountable() }
+        .filter { item -> item.content.kind == type.kind && item.countable }
         .forEach { item ->
             val renderedLength = rendererContentLength(renderer, item.toItemStruct(type.doc)).toInt()
             if (renderedLength > 0 && rendered + renderedLength > target) {
@@ -307,7 +307,7 @@ private fun collectRendererAttributedDeletedIds(
     val deleteIds = createIdSet()
     var rendered = 0L
     type.doc.sequence(type.name)
-        .filter { item -> item.content.kind == type.kind && item.content.isCountable() }
+        .filter { item -> item.content.kind == type.kind && item.countable }
         .forEach { item ->
             val struct = item.toItemStruct(type.doc)
             val renderedLength = rendererContentLength(renderer, struct)

@@ -641,10 +641,11 @@ private fun StoreItem.hasCompatibleV1ParentKind(
     val nestedKind = parentKinds[parent]
     return when (content) {
         is ItemContent.MapEntry -> when {
-            content.value is YValue.SubdocRef && nestedKind != null && nestedKind != RootKind.Map -> false
+            content.value is YValue.SubdocRef && nestedKind != null &&
+                nestedKind !in setOf(RootKind.Map, RootKind.XmlHook) -> false
             parentSub != null && nestedKind == RootKind.XmlFragment -> false
             parentSub != null -> true
-            else -> nestedKind?.let { kind -> kind == RootKind.Map }
+            else -> nestedKind?.let { kind -> kind == RootKind.Map || kind == RootKind.XmlHook }
                 ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.MapEntry }
         }
         is ItemContent.Value -> nestedKind?.let { kind -> kind == RootKind.Array }

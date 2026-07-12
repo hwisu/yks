@@ -21,9 +21,11 @@ class LegacyUpdateMetadataTest {
             isGc = true,
         )
 
-        val decoded = LegacyUpdateCodec.decode(LegacyUpdateCodec.encode(DocumentUpdate(listOf(item), DeleteSet.empty())))
+        val encoded = LegacyUpdateCodec.encode(DocumentUpdate(listOf(item), DeleteSet.empty()))
+        val decoded = LegacyUpdateCodec.decode(encoded)
             .items.single()
 
+        assertEquals(2, encoded[3].toInt())
         assertTrue(decoded.deleted)
         assertTrue(decoded.requiresClockContinuity)
         assertTrue(decoded.isGc)
@@ -165,7 +167,7 @@ class LegacyUpdateMetadataTest {
         val update = encodeStateAsUpdate(source)
         val target = YDoc(clientId = 3)
 
-        assertEquals(3, update[3].toInt())
+        assertEquals(2, update[3].toInt())
         applyUpdate(target, update)
 
         assertEquals("<p></p>", target.getXmlFragment(rootName).toString())

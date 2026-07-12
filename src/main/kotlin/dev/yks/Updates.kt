@@ -476,12 +476,8 @@ fun createDeleteSetFromDoc(doc: YDoc): IdSet = doc.deleteSet().toIdSet()
 fun createInsertSetFromStructStore(doc: YDoc, filterDeleted: Boolean = false): IdSet =
     createInsertSetFromDoc(doc, filterDeleted)
 
-fun createDeleteSetFromStructStore(doc: YDoc): IdSet = createDeleteSetFromDoc(doc)
-
 fun createInsertSetFromStructStore(store: StructStore, filterDeleted: Boolean = false): IdSet =
     createInsertIdSet(store.allItems(), filterDeleted)
-
-fun createDeleteSetFromStructStore(store: StructStore): IdSet = store.deleteSet().toIdSet()
 
 fun createContentIdsFromDoc(doc: YDoc): ContentIds = createContentIdsFromUpdate(doc.encodeStateAsUpdate())
 
@@ -904,13 +900,14 @@ private fun List<StoreItem>.resolveSyntheticParentsFromUnion(): List<StoreItem> 
 
 private fun ItemContent.withResolvedParentKind(kind: RootKind): ItemContent = when (this) {
     is ItemContent.Value -> when (kind) {
-        RootKind.Map -> ItemContent.MapEntry(value)
+        RootKind.Map,
+        RootKind.XmlHook -> ItemContent.MapEntry(value)
         RootKind.Array -> this
         RootKind.Text,
         RootKind.XmlText -> ItemContent.TextEmbed(value, kind = kind)
         else -> this
     }
-    is ItemContent.MapEntry -> if (kind == RootKind.Map) this else ItemContent.Value(value)
+    is ItemContent.MapEntry -> if (kind == RootKind.Map || kind == RootKind.XmlHook) this else ItemContent.Value(value)
     is ItemContent.Text -> copy(kind = kind)
     is ItemContent.TextEmbed -> copy(kind = kind)
     is ItemContent.TextFormat -> copy(kind = kind)
@@ -1021,10 +1018,10 @@ private fun AbstractContent.toItemContents(kind: RootKind, original: ItemContent
             RootKind.Text,
             RootKind.XmlText -> toTextItemContents(kind, original.textAttributesOrEmpty())
             RootKind.Array -> toArrayItemContents()
-            RootKind.Map -> listOf(ItemContent.MapEntry(toSingleYValue()))
+            RootKind.Map,
+            RootKind.XmlHook -> listOf(ItemContent.MapEntry(toSingleYValue()))
             RootKind.XmlFragment -> toXmlFragmentItemContents()
-            RootKind.XmlElement,
-            RootKind.XmlHook -> toXmlSequenceItemContents(kind)
+            RootKind.XmlElement -> toXmlSequenceItemContents(kind)
         }
     }
 
@@ -1084,6 +1081,7 @@ private fun AbstractContent.toXmlSequenceItemContents(kind: RootKind): List<Item
     is ContentType -> when (type) {
         is YText -> listOf(ItemContent.XmlType(YValue.TypeRef(type.kind, type.name), "", kind))
         is YXmlElementType -> listOf(ItemContent.XmlType(YValue.TypeRef(type.kind, type.name), type.nodeName, kind))
+        is YXmlHook -> listOf(ItemContent.XmlType(YValue.TypeRef(type.kind, type.name), type.hookName, kind))
         is YXmlTextType -> listOf(ItemContent.XmlType(YValue.TypeRef(type.kind, type.name), "", kind))
         else -> error("unsupported XML fragment type content: ${type::class.simpleName}")
     }

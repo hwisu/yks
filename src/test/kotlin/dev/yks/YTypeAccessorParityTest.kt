@@ -485,7 +485,7 @@ class YTypeAccessorParityTest {
 
     @Test
     fun genericMapHelpersCoverSharedAttributesAndMapTypes() {
-        val doc = YDoc(clientId = 1)
+        val doc = YDoc(clientId = 1, gc = false)
         val array = doc.getArray("array")
         val map = doc.getMap("map")
         val beforeAttrs = snapshot(doc)
@@ -498,7 +498,7 @@ class YTypeAccessorParityTest {
         assertEquals("list", typeMapGet(array, "kind"))
         assertTrue(typeMapHas(array, "count"))
         assertEquals(mapOf("count" to 1L, "kind" to "list"), typeMapGetAll(array))
-        assertEquals(listOf("count=1", "kind=list"), buildList {
+        assertEquals(listOf("kind=list", "count=1"), buildList {
             val iterator = createMapIterator(array)
             while (iterator.hasNext()) {
                 val entry = iterator.next()
@@ -509,7 +509,7 @@ class YTypeAccessorParityTest {
         assertEquals(null, typeMapGetSnapshot(array, "kind", beforeAttrs))
         assertEquals("list", typeMapGetSnapshot(array, "kind", withKind))
         assertEquals(
-            YMapDelta().setAttr("count", 1L).setAttr("kind", "list"),
+            YMapDelta().setAttr("kind", "list").setAttr("count", 1L),
             typeMapGetDelta(array),
         )
         assertEquals(

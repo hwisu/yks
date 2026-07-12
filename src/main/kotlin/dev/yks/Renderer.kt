@@ -140,7 +140,7 @@ abstract class AbstractRenderer {
 fun rendererContentLength(renderer: AbstractRenderer?, item: ItemStruct): Long =
     if (renderer != null && renderer.hasItem(item)) {
         renderer.contentLength(item)
-    } else if (item.deleted || !item.content.isCountable()) {
+    } else if (item.deleted || !item.countable) {
         0
     } else {
         item.length
@@ -162,7 +162,7 @@ open class BaseRenderer : AbstractRenderer() {
     }
 
     override fun contentLength(item: ItemStruct): Long =
-        if (item.deleted || !item.content.isCountable()) 0 else item.length
+        if (item.deleted || !item.countable) 0 else item.length
 }
 
 val baseRenderer: BaseRenderer = BaseRenderer()
@@ -209,7 +209,7 @@ open class TwosetRenderer(
     }
 
     override fun contentLength(item: ItemStruct): Long {
-        if (!item.content.isCountable()) return 0
+        if (!item.countable) return 0
         if (!item.deleted) return item.length
         return deletes.slice(item.id.client, item.id.clock, item.length)
             .sumOf { range -> if (range.attrs != null) range.len else 0L }
@@ -332,7 +332,7 @@ class DiffRenderer(
     }
 
     override fun contentLength(item: ItemStruct): Long {
-        if (!item.deleted) return if (item.content.isCountable()) item.length else 0
+        if (!item.deleted) return if (item.countable) item.length else 0
         val contents = mutableListOf<AttributedContent>()
         readContent(contents, item.id.client, item.id.clock, deleted = true, item.content, renderBehavior = 0)
         return contents.sumOf { attributed ->
@@ -602,7 +602,7 @@ class SnapshotRenderer(
     }
 
     override fun contentLength(item: ItemStruct): Long {
-        if (!item.content.isCountable()) return 0
+        if (!item.countable) return 0
         if (!item.deleted) return item.length
         return attrs.slice(item.id.client, item.id.clock, item.length)
             .sumOf { range -> if (range.attrs != null) range.len else 0L }

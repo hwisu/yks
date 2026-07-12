@@ -36,7 +36,7 @@ class StructHelperTest {
 
     @Test
     fun documentStructHelpersExposeItemSnapshotsAndIteration() {
-        val doc = YDoc(clientId = 1)
+        val doc = YDoc(clientId = 1, gc = false)
         val text = doc.getText("body")
         text.insert(0, "abc")
         text.delete(1)

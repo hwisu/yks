@@ -263,6 +263,12 @@ class UndoManager private constructor(
         if (!isInScope(event)) return
         if (options.captureTransaction?.invoke(event) == false) return
 
+        // Upstream marks deleted items as kept during afterTransaction so automatic GC, which
+        // runs immediately afterwards, cannot discard content required by a future undo.
+        event.deletedItems
+            .filter { item -> isItemInScope(item) }
+            .forEach { item -> keepItem(doc, item.toItemStruct(doc), keep = true) }
+
         val stackItem = normalizeStackItem(
             StackItem(
                 insertedItems = event.addedItems.map { it.copy(deleted = false) },
@@ -328,6 +334,7 @@ class UndoManager private constructor(
             val changedTypesSubscription = doc.observeAfterTransactions { event ->
                 if (event.origin === this) {
                     deletedItems = event.deletedItems
+                    deletedItems.forEach { item -> keepItem(doc, item.toItemStruct(doc), keep = true) }
                     changedParentTypes = event.changedParentTypes
                 }
             }
@@ -370,6 +377,13 @@ class UndoManager private constructor(
         val names = scopeNames ?: return true
         return event.changedParents.any { changedParent ->
             names.any { scopeName -> changedParent == scopeName || doc.pathBetween(scopeName, changedParent) != null }
+        }
+    }
+
+    private fun isItemInScope(item: StoreItem): Boolean {
+        val names = scopeNames ?: return true
+        return names.any { scopeName ->
+            item.parent == scopeName || doc.pathBetween(scopeName, item.parent) != null
         }
     }
 

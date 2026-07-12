@@ -95,6 +95,24 @@ writeFixture('concurrent-format-base-v1', concurrentFormatBaseUpdate)
 writeFixture('concurrent-format-bold-v1', concurrentBoldUpdates[0])
 writeFixture('concurrent-format-italic-v1', concurrentItalicUpdates[0])
 
+// Concurrent ranges that assign the same value leave a visible ContentFormat boundary.
+// Y.Text.toDelta intentionally packs text at that boundary even though the effective
+// attributes on the adjacent strings are identical.
+const formatBoundaryLong = new Y.Doc({ gc: false })
+formatBoundaryLong.clientID = 2
+Y.applyUpdate(formatBoundaryLong, concurrentFormatBaseUpdate)
+const formatBoundaryLongUpdates = []
+formatBoundaryLong.on('update', value => formatBoundaryLongUpdates.push(value))
+formatBoundaryLong.getText('body').format(1, 2, { italic: 'x' })
+const formatBoundaryShort = new Y.Doc({ gc: false })
+formatBoundaryShort.clientID = 3
+Y.applyUpdate(formatBoundaryShort, concurrentFormatBaseUpdate)
+const formatBoundaryShortUpdates = []
+formatBoundaryShort.on('update', value => formatBoundaryShortUpdates.push(value))
+formatBoundaryShort.getText('body').format(1, 1, { italic: 'x' })
+writeFixture('text-format-boundary-long-v1', formatBoundaryLongUpdates[0])
+writeFixture('text-format-boundary-short-v1', formatBoundaryShortUpdates[0])
+
 const formattedEmbed = new Y.Doc({ gc: false })
 formattedEmbed.clientID = 1
 formattedEmbed.getText('body').insertEmbed(0, { image: 'x' }, { bold: true })
@@ -180,6 +198,18 @@ mapKeys.getMap('meta').set('second', 2)
 writeFixture('map-first-key-v1', mapKeyUpdates[0])
 writeFixture('map-second-key-v1', mapKeyUpdates[1])
 
+const mapOrderClientOne = new Y.Doc({ gc: false })
+mapOrderClientOne.clientID = 1
+mapOrderClientOne.getMap('ordered').set('z', 1)
+const mapOrderClientOneUpdate = Y.encodeStateAsUpdate(mapOrderClientOne)
+const mapOrderClientTwo = new Y.Doc({ gc: false })
+mapOrderClientTwo.clientID = 2
+mapOrderClientTwo.getMap('ordered').set('a', 2)
+const mapOrderClientTwoUpdate = Y.encodeStateAsUpdate(mapOrderClientTwo)
+writeFixture('map-order-client-one-v1', mapOrderClientOneUpdate)
+writeFixture('map-order-client-two-v1', mapOrderClientTwoUpdate)
+writeFixture('map-order-merged-v1', Y.mergeUpdates([mapOrderClientOneUpdate, mapOrderClientTwoUpdate]))
+
 const mapGc = new Y.Doc()
 mapGc.clientID = 1
 mapGc.getMap('meta').set('title', 'old')
@@ -260,6 +290,7 @@ const formattedXmlText = new Y.XmlText()
 formattedXmlParagraph.insert(0, [formattedXmlText])
 formattedXmlText.insert(0, 'hi', { strong: { level: '1' } })
 writeFixture('xml-formatted-full-v1', Y.encodeStateAsUpdate(formattedXml))
+writeFixture('xml-hook-v1', Y.encodeStateAsUpdate(createScenarioDocument('xml-hook')))
 
 const crossXml = new Y.Doc({ gc: false })
 Y.applyUpdate(crossXml, xmlUpdates[0])

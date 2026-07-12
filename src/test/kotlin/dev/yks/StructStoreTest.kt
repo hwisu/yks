@@ -54,7 +54,7 @@ class StructStoreTest {
 
     @Test
     fun documentStoreExposesClientStructViewsAndDeleteSet() {
-        val doc = YDoc(clientId = 1)
+        val doc = YDoc(clientId = 1, gc = false)
         val text = doc.getText("body")
         text.insert(0, "ab")
         text.delete(1)
@@ -73,7 +73,7 @@ class StructStoreTest {
 
     @Test
     fun documentStoreSupportsYjsStyleStructLookupMethods() {
-        val doc = YDoc(clientId = 1)
+        val doc = YDoc(clientId = 1, gc = false)
         val text = doc.getText("body")
         text.insert(0, "abc")
         text.delete(1)

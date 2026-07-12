@@ -3,6 +3,7 @@ package dev.yks
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -50,6 +51,57 @@ class YXmlTest {
 
         assertEquals("<em><strong level=\"1\">abc</strong></em>", text.toString())
         assertEquals("<p></p>", YXmlElement("p").toString())
+    }
+
+    @Test
+    fun liveXmlTextRenderingUsesJavaScriptCoercionForEmbedsAndFormatAttributes() {
+        fun render(value: Any?): Pair<String, Any?> {
+            val doc = YDoc(clientId = 1, gc = false)
+            val text = doc.createXmlText()
+            doc.getXmlFragment("xml").push(text)
+            text.insertEmbed(0, value, mapOf("mark" to value))
+            return text.toString() to text.toJSON()
+        }
+
+        listOf(
+            linkedMapOf("a" to 1, "b" to null) to
+                "<mark a=\"1\" b=\"null\">[object Object]</mark>",
+            listOf("x", null, 3) to
+                "<mark 0=\"x\" 1=\"null\" 2=\"3\">x,,3</mark>",
+            byteArrayOf(1, -1) to
+                "<mark 0=\"1\" 1=\"255\">1,255</mark>",
+            7 to "<mark>7</mark>",
+            true to "<mark>true</mark>",
+        ).forEach { (value, expected) ->
+            val (stringValue, jsonValue) = render(value)
+            assertEquals(expected, stringValue)
+            assertEquals(expected, jsonValue)
+        }
+    }
+
+    @Test
+    fun xmlHookIsAMapBackedXmlChildAndRoundTripsTypeRefFive() {
+        val source = YDoc(clientId = 1, gc = false)
+        val fragment = source.getXmlFragment("xml")
+        val hook = source.createXmlHook("Widget")
+        fragment.push(hook)
+        hook.set("x", 1)
+        hook.set("nested", linkedMapOf("ok" to true))
+
+        assertEquals(YXmlHookRefID, hook.typeRef)
+        assertEquals("Widget", hook.hookName)
+        assertEquals(mapOf("x" to 1L, "nested" to mapOf("ok" to true)), hook.toJSON())
+        assertEquals("[object Object]", hook.toString())
+        assertEquals("[object Object]", fragment.toString())
+        assertEquals("[object Object]", fragment.toJSON())
+
+        val target = YDoc(clientId = 2, gc = false)
+        applyUpdate(target, encodeStateAsUpdate(source))
+
+        val decoded = assertIs<YXmlHook>(target.getXmlFragment("xml").getType(0))
+        assertEquals("Widget", decoded.hookName)
+        assertEquals(hook.toJSON(), decoded.toJSON())
+        assertEquals("[object Object]", target.getXmlFragment("xml").toString())
     }
 
     @Test
