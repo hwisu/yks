@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -133,7 +134,7 @@ class PublicApiParityTest {
         assertEquals("<p id=\"intro\">hello<br></br></p>", paragraph.toString())
         assertTrue(source.share["paragraph"] is YXmlElementType)
 
-        val target = createDocFromUpdate(source.encodeStateAsUpdate())
+        val target = createDocFromUpdate(source.encodeStateAsUpdateLossless())
         val synced = target.getXmlElement("paragraph", "p")
 
         assertEquals("<p id=\"intro\">hello<br></br></p>", synced.toString())
@@ -188,22 +189,36 @@ class PublicApiParityTest {
     }
 
     @Test
-    fun shareMaterializesRemoteRootTypesFromUpdates() {
+    fun shareViewDoesNotMaterializeRemoteRootTypesFromUpdates() {
         val source = YDoc(clientId = 1)
         source.getArray("items").push("a")
         source.getMap("meta").set("title", "hello")
         source.getText("body").insert(0, "text")
         source.getXmlFragment("xml").push(YXmlText("x"))
 
-        val target = createDocFromUpdate(source.encodeStateAsUpdate())
+        val target = YDoc(clientId = 2)
+        val share: Map<String, AbstractYType> = target.share
+        assertTrue(share.isEmpty())
+        target.applyUpdate(source.encodeStateAsUpdateLossless())
 
         assertEquals(setOf("body", "items", "meta", "xml"), target.rootNames())
-        assertTrue(target.get("items") is YArray)
-        assertTrue(target.get("meta") is YMap)
-        assertTrue(target.get("body") is YText)
-        assertTrue(target.get("xml") is YXmlFragment)
-        assertEquals("text", (target.share["body"] as YText).toString())
-        assertEquals("x", (target.share["xml"] as YXmlFragment).toString())
+        assertEquals(target.rootNames(), share.keys)
+        assertEquals(emptyMap(), target.toJSON())
+        val unopenedItems = assertIs<YUnopenedRoot>(share["items"])
+        assertIs<YUnopenedRoot>(share["meta"])
+        assertIs<YUnopenedRoot>(share["body"])
+        assertIs<YUnopenedRoot>(share["xml"])
+        assertSame(unopenedItems, target.getOrNull("items"))
+        assertSame(unopenedItems, target.get("items"))
+
+        val items = target.getArray("items")
+        target.getMap("meta")
+        target.getText("body")
+        target.getXmlFragment("xml")
+        assertEquals(setOf("body", "items", "meta", "xml"), share.keys)
+        assertSame(items, share["items"])
+        assertEquals("text", (share["body"] as YText).toString())
+        assertEquals("x", (share["xml"] as YXmlFragment).toString())
     }
 
     @Test

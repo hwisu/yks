@@ -112,6 +112,7 @@ internal fun AbstractYType.renderDeepDelta(): YDeepDelta =
     renderDeepDelta(DeepDeltaRenderOptions(renderer = activeRenderer))
 
 internal fun AbstractYType.renderDeepDelta(options: DeepDeltaRenderOptions): YDeepDelta = when (this) {
+    is YUnopenedRoot -> error("open root '$name' with a concrete getter before rendering a deep delta")
     is YArray -> renderArrayDeepDelta(this, options)
     is YText -> renderTextDeepDelta(this, options)
     is YMap -> renderMapDeepDelta(this, options)
@@ -123,9 +124,9 @@ internal fun renderArrayDeepDelta(type: YArray, options: DeepDeltaRenderOptions)
     YArrayDeepDelta(
         attrs = renderTypeAttrs(type, options),
         delta = renderSequenceDelta(type, RootKind.Array, options) { rendered ->
-            val value = (rendered.item.content as ItemContent.Value).value
             DeepDeltaInsertValue(
-                type.doc.valueToAny(value).toDeepDeltaValue(options.nestedValueOptions(rendered.action)),
+                type.doc.arrayItemValue(rendered.item)
+                    .toDeepDeltaValue(options.nestedValueOptions(rendered.action)),
             )
         },
     )
@@ -146,6 +147,14 @@ internal fun renderTextDeepDelta(type: YText, options: DeepDeltaRenderOptions): 
                     is ItemContent.TextEmbed -> {
                         delta.insertEmbed(
                             type.doc.valueToAny(content.value).toDeepDeltaValue(
+                                options.nestedValueOptions(rendered.action),
+                            ),
+                            attributes,
+                        )
+                    }
+                    is ItemContent.XmlType -> {
+                        delta.insertEmbed(
+                            type.doc.typeFromXmlType(content).toDeepDeltaValue(
                                 options.nestedValueOptions(rendered.action),
                             ),
                             attributes,
@@ -181,7 +190,9 @@ private fun textFormatAttributionsByTarget(
     val textItems = type.doc.sequence(type.name)
         .filter { item ->
             item.content.kind == type.kind &&
-                (item.content is ItemContent.Text || item.content is ItemContent.TextEmbed)
+                (item.content is ItemContent.Text ||
+                    item.content is ItemContent.TextEmbed ||
+                    item.content is ItemContent.XmlType)
         }
     if (textItems.isEmpty()) return emptyMap()
     val attributionsByTarget = linkedMapOf<Id, Map<String, Any?>>()
@@ -225,7 +236,8 @@ private fun textFormatAttributionsByTarget(
                 activeNativeAttributions[content.key] = attribution
             }
             is ItemContent.Text,
-            is ItemContent.TextEmbed -> {
+            is ItemContent.TextEmbed,
+            is ItemContent.XmlType -> {
                 val attribution = activeNativeAttributions.values.fold(emptyMap<String, Any?>()) { merged, value ->
                     merged.mergeTextAttribution(value)
                 }
@@ -396,6 +408,7 @@ private fun ItemContent.toXmlDeepDeltaValue(doc: YDoc, options: DeepDeltaRenderO
 internal fun YXmlNode.toXmlElementDeepDeltaChildValue(
     options: DeepDeltaRenderOptions = DeepDeltaRenderOptions(),
 ): Any? = when (this) {
+    is YXmlSnapshotText -> clone()
     is YXmlText -> {
         val text = toJson()
         val deepAttrs = deepDeltaTextAttributes(options)
@@ -430,6 +443,7 @@ private enum class RenderedDeltaAction {
 
 private fun renderTypeAttrs(type: AbstractYType, options: DeepDeltaRenderOptions): Map<String, Any?> {
     val visibleAttrs = when (type) {
+        is YUnopenedRoot -> error("open root '${type.name}' before rendering attributes")
         is YArray -> type.getAttrs()
         is YText -> type.getAttrs()
         is YMap -> type.toMap()
@@ -455,7 +469,11 @@ private fun renderTypeAttr(
 ): Any? {
     val rendered = type.doc.mapItemOrder(type.name, key)
         .mapNotNull { item ->
-            val value = (item.content as? ItemContent.MapEntry)?.value ?: return@mapNotNull null
+            val value = when (val content = item.content) {
+                is ItemContent.MapEntry -> type.doc.valueToAny(content.value)
+                is ItemContent.XmlType -> type.doc.typeFromXmlType(content)
+                else -> return@mapNotNull null
+            }
             val renderedContent = item.readRenderedContents(type.doc, options).lastOrNull()
                 ?: return@mapNotNull null
             if (renderedContent.deleted && renderedContent.attrs == null) return@mapNotNull null
@@ -463,7 +481,7 @@ private fun renderTypeAttr(
                 renderedContent.attrs,
                 renderedContent.deleted,
             ).orEmpty()
-            type.doc.valueToAny(value).toDeepDeltaValue(options) to attribution
+            value.toDeepDeltaValue(options) to attribution
         }
         .lastOrNull()
 
@@ -638,6 +656,7 @@ private fun ItemContent.textAttributesForDeepDelta(
 ): Map<String, Any?> = when (this) {
     is ItemContent.Text -> attributes
     is ItemContent.TextEmbed -> attributes
+    is ItemContent.XmlType -> attributes
     else -> emptyMap()
 }.mapValues { (_, value) -> doc.valueToAny(value).toDeepDeltaValue(options) }.toSortedMap()
 
@@ -660,6 +679,14 @@ private fun ItemContent.textRetainAttributesForDeepDelta(
         formatAttributes + attribution
     }
     is ItemContent.TextEmbed -> {
+        val formatAttributes = if (hasTextFormatChange) {
+            textAttributeDiffForDeepDelta(doc, baseAttributes, attributes, options)
+        } else {
+            emptyMap()
+        }
+        formatAttributes + attribution
+    }
+    is ItemContent.XmlType -> {
         val formatAttributes = if (hasTextFormatChange) {
             textAttributeDiffForDeepDelta(doc, baseAttributes, attributes, options)
         } else {

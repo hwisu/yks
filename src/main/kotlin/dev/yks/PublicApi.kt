@@ -12,9 +12,8 @@ fun <T> transact(doc: YDoc, origin: Any? = null, local: Boolean = true, block: (
 fun <T> transact(doc: YDoc, block: (YTransaction) -> T, origin: Any? = null, local: Boolean = true): T =
     doc.transact(block = block, origin = origin, local = local)
 
-@Suppress("UNUSED_PARAMETER")
 fun addChangedTypeToTransaction(transaction: YTransaction, type: AbstractYType, parentSub: String? = null) {
-    transaction.addChangedType(type)
+    transaction.addChangedType(type, parentSub)
 }
 
 fun deleteText(type: YText, index: Int, length: Int = 1, origin: Any? = null) {
@@ -114,7 +113,7 @@ fun typeTextToArraySnapshot(parent: YText, snapshot: Snapshot): List<Any?> =
 fun typeXmlFragmentToJsonSnapshot(parent: YXmlFragment, snapshot: Snapshot): List<Any?> =
     parent.doc.xmlFragmentAtSnapshot(parent, snapshot)
 
-fun typeXmlFragmentToArraySnapshot(parent: YXmlFragment, snapshot: Snapshot): List<YXmlNode> =
+fun typeXmlFragmentToArraySnapshot(parent: YXmlFragment, snapshot: Snapshot): List<Any?> =
     parent.doc.xmlFragmentArrayAtSnapshot(parent, snapshot)
 
 fun typeXmlFragmentToStringSnapshot(
@@ -204,7 +203,13 @@ fun findRootTypeKey(type: AbstractYType): String {
 fun findTypeInOtherDoc(type: AbstractYType, otherDoc: YDoc): AbstractYType {
     if (type.name in type.doc.rootNames()) {
         val rootKey = findRootTypeKey(type)
-        return otherDoc.rootType(rootKey) ?: error("type does not exist in other document")
+        otherDoc.rootType(rootKey)?.let { return it }
+        require(rootKey in otherDoc.rootNames()) { "type does not exist in other document" }
+        return if (type is YXmlElementType) {
+            otherDoc.getXmlElement(rootKey, type.nodeName)
+        } else {
+            otherDoc.get(rootKey, type.kind)
+        }
     }
     val itemId = type.doc.typeRefItemId(type) ?: error("type does not exist in its source document")
     return otherDoc.typeFromItemId(itemId) ?: error("type does not exist in other document")
@@ -275,11 +280,14 @@ private fun MutableMap<String, YValue>.applyTextFormatAttributesForCleanup(attri
 }
 
 private fun ItemContent.isTextCountableForCleanup(): Boolean =
-    this is ItemContent.Text || this is ItemContent.TextEmbed
+    this is ItemContent.Text ||
+        this is ItemContent.TextEmbed ||
+        (this is ItemContent.XmlType && kind in setOf(RootKind.Text, RootKind.XmlText))
 
 private fun ItemContent.baseTextAttributesForCleanup(): Map<String, YValue> = when (this) {
     is ItemContent.Text -> baseAttributes
     is ItemContent.TextEmbed -> baseAttributes
+    is ItemContent.XmlType -> baseAttributes
     else -> emptyMap()
 }
 

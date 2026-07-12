@@ -148,6 +148,7 @@ class YTypeCloneTest {
 
         val target = YDoc(clientId = 2)
         val clone = xml.clone(target)
+        target.getArray("holder").push(clone)
         val clonedParagraph = clone.getType(0) as YXmlElementType
         val clonedText = clonedParagraph.getType(0) as YText
         clonedText.insert(clonedText.length, "!")

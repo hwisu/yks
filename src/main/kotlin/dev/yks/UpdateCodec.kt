@@ -20,11 +20,27 @@ internal object LegacyUpdateCodec {
     }
 
     fun write(encoder: BinaryEncoder, update: DocumentUpdate): BinaryEncoder {
-        val version = if (update.items.any { item -> item.unresolvedParent != null }) 3 else 2
+        val items = update.items.map { item ->
+            if (item.unresolvedParent != null) {
+                item
+            } else {
+                update.parentItemIds[item.parent]
+                    ?.let { ownerId -> item.copy(unresolvedParent = UnresolvedYjsParent.Nested(ownerId)) }
+                    ?: item
+            }
+        }
+        val version = when {
+            items.any { item ->
+                val content = item.content as? ItemContent.XmlType
+                content != null && (content.attributes.isNotEmpty() || content.baseAttributes.isNotEmpty())
+            } -> 4
+            items.any { item -> item.unresolvedParent != null } -> 3
+            else -> 2
+        }
         updateMagicPrefix.forEach { encoder.writeByte(it.toInt()) }
         encoder.writeByte(version)
-        encoder.writeVarUInt(update.items.size.toLong())
-        update.items.sortedWith(compareBy<StoreItem> { it.id.client }.thenBy { it.id.clock }).forEach { item ->
+        encoder.writeVarUInt(items.size.toLong())
+        items.sortedWith(compareBy<StoreItem> { it.id.client }.thenBy { it.id.clock }).forEach { item ->
             writeItem(encoder, item, version)
         }
         writeDeleteSet(encoder, update.deleteSet)
@@ -39,7 +55,7 @@ internal object LegacyUpdateCodec {
             "unsupported update format"
         }
         val version = decoder.readByte()
-        check(version in 1..3) { "unsupported legacy update version: $version" }
+        check(version in 1..4) { "unsupported legacy update version: $version" }
         val itemCount = decoder.readVarUInt().toDecodedCount()
         val items = buildList {
             repeat(itemCount) {
@@ -148,6 +164,10 @@ internal object LegacyUpdateCodec {
                 writeRootKind(encoder, content.kind)
                 writeYValue(encoder, content.ref)
                 encoder.writeString(content.nodeName)
+                if (version >= 4) {
+                    writeAttributes(encoder, content.attributes)
+                    writeAttributes(encoder, content.baseAttributes)
+                }
             }
         }
     }
@@ -196,7 +216,10 @@ internal object LegacyUpdateCodec {
             7 -> {
                 val kind = readRootKind(decoder)
                 val ref = readYValue(decoder) as? YValue.TypeRef ?: error("XML type child ref is missing")
-                ItemContent.XmlType(ref, decoder.readString(), kind)
+                val nodeName = decoder.readString()
+                val attributes = if (version >= 4) readAttributes(decoder) else emptyMap()
+                val baseAttributes = if (version >= 4) readAttributes(decoder) else attributes
+                ItemContent.XmlType(ref, nodeName, kind, attributes, baseAttributes)
             }
             8 -> {
                 val kind = readRootKind(decoder)

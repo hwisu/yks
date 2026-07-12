@@ -218,7 +218,8 @@ class StructHelperTest {
 
         val collected = gcIdSet(doc, idSet(1, 0, 1)) { struct -> struct.id.clock == 0L }
         val peer = YDoc()
-        applyUpdate(peer, encodeStateAsUpdate(doc))
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdate(doc) }
+        applyUpdate(peer, encodeStateAsUpdateLossless(doc))
 
         assertTrue(collected.has(1, 0))
         assertTrue(collected.has(1, 1))

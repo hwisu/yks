@@ -247,9 +247,9 @@ class DiffRenderer(
     private val prevBeforeObserverSubscription: Subscription =
         prevDoc.observeBeforeObserverCalls(::handlePrevDocBeforeObserverCalls)
     private val prevUpdateSubscription: Subscription =
-        prevDoc.onUpdate(::handlePrevDocUpdate)
+        prevDoc.onUpdateLossless(::handlePrevDocUpdate)
     private val nextUpdateSubscription: Subscription =
-        nextDoc.onUpdate(::handleNextDocUpdate)
+        nextDoc.onUpdateLossless(::handleNextDocUpdate)
     private val nextAfterTransactionSubscription: Subscription =
         nextDoc.observeAfterTransactions(::handleNextDocAfterTransaction)
     private val nextDestroySubscription: Subscription =
@@ -262,7 +262,7 @@ class DiffRenderer(
     var suggestionOrigins: List<Any?>? = null
 
     fun acceptAllChanges() {
-        applyUpdate(prevDoc, encodeStateAsUpdate(nextDoc), origin = this)
+        applyUpdate(prevDoc, encodeStateAsUpdateLossless(nextDoc), origin = this)
     }
 
     fun acceptChanges(start: Id, end: Id = start) {
@@ -270,7 +270,11 @@ class DiffRenderer(
         require(end.clock >= start.clock) { "end must not be before start" }
         val selected = createIdSet().also { ids -> ids.add(start.client, start.clock, end.clock - start.clock + 1) }
         val contentIds = acceptedContentIds(intersectSets(selected, inserts), intersectSets(selected, deletes))
-        applyUpdate(prevDoc, intersectUpdateWithContentIds(encodeStateAsUpdate(nextDoc), contentIds), origin = this)
+        applyUpdate(
+            prevDoc,
+            intersectUpdateWithContentIdsLossless(encodeStateAsUpdateLossless(nextDoc), contentIds),
+            origin = this,
+        )
     }
 
     fun rejectAllChanges() {
@@ -456,8 +460,8 @@ class DiffRenderer(
         val syncInserts = mergeIdSets(listOf(rejectedInserts, undoInsertSet))
         val syncDeletes = mergeIdSets(listOf(rejectedInserts, rejectedDeletes, undoDeleteSet))
         if (syncInserts.isEmpty() && syncDeletes.isEmpty()) return
-        val update = intersectUpdateWithContentIds(
-            encodeStateAsUpdate(nextDoc),
+        val update = intersectUpdateWithContentIdsLossless(
+            encodeStateAsUpdateLossless(nextDoc),
             ContentIds(inserts = syncInserts, deletes = syncDeletes),
         )
         applyUpdate(prevDoc, update, origin = this)
@@ -501,7 +505,7 @@ class DiffRenderer(
         if (attributedDeletes.isEmpty()) return
         applyUpdate(
             prevDoc,
-            UpdateCodec.encode(DocumentUpdate(emptyList(), attributedDeletes.toDeleteSet())),
+            UpdateCodec.encodeLossless(DocumentUpdate(emptyList(), attributedDeletes.toDeleteSet())),
             origin = this,
         )
     }

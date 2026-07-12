@@ -30,14 +30,16 @@ val updateV2 = encodeStateAsUpdateV2(source)
 applyUpdateV2(target, updateV2)
 ```
 
-Create nested shared types through the owning document and attach the owner
-before writing child content when standard Yjs wire output is required:
+Shared types created with public constructors are preliminary values. They can
+be populated before insertion; YKS integrates that same instance and replays
+its content in owner-first clock order so standard Yjs wire remains available:
 
 ```kotlin
 val doc = YDoc(clientId = 1)
-val profile = doc.createMap()
+val profile = YMap(mapOf("name" to "Ada"))
 doc.getMap("root").set("profile", profile)
-profile.set("name", "Ada")
+
+check(doc.getMap("root").get("profile") === profile)
 ```
 
 Live XML uses document-owned node types:
@@ -67,17 +69,42 @@ the compatibility policy below.
 - Kotlin extensions: deep deltas, renderers, shared-type attributes, and
   compact XML values
 
-Update listeners are available through `observeUpdates`, `onUpdate`, and
-`onUpdateV2`. Listener payloads follow the same standard-versus-private policy
-as explicit state exports.
+`observeUpdates`, `onUpdate`, and `onUpdateV2` are standard-wire channels. They
+never deliver a private YKS envelope. Use `observeUpdatesLossless`,
+`onUpdateLossless`, or `onUpdateV2Lossless` for an explicitly lossless channel
+that may carry private bytes. `YTransactionEvent.update` remains the lossless
+transaction artifact so internal relay and Kotlin-only tooling can preserve all
+state; use `encodeUpdateMessageFromTransaction` when genuine V1 bytes are
+required.
+
+If a lossless-only transaction occurs while a standard update listener is
+registered, the mutation remains committed and listener emission reports
+`UnsupportedYjsStandardUpdateException`; the standard listener receives no
+payload. Lossless listeners are still invoked.
 
 ## Standard and private update formats
 
-YKS accepts genuine Yjs update V1 and V2. It emits genuine standard updates
-when the current document state can be represented without losing Kotlin-only
-information. Covered standard paths include:
+YKS accepts genuine Yjs update V1/V2 and private YKS updates on all apply/decode
+paths. Upstream-named writer APIs are stricter: `encodeStateAsUpdate`,
+`encodeStateAsUpdateV2`, `mergeUpdates`, `diffUpdate`, conversion, filtering,
+and obfuscation return genuine Yjs bytes only. If the requested state cannot be
+represented, they throw `UnsupportedYjsStandardUpdateException` instead of
+silently returning private bytes.
 
-- root and owner-first nested arrays, maps, and text;
+Use the corresponding explicit `*Lossless` API when a YKS-only peer is allowed,
+for example `encodeStateAsUpdateLossless`, `encodeStateAsUpdateV2Lossless`,
+`mergeUpdatesLossless`, `diffUpdateLossless`, or
+`convertUpdateFormatV1ToV2Lossless`. Lossless APIs still emit genuine standard
+wire whenever possible, and otherwise emit the private envelope beginning with
+`YKS`. The latest envelope is `YKS\x04`; the writer selects the oldest sufficient
+version from `YKS\x02` through `YKS\x04`, and readers retain compatibility with
+`YKS\x01` through `YKS\x04`. Upstream JavaScript Yjs cannot read this format.
+The `V2Lossless` APIs emit genuine V2 when representable; their fallback is the
+versioned private YKS envelope, not a Yjs V2 frame.
+
+Covered standard paths include:
+
+- root, owner-first, and preliminary nested arrays, maps, and text;
 - binary and lib0 values, including `undefined`, negative zero, special
   floating-point values, and signed 64-bit BigInt values;
 - native rich-text format markers and embeds supported by the selected wire
@@ -87,33 +114,25 @@ information. Covered standard paths include:
 - delete sets, GC/Skip structs, large deleted ranges, state-vector diffs, and
   merged baseline/incremental updates.
 
-When lossless standard encoding is not possible, YKS writes a private envelope
-beginning with `YKS` (currently `YKS\x03`). Other YKS documents can read this
-format, including older `YKS\x01` and `YKS\x02` payloads. Upstream JavaScript
-Yjs cannot read a private YKS envelope.
-
-Current private-fallback cases include:
+Current lossless-only cases include:
 
 - compact/static XML nodes and attributes on a root XML fragment;
-- pre-populated detached shared types whose child clocks precede their owner;
 - subdocument options that do not exist on Yjs wire, such as `collectionId`
   and suggestion-document metadata;
 - other Kotlin-only metadata or content shapes that fail the lossless standard
   eligibility gate.
 
-Some live transaction updates involving preliminary/detached nested state may
-therefore be private even when a later explicit full-state export is standard.
-Applications synchronizing directly with JavaScript Yjs should cover their
-actual mutation paths with the interop verifier instead of assuming every byte
-array is standard.
+Applications synchronizing directly with JavaScript Yjs should use only the
+standard APIs/channels. Pending and private internal relay state uses the
+lossless path so it is never discarded; exporting that state through a standard
+API fails explicitly until it becomes representable.
 
 ## Known limitations
 
 - Root shared-type kind and a root `XmlElement` node name are not encoded by
-  Yjs updates. Receivers may need to materialize the expected XML root before
-  applying an ambiguous update.
-- `Y.XmlHook` wire refs are recognized, but there is not yet a separate public
-  map-style `YXmlHook` API matching JavaScript Yjs.
+  Yjs updates. Applied remote roots therefore remain unopened and are omitted
+  from `toJSON()` until an explicit typed getter supplies the expected schema.
+  Local clone/snapshot helpers preserve schema known when they are created.
 - Browser DOM helpers such as `toDOM` and selector APIs are outside the current
   JVM surface.
 - Kotlin callback/type shapes and Kotlin-specific extensions are not a

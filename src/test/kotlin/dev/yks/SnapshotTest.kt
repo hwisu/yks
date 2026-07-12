@@ -5,6 +5,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class SnapshotTest {
@@ -116,6 +117,19 @@ class SnapshotTest {
     }
 
     @Test
+    fun createDocFromSnapshotUsesRootsCapturedAtSnapshotTimeOnly() {
+        val doc = YDoc(clientId = 1, gc = false)
+        doc.getArray("before")
+        val beforeLaterRoot = snapshot(doc)
+
+        doc.getMap("later").set("value", true)
+        val restored = createDocFromSnapshot(doc, beforeLaterRoot)
+
+        assertEquals(mapOf("before" to emptyList<Any?>()), restored.toJson())
+        assertEquals(null, restored.getOrNull("later"))
+    }
+
+    @Test
     fun createDocFromEmptySnapshotIgnoresZeroClockStateVectorEntries() {
         val doc = YDoc(clientId = 1, gc = false)
         val snap = snapshot(doc).copy(sv = mapOf(9999L to 0L))
@@ -145,6 +159,20 @@ class SnapshotTest {
 
         assertEquals(mapOf("key1" to "value1"), restoredNested.getAttrs())
         assertEquals(mapOf("key1" to "value1", "key2" to "value2"), nested.getAttrs())
+    }
+
+    @Test
+    fun createDocFromSnapshotUsesLosslessInternalWireForStaticXml() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val xml = doc.getXmlFragment("xml")
+        xml.push(YXmlElement("p").also { it.push(YXmlText("old")) })
+        val snap = snapshot(doc)
+        xml.clear()
+        xml.push(YXmlText("new"))
+
+        val restored = createDocFromSnapshot(doc, snap)
+
+        assertEquals("<p>old</p>", restored.getXmlFragment("xml").toString())
     }
 
     @Test
@@ -383,15 +411,104 @@ class SnapshotTest {
         val updated = snapshot(doc)
 
         assertEquals(listOf("old"), typeXmlFragmentToJsonSnapshot(xml, initial))
-        assertEquals("old", typeXmlFragmentToArraySnapshot(xml, initial).single().toJson())
-        assertEquals("old", typeXmlFragmentToDeltaSnapshot(xml, initial).single().insert!!.single().toString())
-        assertEquals("old", typeXmlFragmentToStringSnapshot(xml, initial))
+        assertSame(text, typeXmlFragmentToArraySnapshot(xml, initial).single())
+        assertSame(text, typeXmlFragmentToDeltaSnapshot(xml, initial).single().insert!!.single())
+        assertEquals("<bold>old</bold>", typeXmlFragmentToStringSnapshot(xml, initial))
 
         assertEquals(listOf("new"), typeXmlFragmentToJsonSnapshot(xml, updated))
-        assertEquals("new", typeXmlFragmentToArraySnapshot(xml, updated).single().toJson())
-        assertEquals("new", typeXmlFragmentToDeltaSnapshot(xml, updated).single().insert!!.single().toString())
-        assertEquals("new", typeXmlFragmentToStringSnapshot(xml, updated))
+        assertSame(text, typeXmlFragmentToArraySnapshot(xml, updated).single())
+        assertSame(text, typeXmlFragmentToDeltaSnapshot(xml, updated).single().insert!!.single())
+        assertEquals("<italic>new</italic>", typeXmlFragmentToStringSnapshot(xml, updated))
         assertEquals(YTextDelta().insert("new", mapOf("italic" to true)), text.toDelta())
+    }
+
+    @Test
+    fun xmlSnapshotSerializerPreservesLiveXmlTextFormattingAndEmbeds() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val xml = doc.getXmlFragment("xml")
+        val text = doc.createXmlText()
+        text.insert(0, "A", mapOf("em" to emptyMap<String, Any?>()))
+        text.insertEmbed(1, mapOf("image" to "old"), mapOf("strong" to emptyMap<String, Any?>()))
+        xml.push(text)
+        val initial = snapshot(doc)
+
+        text.delete(0, text.length)
+        text.insert(0, "new")
+
+        val expected = "<em>A</em><strong>[object Object]</strong>"
+        val snapshotValue = typeXmlFragmentToArraySnapshot(xml, initial).single()
+        val deltaValue = typeXmlFragmentToDeltaSnapshot(xml, initial).single().insert!!.single()
+        assertSame(text, snapshotValue)
+        assertSame(text, deltaValue)
+        assertEquals(expected, typeXmlFragmentToStringSnapshot(xml, initial))
+        assertEquals("A", typeXmlFragmentToJsonSnapshot(xml, initial).single())
+        assertEquals("new", xml.toString())
+
+        val historicalXml = createDocFromSnapshot(doc, initial).getXmlFragment("xml")
+        val historicalText = historicalXml.getType(0) as YXmlTextType
+        assertEquals(expected, historicalXml.toString())
+        val target = YDoc(clientId = 2)
+        val targetXml = target.getXmlFragment("xml")
+        targetXml.push(historicalText.clone(target))
+        assertEquals(expected, targetXml.toString())
+        assertEquals(
+            YTextDelta()
+                .insert("A", mapOf("em" to emptyMap<String, Any?>()))
+                .insertEmbed(mapOf("image" to "old"), mapOf("strong" to emptyMap<String, Any?>())),
+            (targetXml.getType(0) as YXmlTextType).toDelta(),
+        )
+    }
+
+    @Test
+    fun xmlSnapshotSerializerPreservesRichXmlTextNestedInAnElement() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val xml = doc.getXmlFragment("xml")
+        val paragraph = doc.createXmlElement("p")
+        val text = doc.createXmlText()
+        text.insert(0, "A", mapOf("em" to emptyMap<String, Any?>()))
+        text.insertEmbed(1, listOf("x", null, 2), mapOf("strong" to emptyMap<String, Any?>()))
+        paragraph.push(text)
+        xml.push(paragraph)
+        val initial = snapshot(doc)
+
+        text.delete(0, text.length)
+        text.insert(0, "new")
+
+        val expected = "<p><em>A</em><strong>x,,2</strong></p>"
+        assertSame(paragraph, typeXmlFragmentToArraySnapshot(xml, initial).single())
+        assertSame(paragraph, typeXmlFragmentToDeltaSnapshot(xml, initial).single().insert!!.single())
+        assertEquals(expected, typeXmlFragmentToStringSnapshot(xml, initial))
+
+        val historicalXml = createDocFromSnapshot(doc, initial).getXmlFragment("xml")
+        val historicalParagraph = historicalXml.getType(0) as YXmlElementType
+        assertEquals(expected, historicalXml.toString())
+        val target = YDoc(clientId = 2)
+        val targetXml = target.getXmlFragment("xml")
+        targetXml.push(historicalParagraph.clone(target))
+        assertEquals(expected, targetXml.toString())
+        val targetParagraph = targetXml.getType(0) as YXmlElementType
+        assertTrue(targetParagraph.getType(0) is YXmlTextType)
+    }
+
+    @Test
+    fun xmlSnapshotArraysAndDeltasPreserveGenericSharedTypeIdentity() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val xml = doc.getXmlFragment("xml")
+        val array = YArray(listOf("old"))
+        val map = YMap(mapOf("version" to 1))
+        xml.push(array, map)
+        val before = snapshot(doc)
+
+        array.push("new")
+        map.set("version", 2)
+
+        val snapshotValues = typeXmlFragmentToArraySnapshot(xml, before)
+        val deltaValues = typeXmlFragmentToDeltaSnapshot(xml, before).flatMap { op -> op.insert.orEmpty() }
+
+        assertSame(array, snapshotValues[0])
+        assertSame(map, snapshotValues[1])
+        assertSame(array, deltaValues[0])
+        assertSame(map, deltaValues[1])
     }
 
     @Test

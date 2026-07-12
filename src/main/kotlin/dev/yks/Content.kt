@@ -422,18 +422,7 @@ class ContentType(
 
     override fun isCountable(): Boolean = true
 
-    override fun copy(): ContentType = ContentType(
-        YDoc().let { targetDoc ->
-            when (type) {
-                is YArray -> type.clone(targetDoc)
-                is YText -> type.clone(targetDoc)
-                is YMap -> type.clone(targetDoc)
-                is YXmlFragment -> type.clone(targetDoc)
-                is YXmlElementType -> type.clone(targetDoc)
-                is YXmlTextType -> type.clone(targetDoc)
-            }
-        },
-    )
+    override fun copy(): ContentType = ContentType(type.emptyContentTypeCopy())
 
     override fun mergeWith(right: AbstractContent): Boolean = false
 

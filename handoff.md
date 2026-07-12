@@ -8,14 +8,15 @@
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
 - 기준 원격 커밋: `origin/main` = `d2e93a6`
-- 이번 커밋 반영 후 `origin/main`보다 4개 커밋 앞섬
-- 2026-07-12 정밀 감사에서 기존 완료 선언과 달리 추가 parity blocker를 확인하여 개선 작업 진행 중
+- 이번 커밋 반영 후 `origin/main`보다 5개 커밋 앞섬
+- 2026-07-12 정밀 감사에서 확인한 parity blocker와 후속 edge case를 모두 수정하고 전체 gate를 재검증함
 - 모든 개선 커밋은 구현·회귀 테스트와 이 문서를 함께 갱신함
 
 현재 커밋 이력:
 
 ```text
-HEAD fix: align Yjs cleanup map and XML semantics
+HEAD fix: complete audited Yjs Kotlin parity
+570194c fix: align Yjs cleanup map and XML semantics
 cada05a fix: harden Yjs update metadata and range merging
 92e2908 fix: close audited Yjs interoperability gaps
 3b40be1 fix: match Yjs sequence conflict ordering
@@ -62,12 +63,12 @@ a19f4ac feat: decode and integrate Yjs V1 updates
 
 ### 2. 표준 Yjs update V1 codec 기반
 
-- 기존 private `YKS\x01` decode compatibility를 유지하고 writer는 metadata-capable `YKS\x02` 사용
+- private `YKS\x01`~`YKS\x04` decode compatibility 유지
 - 새 `UpdateCodec`은 다음처럼 dispatch함:
-  - `YKS\x01`/`YKS\x02` magic이면 legacy decode
+  - `YKS\x01`~`YKS\x04` magic이면 private/lossless decode
   - 그 외에는 표준 Yjs update V1 decode
-  - V1로 손실 없이 표현 가능한 update만 표준 V1으로 encode
-  - 아직 표현하지 못하는 update는 legacy envelope로 fallback
+  - upstream 이름의 표준 API는 genuine V1/V2만 반환하고 표현 불가능하면 명시적 예외 발생
+  - `*Lossless` API만 필요한 최소 버전의 private envelope를 명시적으로 사용
 - lib0 any/varint/string/binary codec과 golden test 추가
 - client ID 생성 규칙을 Yjs의 unsigned 32-bit 범위에 맞춤
 
@@ -84,7 +85,8 @@ a19f4ac feat: decode and integrate Yjs V1 updates
 - owner-first live XML tree
 - direct `Y.Array`/`Y.Map` subdocument
 
-표준 writer가 보장할 수 없는 경우에는 기존 `YKS` envelope를 사용함.
+표준 writer가 보장할 수 없는 경우 표준 API는 `UnsupportedYjsStandardUpdateException`을 던지고,
+명시적 `*Lossless` API만 `YKS` envelope를 사용함.
 
 ### 4. 표준 V1 decoder와 integration
 
@@ -250,26 +252,27 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 
 ### 15. root transaction-event V1 standardization
 
-- root text/array/map의 lossless insert/update transaction은 `update` event에서 표준 V1 payload 방출
+- root text/array/map의 표현 가능한 insert/update transaction은 lossless transaction artifact에서도 표준 V1 payload 방출
 - upstream fixture relay와 Kotlin-authored formatted root text event를 실제 `Y.applyUpdate`로 검증
-- 기존 API와 동일한 `isSupportedV1Update` gate를 통과하지 못하면 legacy envelope 유지
-- pre-populated detached nested owner와 nested child mutation은 이름 통합 전까지 legacy 유지
-- 이 제한으로 기존 bidirectional UndoManager 동기화 의미를 보존
+- `observeUpdates`/`onUpdate`/`onUpdateV2`는 standard-only channel이며 private payload를 절대 전달하지 않음
+- `observeUpdatesLossless`/`onUpdateLossless`/`onUpdateV2Lossless`와 `YTransactionEvent.update`는 Kotlin-only 상태도 보존
+- standard gate를 통과하지 못한 transaction은 mutation과 lossless listener를 유지하되 standard listener에서 명시적 예외로 보고
 
 ### 16. pending/GC private serialization metadata
 
-- private fallback writer를 `YKS\x02`로 올리고 `requiresClockContinuity`와 `isGc`를 item마다 직렬화
+- private writer의 `YKS\x02`부터 `requiresClockContinuity`와 `isGc`를 item마다 직렬화
 - 기존 `YKS\x01` payload는 metadata 기본값으로 계속 decode
 - pending struct view를 decode/re-encode해도 GC와 clock-continuity metadata가 보존되는 regression test 추가
 - sparse content intersection은 의도적인 standalone chunk이므로 continuity requirement를 명시적으로 해제
 - V1/V2 native GC fixture의 clock ownership/convergence 검증과 함께 pending metadata 손실 제거
+- lossless range/id-set 선택에서 sparse continuity나 XML type attributes를 표준 wire로 잘못 축약하지 않고 필요한 경우 `YKS\x04` 사용
 
 ### 17. delete transaction-event V1 standardization
 
-- root delete-set transaction의 `update` event도 표준 V1 payload로 전환
+- 표현 가능한 root delete-set transaction의 lossless artifact도 표준 V1 payload 사용
 - subdocument insert, delete, destroy-cleanup에서 방출된 3개 event payload 모두 표준 V1인지 검증
 - 실제 upstream `Y.applyUpdate` sequence가 최종 subdocument deletion state로 수렴하는지 검증
-- detached nested owner fallback을 유지한 상태에서 bidirectional UndoManager regression이 다시 통과함을 확인
+- standard/lossless channel 분리 상태에서 bidirectional UndoManager regression이 다시 통과함을 확인
 
 ### 18. Yjs sequence conflict ordering
 
@@ -293,7 +296,7 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
 - JS object key enumeration 순서(정수 index 우선, 나머지는 insertion order) 보존
 - 사용자 formatting key `__yks_text_format`이 private payload로 오인되지 않도록 schema 판별 강화
 - direct default subdocument는 upstream처럼 standard wire로 내보내고 receiver `shouldLoad=false` 의미 검증
-- nested collection 안 subdocument는 표준 ref 9로 표현할 수 없으므로 유실 없이 명시적 private fallback 유지
+- nested collection 안 subdocument는 표준 ref 9로 표현할 수 없으므로 explicit `*Lossless` 경로에서 private envelope로 보존
 
 ### 20. merge, pending parent metadata, V2 snapshot
 
@@ -377,7 +380,45 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
   - `hookName`, map API, `toJSON`, `[object Object]` 문자열 의미
   - type-ref 5 V1/V2 read/write, `YDoc.createXmlHook`, clone/materialization 지원
   - hook 내부 변경은 map snapshot/event/delta 의미 사용
-- private envelope는 unresolved-parent metadata가 있을 때만 V3를 쓰고, 그 외 payload는 rolling-upgrade 호환 V2 유지
+- private envelope는 XML type attribute/base-attribute metadata에 V4, unresolved-parent metadata에 V3,
+  나머지 lossless-only metadata에 rolling-upgrade 호환 V2를 선택
+
+### 29. 최종 공개 surface와 lossless parity 감사
+
+- 표준/비표준 update 경계를 API와 event channel에서 완전히 분리
+  - upstream 이름의 encode/merge/diff/convert/filter/obfuscate API는 genuine V1/V2만 반환
+  - private 입력이나 표현 불가능한 Kotlin-only shape는 조용한 fallback 없이 명시적 예외
+  - 대응하는 `*Lossless` API는 표준 wire를 우선하고 필요한 경우에만 `YKS\x02`~`YKS\x04` 사용
+  - 단일 입력 `mergeUpdates`/`mergeUpdatesV2`도 입력 byte passthrough 대신 요청한 wire format으로 검증·정규화
+  - empty/delete-only V1의 leading zero를 V2 envelope로 오인하지 않고 V2 decode 실패 시 구조적으로 V1 재검증
+  - duplicate standard/private struct의 continuity, GC, unresolved-parent, text metadata를 입력 순서와 무관하게 병합
+  - formatted Text/TextEmbed/ContentType 부분 선택은 실제 CRDT sequence의 active marker를 재구성해 metadata 유실 여부 판정
+- public constructor로 만든 preliminary `YArray`/`YMap`/`YText`/live XML을 동일 instance로 integration
+  - child를 먼저 채운 뒤 owner에 넣어도 owner-first clock 순서로 replay해 genuine 표준 update 생성
+  - nested preliminary graph의 identity, cycle, cross-document 재사용을 mutation 전에 원자적으로 preflight
+  - array/map/text/XML의 generic `ContentType` placement와 Kotlin→Yjs verifier 추가
+  - preliminary `YText` pending operation 오류는 upstream처럼 기록하되 owner integration과 queue 정리는 완료
+  - sparse lossless nested child는 private V3 unresolved-parent metadata로 owner 도착 전 pending 유지
+- upstream event surface에 맞춘 typed event와 deep-observe contract 추가
+  - `YArrayEvent`, `YMapEvent`, `YTextEvent`, `YXmlEvent`, `YEventChanges`
+  - deep observer는 concrete event list를 path depth 기준 stable order로 전달
+  - net-noop mutation도 upstream `changedSubs` 기반 `keysChanged`/`childListChanged`를 유지하고 `changes.keys`/delta는 empty
+  - `YTextEvent.changes.added/deleted`는 upstream처럼 항상 empty이고, concurrent losing map write는
+    `keysChanged`만 유지한 채 `changes.keys`를 empty로 유지
+- remote update로만 존재하는 모호한 root는 `YUnopenedRoot` live placeholder로 유지
+  - `YDoc.share`의 기존 `Map<String, AbstractYType>` source shape 보존
+  - `get`/`getOrNull`은 guessed `YArray`를 만들지 않고 placeholder 반환
+  - explicit typed getter가 호출될 때만 concrete root로 교체·정규화하며 unopened root는 `toJSON()`에서 제외
+  - document destroy가 아직 materialize되지 않은 placeholder에도 destroy event를 정확히 한 번 전달
+- `cloneDoc`과 in-memory snapshot은 capture 시점에 알려진 root kind와 root `XmlElement` node name을 보존
+  - snapshot 뒤 새로 연 root가 과거 snapshot document에 섞이지 않음
+  - snapshot 이전의 empty root는 복원됨
+- generic XML snapshot array/delta는 live `YXmlElementType`/`YXmlTextType` identity를 반환
+  - historical XML string/JSON은 `createDocFromSnapshot` 경로에서 snapshot 시점 formatting/attributes를 유지
+- UndoManager redo가 remotely deleted owner 아래 child를 고아로 복원하지 않도록 ancestor owner chain 전체의 restore eligibility를 재귀 검증
+- `ContentType.copy()`는 upstream `_copy()`처럼 alias가 아닌 detached empty shared-type copy를 반환
+- 두 차례 독립 감사에서 추가로 발견된 총 17개 merge/metadata/event/preliminary/snapshot/root/undo/copy
+  edge case를 모두 최소 재현과 regression으로 고정
 
 ## 완료된 작업: XML + subdocument V1
 
@@ -442,12 +483,12 @@ subdoc-duplicate-guid-v1.bin
 표준 V1에서 의도적으로 제외한 경우:
 
 - static compact `ItemContent.XmlNode`
-- owner보다 child clock이 먼저 생긴 pre-populated detached XML type
 - root `XmlFragment`의 Kotlin-only attributes
 - `collectionId` 또는 suggestion-doc 같은 비표준 subdocument 옵션
 - `shouldLoad=true`, `autoLoad=false`처럼 upstream wire에서 보존할 수 없는 상태
 
-이 경우 모두 legacy `YKS` codec으로 fallback하는 테스트가 있음.
+이 경우 표준 API는 명시적 예외를 내고, 대응하는 `*Lossless` API만 private `YKS` codec을
+사용하는 테스트가 있음. Preliminary live XML은 owner-first replay로 표준 V1/V2를 지원함.
 
 ## 마지막 검증 결과
 
@@ -458,9 +499,9 @@ subdoc-duplicate-guid-v1.bin
 BUILD SUCCESSFUL
 ```
 
-- 일반 Kotlin tests: 567 passed
-- Kotlin Yjs V1/V2 interop tests: 77 passed
-- JavaScript/Yjs oracle tests: 88 passed
+- 일반 Kotlin tests: 611 passed
+- Kotlin Yjs V1/V2 interop tests: 78 passed
+- JavaScript/Yjs oracle tests: 92 passed
 - deterministic upstream differential: 500 seeds, 0 failures
 - 15,000 nested insertion regression: passed
 - fixture regeneration diff: clean
@@ -480,36 +521,32 @@ git diff --check
 
 ## 정밀 감사 후 개선 상태
 
-기존의 "semantic/convergence blocker 없음" 선언은 철회함. 이번 커밋에서 핵심 sequence ordering blocker를 수정했으며, 다음 항목은 후속 커밋에서 계속 개선해야 함:
+2026-07-12 감사에서 확인한 sequence ordering, cleanup/map/XML 의미와 두 차례 후속 독립 감사의 17개 공개 API·metadata·preliminary·snapshot·event edge case까지 모두 수정하고 regression을 추가함. 현재 알려진 semantic/convergence blocker는 없음.
 
-1. 표준 update API에서 남아 있는 static XML/Kotlin-only extension의 private `YKS` fallback을 명시적으로 분리
-2. detached/preliminary shared type의 동일 instance integration과 owner-before-child clock 의미 구현
-3. typed event/deep-observe contract 등 공개 type surface 보강
-4. unopened remote root의 `YDoc.toJSON` materialization과 XML snapshot formatting 세부 의미 정렬
-
-아래 항목은 기존 구현의 compatibility 제약 기록이며, 위 blocker를 모두 해결한 뒤 실제 남은 JVM adaptation만 재분류해야 함:
+실제로 남은 경계는 upstream wire 자체 또는 JVM 환경 차이임:
 
 1. root XML schema
    - root shared type kind와 root `XmlElement` node name은 Yjs update wire에 없음
-   - receiver는 apply 전에 예상 root XML kind/node name을 pre-materialize해야 함
-2. Kotlin-only subdocument options
-   - `collectionId`, suggestion-doc 등 upstream wire에 없는 option은 `YKS\x02` lossless envelope 사용
-   - 표준 V1/V2로 조용히 option을 유실시키지 않음
+   - remote root는 guessed type으로 열지 않고 `YUnopenedRoot`로 보존하며 explicit typed getter가 schema를 결정
+   - local clone/in-memory snapshot은 capture 시점에 알려진 schema를 별도 metadata로 보존
+2. Kotlin-only subdocument/options와 static XML
+   - upstream wire에 없는 `collectionId`, suggestion metadata, compact/static XML 등은 explicit `*Lossless` API만 private envelope 사용
+   - 표준 V1/V2 API와 standard event channel은 조용히 option을 유실하거나 private bytes를 반환하지 않음
 3. GC storage compactness
-   - wire/pending metadata와 clock semantics는 완전히 보존함
-   - GC range를 내부에서 unit `StoreItem`으로 펼치는 구현은 향후 메모리 최적화 대상으로만 남김
-4. detached preliminary nested content
-   - Kotlin에서 owner보다 먼저 clock을 할당받은 pre-populated detached child는 표준 Yjs owner-before-child wire로 무손실 변환할 수 없음
-   - 해당 transaction만 `YKS\x02`를 사용하며 owner-first nested content와 root insert/update/delete events는 표준 V1/V2 사용
+   - wire/pending metadata, large range, clock semantics는 보존됨
+   - 추가 내부 메모리 최적화는 성능 개선 항목일 뿐 correctness blocker가 아님
+4. browser-only surface
+   - DOM 생성, selector 등 JVM에 직접 대응하지 않는 API는 범위 밖
 
-새 기능을 추가할 때는 이 constraint를 깨뜨리기보다 fixture/oracle을 먼저 추가하고 lossless standard eligibility를 넓힐 것.
+새 기능을 추가할 때는 fixture/oracle을 먼저 추가하고, 표준 wire eligibility와 explicit lossless 경계를 동시에 검증할 것.
 
 ## 주의 사항
 
-- root shared type kind는 Yjs update wire에 기록되지 않음. 모호한 root XML type은 apply 전에 예상 kind를 materialize해야 함.
+- root shared type kind는 Yjs update wire에 기록되지 않음. 모호한 remote root는 apply 후 explicit typed getter로 materialize해야 함.
 - Yjs clock은 UTF-16 code unit 기준임.
 - `Skip`은 clock ownership이 아니며 store/state vector에 들어가면 안 됨.
 - `GC`는 clock을 소유하며 anchor/parent가 GC이면 dependent item도 GC로 통합해야 함.
 - packed struct 내부 ID를 anchor로 사용할 수 있으므로 start-ID lookup만 사용하면 안 됨.
 - delete set은 struct integration 뒤에 적용되며 아직 없는 range는 pending으로 유지해야 함.
-- standard writer eligibility를 넓힐 때는 손실 없는 경우만 허용하고, 애매하면 legacy fallback을 유지할 것.
+- standard writer eligibility를 넓힐 때는 손실 없는 경우만 허용하고, 애매하면 표준 API는 예외,
+  explicit `*Lossless` API만 private envelope를 사용하도록 유지할 것.

@@ -61,8 +61,14 @@ fun readUpdateV2(decoder: UpdateDecoderV2, doc: YDoc, origin: Any? = null) {
 fun encodeStateAsUpdate(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
     doc.encodeStateAsUpdate(encodedStateVector)
 
+fun encodeStateAsUpdateLossless(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
+    doc.encodeStateAsUpdateLossless(encodedStateVector)
+
 fun encodeStateAsUpdateV2(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
     doc.encodeStateAsUpdateV2(encodedStateVector)
+
+fun encodeStateAsUpdateV2Lossless(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
+    doc.encodeStateAsUpdateV2Lossless(encodedStateVector)
 
 fun encodeStateVector(doc: YDoc): ByteArray = doc.encodeStateVector()
 
@@ -81,12 +87,36 @@ fun writeStateAsUpdate(
         ),
     )
 
+fun writeStateAsUpdateLossless(
+    encoder: BinaryEncoder,
+    doc: YDoc,
+    targetStateVector: StateVector = emptyMap(),
+): BinaryEncoder =
+    UpdateCodec.writeLossless(
+        encoder,
+        DocumentUpdate(
+            doc.store.itemsSince(targetStateVector),
+            doc.store.deleteSet(),
+            doc.store.parentItemIds(),
+            doc.store.parentKinds(),
+        ),
+    )
+
 fun writeStateAsUpdate(
     encoder: IdSetEncoderV1,
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
 ): IdSetEncoderV1 {
     writeStateAsUpdate(encoder.restEncoder, doc, targetStateVector)
+    return encoder
+}
+
+fun writeStateAsUpdateLossless(
+    encoder: IdSetEncoderV1,
+    doc: YDoc,
+    targetStateVector: StateVector = emptyMap(),
+): IdSetEncoderV1 {
+    writeStateAsUpdateLossless(encoder.restEncoder, doc, targetStateVector)
     return encoder
 }
 
@@ -98,12 +128,28 @@ fun writeStateAsUpdateV2(
     it.writeRawBytes(doc.encodeStateAsUpdateV2(encodeStateVector(targetStateVector)))
 }
 
+fun writeStateAsUpdateV2Lossless(
+    encoder: BinaryEncoder,
+    doc: YDoc,
+    targetStateVector: StateVector = emptyMap(),
+): BinaryEncoder = encoder.also {
+    it.writeRawBytes(doc.encodeStateAsUpdateV2Lossless(encodeStateVector(targetStateVector)))
+}
+
 fun writeStateAsUpdateV2(
     encoder: UpdateEncoderV2,
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
 ): UpdateEncoderV2 = encoder.also {
     it.setEncodedUpdate(doc.encodeStateAsUpdateV2(encodeStateVector(targetStateVector)))
+}
+
+fun writeStateAsUpdateV2Lossless(
+    encoder: UpdateEncoderV2,
+    doc: YDoc,
+    targetStateVector: StateVector = emptyMap(),
+): UpdateEncoderV2 = encoder.also {
+    it.setEncodedUpdate(doc.encodeStateAsUpdateV2Lossless(encodeStateVector(targetStateVector)))
 }
 
 fun writeStateAsUpdateV2(
@@ -113,12 +159,29 @@ fun writeStateAsUpdateV2(
 ): IdSetEncoderV1 =
     writeStateAsUpdate(encoder, doc, targetStateVector)
 
+fun writeStateAsUpdateV2Lossless(
+    encoder: IdSetEncoderV1,
+    doc: YDoc,
+    targetStateVector: StateVector = emptyMap(),
+): IdSetEncoderV1 =
+    writeStateAsUpdateLossless(encoder, doc, targetStateVector)
+
 fun writeClientsStructs(
     encoder: BinaryEncoder,
     store: StructStore,
     stateVector: StateVector = emptyMap(),
 ): BinaryEncoder =
     UpdateCodec.write(
+        encoder,
+        DocumentUpdate(store.itemsSince(stateVector), DeleteSet.empty(), store.parentItemIds(), store.parentKinds()),
+    )
+
+fun writeClientsStructsLossless(
+    encoder: BinaryEncoder,
+    store: StructStore,
+    stateVector: StateVector = emptyMap(),
+): BinaryEncoder =
+    UpdateCodec.writeLossless(
         encoder,
         DocumentUpdate(store.itemsSince(stateVector), DeleteSet.empty(), store.parentItemIds(), store.parentKinds()),
     )
@@ -132,6 +195,15 @@ fun writeClientsStructs(
     return encoder
 }
 
+fun writeClientsStructsLossless(
+    encoder: IdSetEncoderV1,
+    store: StructStore,
+    stateVector: StateVector = emptyMap(),
+): IdSetEncoderV1 {
+    writeClientsStructsLossless(encoder.restEncoder, store, stateVector)
+    return encoder
+}
+
 fun writeClientsStructs(
     encoder: UpdateEncoderV2,
     store: StructStore,
@@ -139,6 +211,23 @@ fun writeClientsStructs(
 ): UpdateEncoderV2 = encoder.also {
     it.setEncodedUpdate(
         UpdateCodec.encodeV2(
+            DocumentUpdate(
+                store.itemsSince(stateVector),
+                DeleteSet.empty(),
+                store.parentItemIds(),
+                store.parentKinds(),
+            ),
+        ),
+    )
+}
+
+fun writeClientsStructsLossless(
+    encoder: UpdateEncoderV2,
+    store: StructStore,
+    stateVector: StateVector = emptyMap(),
+): UpdateEncoderV2 = encoder.also {
+    it.setEncodedUpdate(
+        UpdateCodec.encodeV2Lossless(
             DocumentUpdate(
                 store.itemsSince(stateVector),
                 DeleteSet.empty(),
@@ -162,10 +251,43 @@ fun createDocFromUpdateV2(update: ByteArray, doc: YDoc = YDoc()): YDoc = doc.als
 fun createDocFromUpdateV2(update: ByteArray, options: YDocOptions): YDoc =
     createDocFromUpdateV2(update, options.toDoc())
 
-fun cloneDoc(doc: YDoc): YDoc = createDocFromUpdate(encodeStateAsUpdate(doc))
+internal fun YDoc.concreteRootMetadata(): Map<String, SnapshotRootType> =
+    concreteRootTypes().mapValues { (_, type) ->
+        SnapshotRootType(
+            kind = type.kind,
+            xmlElementNodeName = (type as? YXmlElementType)?.nodeName,
+        )
+    }
+
+internal fun YDoc.preMaterializeRoots(roots: Map<String, SnapshotRootType>): YDoc {
+    roots.forEach { (name, root) ->
+        when (root.kind) {
+            RootKind.Array -> getArray(name)
+            RootKind.Map -> getMap(name)
+            RootKind.Text -> getText(name)
+            RootKind.XmlFragment -> getXmlFragment(name)
+            RootKind.XmlElement -> getXmlElement(name, root.xmlElementNodeName ?: name)
+            RootKind.XmlHook,
+            RootKind.XmlText -> error("XML node type refs cannot be document roots")
+        }
+    }
+    return this
+}
+
+internal fun YDoc.preMaterializeRootsFrom(source: YDoc): YDoc {
+    if (this === source) return this
+    return preMaterializeRoots(source.concreteRootMetadata())
+}
+
+private fun cloneDocInto(source: YDoc, target: YDoc): YDoc {
+    target.preMaterializeRootsFrom(source)
+    return createDocFromUpdate(encodeStateAsUpdateLossless(source), target)
+}
+
+fun cloneDoc(doc: YDoc): YDoc = cloneDocInto(doc, YDoc())
 
 fun cloneDoc(doc: YDoc, options: YDocOptions): YDoc =
-    createDocFromUpdate(encodeStateAsUpdate(doc), options)
+    cloneDocInto(doc, options.toDoc())
 
 fun writeStructs(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray {
     val idSet = createIdSet()
@@ -177,14 +299,38 @@ fun writeStructsV2(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray 
     createIdSet().also { ids -> idRanges.forEach { ids.add(client, it.clock, it.len) } }
         .let { writeStructsFromIdSetV2(doc, it) }
 
+fun writeStructsLossless(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray =
+    createIdSet().also { ids -> idRanges.forEach { ids.add(client, it.clock, it.len) } }
+        .let { writeStructsFromIdSetLossless(doc, it) }
+
+fun writeStructsV2Lossless(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray =
+    createIdSet().also { ids -> idRanges.forEach { ids.add(client, it.clock, it.len) } }
+        .let { writeStructsFromIdSetV2Lossless(doc, it) }
+
 fun writeStructsFromIdSet(doc: YDoc, idSet: IdSet): ByteArray =
     encodeStructsFromIdSet(doc, idSet)
 
 fun writeStructsFromIdSetV2(doc: YDoc, idSet: IdSet): ByteArray =
     encodeStructsFromIdSetV2(doc, idSet)
 
+fun writeStructsFromIdSetLossless(doc: YDoc, idSet: IdSet): ByteArray =
+    encodeStructsFromIdSetLossless(doc, idSet)
+
+fun writeStructsFromIdSetV2Lossless(doc: YDoc, idSet: IdSet): ByteArray =
+    encodeStructsFromIdSetV2Lossless(doc, idSet)
+
 fun encodeStructsFromIdSet(doc: YDoc, idSet: IdSet): ByteArray =
     UpdateCodec.encode(
+        DocumentUpdate(
+            doc.itemsForIdSet(idSet),
+            DeleteSet.empty(),
+            doc.store.parentItemIds(),
+            doc.store.parentKinds(),
+        ),
+    )
+
+fun encodeStructsFromIdSetLossless(doc: YDoc, idSet: IdSet): ByteArray =
+    UpdateCodec.encodeLossless(
         DocumentUpdate(
             doc.itemsForIdSet(idSet),
             DeleteSet.empty(),
@@ -203,11 +349,27 @@ fun encodeStructsFromIdSetV2(doc: YDoc, idSet: IdSet): ByteArray =
         ),
     )
 
+fun encodeStructsFromIdSetV2Lossless(doc: YDoc, idSet: IdSet): ByteArray =
+    UpdateCodec.encodeV2Lossless(
+        DocumentUpdate(
+            doc.itemsForIdSet(idSet),
+            DeleteSet.empty(),
+            doc.store.parentItemIds(),
+            doc.store.parentKinds(),
+        ),
+    )
+
 fun writeStructsFromTransaction(transaction: YTransactionEvent): ByteArray =
     encodeStructsFromTransaction(transaction)
 
 fun writeStructsFromTransactionV2(transaction: YTransactionEvent): ByteArray =
     encodeStructsFromTransactionV2(transaction)
+
+fun writeStructsFromTransactionLossless(transaction: YTransactionEvent): ByteArray =
+    encodeStructsFromTransactionLossless(transaction)
+
+fun writeStructsFromTransactionV2Lossless(transaction: YTransactionEvent): ByteArray =
+    encodeStructsFromTransactionV2Lossless(transaction)
 
 fun encodeStructsFromTransaction(transaction: YTransactionEvent): ByteArray =
     UpdateCodec.encode(
@@ -229,19 +391,65 @@ fun encodeStructsFromTransactionV2(transaction: YTransactionEvent): ByteArray =
         ),
     )
 
+fun encodeStructsFromTransactionLossless(transaction: YTransactionEvent): ByteArray =
+    UpdateCodec.encodeLossless(
+        DocumentUpdate(
+            transaction.addedItems.map { it.copy() },
+            DeleteSet.empty(),
+            transaction.doc.store.parentItemIds(),
+            transaction.doc.store.parentKinds(),
+        ),
+    )
+
+fun encodeStructsFromTransactionV2Lossless(transaction: YTransactionEvent): ByteArray =
+    UpdateCodec.encodeV2Lossless(
+        DocumentUpdate(
+            transaction.addedItems.map { it.copy() },
+            DeleteSet.empty(),
+            transaction.doc.store.parentItemIds(),
+            transaction.doc.store.parentKinds(),
+        ),
+    )
+
 fun writeUpdateMessageFromTransaction(transaction: YTransactionEvent): ByteArray? =
     encodeUpdateMessageFromTransaction(transaction)
 
 fun writeUpdateMessageFromTransactionV2(transaction: YTransactionEvent): ByteArray? =
     encodeUpdateMessageFromTransactionV2(transaction)
 
+fun writeUpdateMessageFromTransactionLossless(transaction: YTransactionEvent): ByteArray? =
+    encodeUpdateMessageFromTransactionLossless(transaction)
+
+fun writeUpdateMessageFromTransactionV2Lossless(transaction: YTransactionEvent): ByteArray? =
+    encodeUpdateMessageFromTransactionV2Lossless(transaction)
+
 fun encodeUpdateMessageFromTransaction(transaction: YTransactionEvent): ByteArray? {
     if (transaction.insertSet.isEmpty() && transaction.deleteSet.isEmpty) return null
-    return transaction.update.copyOf()
+    return UpdateCodec.encode(
+        DocumentUpdate(
+            transaction.addedItems.map { it.copy() },
+            transaction.deleteSet.copy(),
+            transaction.doc.store.parentItemIds(),
+            transaction.doc.store.parentKinds(),
+        ),
+    )
 }
+
+fun encodeUpdateMessageFromTransactionLossless(transaction: YTransactionEvent): ByteArray? =
+    if (transaction.insertSet.isEmpty() && transaction.deleteSet.isEmpty) null else transaction.update.copyOf()
 
 fun encodeUpdateMessageFromTransactionV2(transaction: YTransactionEvent): ByteArray? =
     if (transaction.insertSet.isEmpty() && transaction.deleteSet.isEmpty) null else UpdateCodec.encodeV2(
+        DocumentUpdate(
+            transaction.addedItems.map { it.copy() },
+            transaction.deleteSet.copy(),
+            transaction.doc.store.parentItemIds(),
+            transaction.doc.store.parentKinds(),
+        ),
+    )
+
+fun encodeUpdateMessageFromTransactionV2Lossless(transaction: YTransactionEvent): ByteArray? =
+    if (transaction.insertSet.isEmpty() && transaction.deleteSet.isEmpty) null else UpdateCodec.encodeV2Lossless(
         DocumentUpdate(
             transaction.addedItems.map { it.copy() },
             transaction.deleteSet.copy(),
@@ -416,6 +624,7 @@ fun convertUpdateFormat(
     update: ByteArray,
     blockTransformer: (DecodedUpdateStruct) -> DecodedUpdateStruct = { it },
 ): ByteArray {
+    requireStandardYjsUpdateInput(update, "V1")
     val decoded = UpdateCodec.decode(update)
     val transformed = decoded.items.flatMap { item ->
         blockTransformer(item.toDecodedStruct()).toStoreItems(original = item)
@@ -423,9 +632,32 @@ fun convertUpdateFormat(
     return UpdateCodec.encode(DocumentUpdate(transformed, decoded.deleteSet.copy()))
 }
 
-fun convertUpdateFormatV1ToV2(update: ByteArray): ByteArray = UpdateCodec.encodeV2(UpdateCodec.decode(update))
+fun convertUpdateFormatLossless(
+    update: ByteArray,
+    blockTransformer: (DecodedUpdateStruct) -> DecodedUpdateStruct = { it },
+): ByteArray {
+    val decoded = UpdateCodec.decode(update)
+    val transformed = decoded.items.flatMap { item ->
+        blockTransformer(item.toDecodedStruct()).toStoreItems(original = item)
+    }
+    return UpdateCodec.encodeLossless(DocumentUpdate(transformed, decoded.deleteSet.copy()))
+}
 
-fun convertUpdateFormatV2ToV1(update: ByteArray): ByteArray = UpdateCodec.encode(UpdateCodec.decodeV2(update))
+fun convertUpdateFormatV1ToV2(update: ByteArray): ByteArray {
+    requireStandardYjsUpdateInput(update, "V1")
+    return UpdateCodec.encodeV2(UpdateCodec.decode(update))
+}
+
+fun convertUpdateFormatV1ToV2Lossless(update: ByteArray): ByteArray =
+    UpdateCodec.encodeV2Lossless(UpdateCodec.decode(update))
+
+fun convertUpdateFormatV2ToV1(update: ByteArray): ByteArray {
+    requireStandardYjsUpdateInput(update, "V2")
+    return UpdateCodec.encode(UpdateCodec.decodeV2(update))
+}
+
+fun convertUpdateFormatV2ToV1Lossless(update: ByteArray): ByteArray =
+    UpdateCodec.encodeLossless(UpdateCodec.decodeV2(update))
 
 data class ObfuscatorOptions(
     val formatting: Boolean = true,
@@ -434,6 +666,7 @@ data class ObfuscatorOptions(
 )
 
 fun obfuscateUpdate(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray {
+    requireStandardYjsUpdateInput(update, "V1")
     val decoded = UpdateCodec.decode(update)
     val obfuscator = UpdateObfuscator(options)
     val obfuscatedItems = decoded.items.map { item ->
@@ -442,10 +675,33 @@ fun obfuscateUpdate(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOp
     return UpdateCodec.encode(DocumentUpdate(obfuscatedItems, decoded.deleteSet.copy()))
 }
 
-fun obfuscateUpdateV2(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray =
-    UpdateCodec.decodeV2(update).let { decoded ->
+fun obfuscateUpdateLossless(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray {
+    val decoded = UpdateCodec.decode(update)
+    val obfuscator = UpdateObfuscator(options)
+    val obfuscatedItems = decoded.items.map { item ->
+        item.copy(content = obfuscator.obfuscate(item.content))
+    }
+    return UpdateCodec.encodeLossless(DocumentUpdate(obfuscatedItems, decoded.deleteSet.copy()))
+}
+
+fun obfuscateUpdateV2(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray {
+    requireStandardYjsUpdateInput(update, "V2")
+    return UpdateCodec.decodeV2(update).let { decoded ->
         val obfuscator = UpdateObfuscator(options)
         UpdateCodec.encodeV2(
+            DocumentUpdate(
+                decoded.items.map { item -> item.copy(content = obfuscator.obfuscate(item.content)) },
+                decoded.deleteSet.copy(),
+            ),
+        )
+    }
+}
+
+
+fun obfuscateUpdateV2Lossless(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray =
+    UpdateCodec.decodeV2(update).let { decoded ->
+        val obfuscator = UpdateObfuscator(options)
+        UpdateCodec.encodeV2Lossless(
             DocumentUpdate(
                 decoded.items.map { item -> item.copy(content = obfuscator.obfuscate(item.content)) },
                 decoded.deleteSet.copy(),
@@ -469,7 +725,7 @@ fun createContentIds(
 ): ContentIds = ContentIds(inserts, deletes)
 
 fun createInsertSetFromDoc(doc: YDoc, filterDeleted: Boolean = false): IdSet =
-    createInsertIdSet(UpdateCodec.decode(doc.encodeStateAsUpdate()).itemsWithDeleteState(), filterDeleted)
+    createInsertIdSet(UpdateCodec.decode(doc.encodeStateAsUpdateLossless()).itemsWithDeleteState(), filterDeleted)
 
 fun createDeleteSetFromDoc(doc: YDoc): IdSet = doc.deleteSet().toIdSet()
 
@@ -479,7 +735,7 @@ fun createInsertSetFromStructStore(doc: YDoc, filterDeleted: Boolean = false): I
 fun createInsertSetFromStructStore(store: StructStore, filterDeleted: Boolean = false): IdSet =
     createInsertIdSet(store.allItems(), filterDeleted)
 
-fun createContentIdsFromDoc(doc: YDoc): ContentIds = createContentIdsFromUpdate(doc.encodeStateAsUpdate())
+fun createContentIdsFromDoc(doc: YDoc): ContentIds = createContentIdsFromUpdate(doc.encodeStateAsUpdateLossless())
 
 fun createContentIdsFromDocDiff(left: YDoc, right: YDoc): ContentIds =
     excludeContentIds(createContentIdsFromDoc(left), createContentIdsFromDoc(right))
@@ -658,6 +914,7 @@ fun createContentIdsFromUpdateV2(update: ByteArray): ContentIds {
 }
 
 fun intersectUpdateWithContentIds(update: ByteArray, contentIds: ContentIds): ByteArray {
+    requireStandardYjsUpdateInput(update, "V1")
     val decoded = UpdateCodec.decode(update)
     val filteredItems = decoded.items
         .filter { contentIds.inserts.hasId(it.id) }
@@ -666,41 +923,92 @@ fun intersectUpdateWithContentIds(update: ByteArray, contentIds: ContentIds): By
         .let { intersectSets(it, contentIds.deletes) }
         .toDeleteSet()
     if (filteredItems.size == decoded.items.size && filteredDeletes.structurallyEquals(decoded.deleteSet)) {
-        return update
+        return UpdateCodec.encode(decoded)
     }
-    return UpdateCodec.encode(DocumentUpdate(filteredItems, filteredDeletes, allowV1 = false))
+    return UpdateCodec.encode(DocumentUpdate(filteredItems, filteredDeletes))
 }
 
-fun intersectUpdateWithContentIdsV2(update: ByteArray, contentIds: ContentIds): ByteArray =
+fun intersectUpdateWithContentIdsLossless(update: ByteArray, contentIds: ContentIds): ByteArray {
+    val decoded = UpdateCodec.decode(update)
+    val filteredItems = decoded.items
+        .filter { contentIds.inserts.hasId(it.id) }
+        .map { item -> item.copy(requiresClockContinuity = false) }
+    val filteredDeletes = decoded.deleteSet.toIdSet()
+        .let { intersectSets(it, contentIds.deletes) }
+        .toDeleteSet()
+    if (filteredItems.size == decoded.items.size && filteredDeletes.structurallyEquals(decoded.deleteSet)) return update
+    return UpdateCodec.encodeLossless(DocumentUpdate(filteredItems, filteredDeletes))
+}
+
+fun intersectUpdateWithContentIdsV2(update: ByteArray, contentIds: ContentIds): ByteArray {
+    requireStandardYjsUpdateInput(update, "V2")
+    return UpdateCodec.decodeV2(update).let { decoded ->
+        val filteredItems = decoded.items.filter { contentIds.inserts.hasId(it.id) }
+        val filteredDeletes = intersectSets(decoded.deleteSet.toIdSet(), contentIds.deletes).toDeleteSet()
+        if (filteredItems.size == decoded.items.size && filteredDeletes.structurallyEquals(decoded.deleteSet)) {
+            UpdateCodec.encodeV2(decoded)
+        } else UpdateCodec.encodeV2(DocumentUpdate(filteredItems, filteredDeletes))
+    }
+}
+
+fun intersectUpdateWithContentIdsV2Lossless(update: ByteArray, contentIds: ContentIds): ByteArray =
     UpdateCodec.decodeV2(update).let { decoded ->
         val filteredItems = decoded.items.filter { contentIds.inserts.hasId(it.id) }
         val filteredDeletes = intersectSets(decoded.deleteSet.toIdSet(), contentIds.deletes).toDeleteSet()
         if (filteredItems.size == decoded.items.size && filteredDeletes.structurallyEquals(decoded.deleteSet)) update
-        else UpdateCodec.encodeV2(DocumentUpdate(filteredItems, filteredDeletes))
+        else UpdateCodec.encodeV2Lossless(DocumentUpdate(filteredItems, filteredDeletes))
     }
 
 fun mergeUpdates(updates: List<ByteArray>): ByteArray {
-    if (updates.size == 1) return updates.single()
+    updates.forEach { update -> requireStandardYjsUpdateInput(update, "V1") }
+    if (updates.size == 1) return UpdateCodec.encode(UpdateCodec.decode(updates.single()))
     return mergeDecodedUpdates(updates.map(UpdateCodec::decode), UpdateCodec::encode)
 }
 
-fun mergeUpdatesV2(updates: List<ByteArray>): ByteArray {
+fun mergeUpdatesLossless(updates: List<ByteArray>): ByteArray {
     if (updates.size == 1) return updates.single()
+    return mergeDecodedUpdates(updates.map(UpdateCodec::decode), UpdateCodec::encodeLossless)
+}
+
+fun mergeUpdatesV2(updates: List<ByteArray>): ByteArray {
+    updates.forEach { update -> requireStandardYjsUpdateInput(update, "V2") }
+    if (updates.size == 1) return UpdateCodec.encodeV2(UpdateCodec.decodeV2(updates.single()))
     return mergeDecodedUpdates(updates.map(UpdateCodec::decodeV2), UpdateCodec::encodeV2)
 }
 
+fun mergeUpdatesV2Lossless(updates: List<ByteArray>): ByteArray {
+    if (updates.size == 1) return UpdateCodec.encodeV2Lossless(UpdateCodec.decodeV2(updates.single()))
+    return mergeDecodedUpdates(updates.map(UpdateCodec::decodeV2), UpdateCodec::encodeV2Lossless)
+}
+
 fun diffUpdate(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
+    requireStandardYjsUpdateInput(update, "V1")
     val stateVector = decodeStateVector(encodedStateVector)
     val decoded = UpdateCodec.decode(update)
     val filtered = decoded.items.mapNotNull { item -> item.sliceFromClock(stateVector[item.id.client] ?: 0) }
     return UpdateCodec.encode(DocumentUpdate(filtered, decoded.deleteSet))
 }
 
+fun diffUpdateLossless(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
+    val stateVector = decodeStateVector(encodedStateVector)
+    val decoded = UpdateCodec.decode(update)
+    val filtered = decoded.items.mapNotNull { item -> item.sliceFromClock(stateVector[item.id.client] ?: 0) }
+    return UpdateCodec.encodeLossless(DocumentUpdate(filtered, decoded.deleteSet))
+}
+
 fun diffUpdateV2(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
+    requireStandardYjsUpdateInput(update, "V2")
     val stateVector = decodeStateVector(encodedStateVector)
     val decoded = UpdateCodec.decodeV2(update)
     val filtered = decoded.items.mapNotNull { item -> item.sliceFromClock(stateVector[item.id.client] ?: 0) }
     return UpdateCodec.encodeV2(DocumentUpdate(filtered, decoded.deleteSet))
+}
+
+fun diffUpdateV2Lossless(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
+    val stateVector = decodeStateVector(encodedStateVector)
+    val decoded = UpdateCodec.decodeV2(update)
+    val filtered = decoded.items.mapNotNull { item -> item.sliceFromClock(stateVector[item.id.client] ?: 0) }
+    return UpdateCodec.encodeV2Lossless(DocumentUpdate(filtered, decoded.deleteSet))
 }
 
 private fun StoreItem.sliceFromClock(targetClock: Long): StoreItem? {
@@ -779,6 +1087,13 @@ private fun mergeDecodedUpdates(
  */
 private fun MutableList<StoreItem>.mergeClockRange(incoming: StoreItem) {
     val incomingEnd = checkedClockAdd(incoming.id.clock, incoming.length)
+    val duplicateIndex = indexOfFirst { existing ->
+        existing.id == incoming.id && existing.length == incoming.length
+    }
+    if (duplicateIndex >= 0) {
+        this[duplicateIndex] = this[duplicateIndex].mergeDuplicateMetadata(incoming)
+        return
+    }
     val overlapping = filter { existing ->
         existing.id.client == incoming.id.client &&
             rangesOverlap(existing.id.clock, existing.length, incoming.id.clock, incoming.length)
@@ -791,6 +1106,63 @@ private fun MutableList<StoreItem>.mergeClockRange(incoming: StoreItem) {
         uncovered = uncovered.flatMap { range -> range.subtract(existing.id.clock, existingEnd) }
     }
     uncovered.forEach { range -> add(incoming.sliceClockRange(range.start, range.end)) }
+}
+
+/** Duplicate standard/private representations must not make a lossless merge input-order dependent. */
+private fun StoreItem.mergeDuplicateMetadata(other: StoreItem): StoreItem {
+    require(origin == other.origin && rightOrigin == other.rightOrigin && parentSub == other.parentSub) {
+        "conflicting structural metadata for duplicate update item $id"
+    }
+    val mergedUnresolvedParent = when {
+        unresolvedParent == other.unresolvedParent -> unresolvedParent
+        unresolvedParent == null -> other.unresolvedParent
+        other.unresolvedParent == null -> unresolvedParent
+        else -> error("conflicting unresolved parents for duplicate update item $id")
+    }
+    val mergedParent = when {
+        parent == other.parent -> parent
+        mergedUnresolvedParent != null -> minOf(parent, other.parent)
+        else -> error("conflicting parents for duplicate update item $id")
+    }
+    return copy(
+        parent = mergedParent,
+        content = content.mergePrivateMetadata(other.content),
+        deleted = deleted || other.deleted,
+        // False is the stronger, private promise: this item may integrate without prior client clocks.
+        requiresClockContinuity = requiresClockContinuity && other.requiresClockContinuity,
+        isGc = isGc || other.isGc,
+        unresolvedParent = mergedUnresolvedParent,
+        // A GC replacement may retain the original Item.countable bit only on the richer side.
+        countable = countable || other.countable,
+    )
+}
+
+private fun ItemContent.mergePrivateMetadata(other: ItemContent): ItemContent = when {
+    this == other -> this
+    this is ItemContent.Text && other is ItemContent.Text && value == other.value && kind == other.kind -> copy(
+        attributes = chooseLosslessAttributes(attributes, other.attributes),
+        baseAttributes = chooseLosslessAttributes(baseAttributes, other.baseAttributes),
+    )
+    this is ItemContent.TextEmbed && other is ItemContent.TextEmbed && value == other.value && kind == other.kind -> copy(
+        attributes = chooseLosslessAttributes(attributes, other.attributes),
+        baseAttributes = chooseLosslessAttributes(baseAttributes, other.baseAttributes),
+    )
+    this is ItemContent.XmlType && other is ItemContent.XmlType &&
+        ref == other.ref && nodeName == other.nodeName && kind == other.kind -> copy(
+        attributes = chooseLosslessAttributes(attributes, other.attributes),
+        baseAttributes = chooseLosslessAttributes(baseAttributes, other.baseAttributes),
+    )
+    else -> error("conflicting content for duplicate update item")
+}
+
+private fun chooseLosslessAttributes(
+    left: Map<String, YValue>,
+    right: Map<String, YValue>,
+): Map<String, YValue> = when {
+    left == right -> left
+    left.isEmpty() -> right
+    right.isEmpty() -> left
+    else -> error("conflicting private text metadata for duplicate update item")
 }
 
 private data class ClockInterval(val start: Long, val end: Long) {
@@ -960,7 +1332,7 @@ private fun DecodedUpdateStruct.slice(offset: Long, offsetEnd: Long): DecodedUpd
     require(offsetEnd <= length - offset) { "offsetEnd is out of bounds" }
     val keepLength = length - offset - offsetEnd
     require(keepLength > 0) { "sliced update structs must keep at least one clock" }
-    if (offset == 0L && offsetEnd == 0L) return copy(content = content.copy())
+    if (offset == 0L && offsetEnd == 0L) return copy(content = content)
 
     var slicedContent = content.copy()
     if (offset > 0) {
@@ -1016,10 +1388,18 @@ private fun AbstractContent.toItemContents(kind: RootKind, original: ItemContent
         is ContentDeleted -> toDeletedItemContents(kind)
         else -> when (kind) {
             RootKind.Text,
-            RootKind.XmlText -> toTextItemContents(kind, original.textAttributesOrEmpty())
+            RootKind.XmlText -> toTextItemContents(
+                kind,
+                original.textAttributesOrEmpty(),
+                original.baseTextAttributesOrEmpty(),
+            )
             RootKind.Array -> toArrayItemContents()
             RootKind.Map,
-            RootKind.XmlHook -> listOf(ItemContent.MapEntry(toSingleYValue()))
+            RootKind.XmlHook -> if (this is ContentType) {
+                listOf(toContentTypeItem(kind))
+            } else {
+                listOf(ItemContent.MapEntry(toSingleYValue()))
+            }
             RootKind.XmlFragment -> toXmlFragmentItemContents()
             RootKind.XmlElement -> toXmlSequenceItemContents(kind)
         }
@@ -1031,9 +1411,11 @@ private fun ContentDeleted.toDeletedItemContents(kind: RootKind): List<ItemConte
 private fun AbstractContent.toTextItemContents(
     kind: RootKind,
     attributes: Map<String, YValue>,
+    baseAttributes: Map<String, YValue>,
 ): List<ItemContent> = when (this) {
-    is ContentString -> str.map { char -> ItemContent.Text(char.toString(), attributes, kind = kind) }
-    is ContentEmbed -> listOf(ItemContent.TextEmbed(YValue.from(embed), attributes, kind = kind))
+    is ContentString -> str.map { char -> ItemContent.Text(char.toString(), attributes, baseAttributes, kind) }
+    is ContentEmbed -> listOf(ItemContent.TextEmbed(YValue.from(embed), attributes, baseAttributes, kind))
+    is ContentType -> listOf(toContentTypeItem(kind, attributes, baseAttributes))
     is ContentTextFormatRange -> listOf(
         ItemContent.TextFormat(
             target = target,
@@ -1051,8 +1433,21 @@ private fun AbstractContent.toTextItemContents(
 private fun AbstractContent.toArrayItemContents(): List<ItemContent> = when (this) {
     is ContentAny,
     is ContentJSON -> getContent().map { value -> ItemContent.Value(YValue.from(value)) }
+    is ContentType -> listOf(toContentTypeItem(RootKind.Array))
     else -> listOf(ItemContent.Value(toSingleYValue()))
 }
+
+private fun ContentType.toContentTypeItem(
+    parentKind: RootKind,
+    attributes: Map<String, YValue> = emptyMap(),
+    baseAttributes: Map<String, YValue> = attributes,
+): ItemContent.XmlType = ItemContent.XmlType(
+    ref = YValue.TypeRef(type.kind, type.name),
+    nodeName = type.xmlNodeNameOrEmpty(),
+    kind = parentKind,
+    attributes = attributes,
+    baseAttributes = baseAttributes,
+)
 
 private fun AbstractContent.toSingleYValue(): YValue = when (this) {
     is ContentAny,
@@ -1078,19 +1473,21 @@ private fun AbstractContent.toXmlFragmentItemContents(): List<ItemContent> =
     toXmlSequenceItemContents(RootKind.XmlFragment)
 
 private fun AbstractContent.toXmlSequenceItemContents(kind: RootKind): List<ItemContent> = when (this) {
-    is ContentType -> when (type) {
-        is YText -> listOf(ItemContent.XmlType(YValue.TypeRef(type.kind, type.name), "", kind))
-        is YXmlElementType -> listOf(ItemContent.XmlType(YValue.TypeRef(type.kind, type.name), type.nodeName, kind))
-        is YXmlHook -> listOf(ItemContent.XmlType(YValue.TypeRef(type.kind, type.name), type.hookName, kind))
-        is YXmlTextType -> listOf(ItemContent.XmlType(YValue.TypeRef(type.kind, type.name), "", kind))
-        else -> error("unsupported XML fragment type content: ${type::class.simpleName}")
-    }
+    is ContentType -> listOf(toContentTypeItem(kind))
     else -> toXmlNodeValues().map { node -> ItemContent.XmlNode(node, kind) }
 }
 
 private fun ItemContent?.textAttributesOrEmpty(): Map<String, YValue> = when (this) {
     is ItemContent.Text -> attributes
     is ItemContent.TextEmbed -> attributes
+    is ItemContent.XmlType -> attributes
+    else -> emptyMap()
+}
+
+private fun ItemContent?.baseTextAttributesOrEmpty(): Map<String, YValue> = when (this) {
+    is ItemContent.Text -> baseAttributes
+    is ItemContent.TextEmbed -> baseAttributes
+    is ItemContent.XmlType -> baseAttributes
     else -> emptyMap()
 }
 
@@ -1122,6 +1519,12 @@ private class UpdateObfuscator(
         is ItemContent.XmlNode -> content.copy(value = obfuscate(content.value))
         is ItemContent.XmlType -> content.copy(
             nodeName = if (options.name) obfuscateNodeName(content.nodeName) else content.nodeName,
+            attributes = if (options.formatting) obfuscateFormatting(content.attributes) else content.attributes,
+            baseAttributes = if (options.formatting) {
+                obfuscateFormatting(content.baseAttributes)
+            } else {
+                content.baseAttributes
+            },
         )
         is ItemContent.TextFormat -> content.copy(
             attributes = if (options.formatting) obfuscateFormatting(content.attributes) else content.attributes,

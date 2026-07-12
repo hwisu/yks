@@ -571,7 +571,8 @@ class YTextDeltaTest {
             text.insert(0, alien + alien)
             text.delete(1, 2)
 
-            right.applyUpdate(left.encodeStateAsUpdate())
+            assertFailsWith<UnsupportedYjsStandardUpdateException> { left.encodeStateAsUpdate() }
+            right.applyUpdate(left.encodeStateAsUpdateLossless())
 
             assertEquals(alien, text.toString())
             assertEquals(text.toString(), right.getText("body").toString())
@@ -584,7 +585,8 @@ class YTextDeltaTest {
             text.insert(0, alien + alien)
             text.format(1, 2, mapOf("bold" to true))
 
-            right.applyUpdate(left.encodeStateAsUpdate())
+            assertFailsWith<UnsupportedYjsStandardUpdateException> { left.encodeStateAsUpdate() }
+            right.applyUpdate(left.encodeStateAsUpdateLossless())
 
             assertEquals(text.toString(), right.getText("body").toString())
             assertEquals(text.toDelta(), right.getText("body").toDelta())
@@ -664,7 +666,7 @@ class YTextDeltaTest {
         val text = doc.getText("body")
         val mention = mapOf("mention" to "Ada")
 
-        text.applyDelta(YTextDelta(listOf(YTextDeltaOp(insert = listOf("hi", mention, '!', " ok")))))
+        text.applyDelta(YTextDelta().insert(listOf("hi", mention, '!', " ok")))
 
         assertEquals("hi! ok", text.toString())
         assertEquals(listOf("h", "i", mention, "!", " ", "o", "k"), text.toArray())

@@ -39,6 +39,16 @@ fun warnPrematureAccess() {
     System.err.println("Invalid access: Add Yjs type to a document before reading data.")
 }
 
+internal sealed interface YTypeBinding {
+    data object Detached : YTypeBinding
+
+    data class Reserved(val doc: YDoc, val name: String) : YTypeBinding
+
+    data class Root(val doc: YDoc, val name: String) : YTypeBinding
+
+    data class Nested(val doc: YDoc, val name: String, val ownerId: Id?) : YTypeBinding
+}
+
 fun createAttributionFromAttributionItems(attrs: List<ContentAttribute>?, deleted: Boolean): Attribution? {
     if (attrs == null) return null
     val attribution = linkedMapOf<String, Any?>()
@@ -57,10 +67,139 @@ fun createAttributionFromAttributionItems(attrs: List<ContentAttribute>?, delete
 }
 
 sealed class AbstractYType protected constructor(
-    internal val doc: YDoc,
-    val name: String,
+    doc: YDoc,
+    name: String,
     internal val kind: RootKind,
 ) {
+    internal var doc: YDoc = doc
+        private set
+    var name: String = name
+        internal set
+    internal var binding: YTypeBinding = YTypeBinding.Root(doc, name)
+        private set
+    internal val preliminaryList = mutableListOf<Any?>()
+    internal val preliminaryMap = linkedMapOf<String, Any?>()
+    internal val preliminaryOperations = mutableListOf<() -> Unit>()
+    internal val preliminaryOperationValues = mutableListOf<Any?>()
+
+    internal val isPreliminary: Boolean
+        get() = binding is YTypeBinding.Detached || binding is YTypeBinding.Reserved
+
+    internal fun markDetached() {
+        check(binding is YTypeBinding.Root) { "only a fresh shared type can become detached" }
+        binding = YTypeBinding.Detached
+    }
+
+    internal fun reserve(target: YDoc, reservedName: String) {
+        when (val current = binding) {
+            YTypeBinding.Detached -> Unit
+            is YTypeBinding.Reserved -> {
+                require(current.doc === target) { "shared type is reserved for another document" }
+                require(current.name == reservedName) { "shared type already has a different reserved name" }
+                return
+            }
+            is YTypeBinding.Root -> error("root shared types cannot be inserted as nested content")
+            is YTypeBinding.Nested -> error("shared type is already integrated")
+        }
+        doc = target
+        name = reservedName
+        binding = YTypeBinding.Reserved(target, reservedName)
+    }
+
+    internal fun integrateReserved(target: YDoc, ownerId: Id?) {
+        val current = binding as? YTypeBinding.Reserved
+            ?: error("shared type is not reserved for integration")
+        require(current.doc === target) { "shared type is reserved for another document" }
+        binding = YTypeBinding.Nested(target, current.name, ownerId)
+    }
+
+    internal fun markDecodedNested(target: YDoc, nestedName: String, ownerId: Id?) {
+        doc = target
+        name = nestedName
+        binding = YTypeBinding.Nested(target, nestedName, ownerId)
+    }
+
+    internal fun warnIfPreliminary(): Boolean {
+        if (!isPreliminary) return false
+        warnPrematureAccess()
+        return true
+    }
+
+    internal fun queuePreliminaryOperation(values: Any? = null, operation: () -> Unit) {
+        check(isPreliminary) { "preliminary operations can only be queued before integration" }
+        preliminaryOperations.add(operation)
+        if (values != null) preliminaryOperationValues.add(values)
+    }
+
+    internal fun preliminaryGraphValues(): List<Any?> = when (this) {
+        is YUnopenedRoot -> emptyList()
+        is YArray -> preliminaryList + preliminaryMap.values
+        is YMap -> preliminaryMap.values.toList()
+        is YText -> preliminaryOperationValues.toList()
+        is YXmlElementType -> preliminaryList + preliminaryMap.values
+        is YXmlFragment -> preliminaryList + preliminaryMap.values
+    }
+
+    internal fun replayPreliminaryContent() {
+        check(!isPreliminary) { "shared type must be integrated before replay" }
+        when (this) {
+            is YUnopenedRoot -> error("an unopened root cannot replay preliminary content")
+            is YArray -> {
+                val values = preliminaryList.toList()
+                val attrs = preliminaryMap.toMap()
+                preliminaryList.clear()
+                preliminaryMap.clear()
+                if (values.isNotEmpty()) push(values)
+                attrs.forEach { (key, value) -> setAttr(key, value) }
+            }
+            is YMap -> {
+                val entries = preliminaryMap.toList()
+                preliminaryMap.clear()
+                entries.forEach { (key, value) -> set(key, value) }
+            }
+            is YText -> {
+                val operations = preliminaryOperations.toList()
+                preliminaryOperations.clear()
+                preliminaryOperationValues.clear()
+                try {
+                    operations.forEach { operation -> operation() }
+                } catch (error: Exception) {
+                    // Upstream Y.Text logs a failed pending operation during _integrate, but it
+                    // keeps the ContentType owner integrated and clears the pending queue.
+                    error.printStackTrace(System.err)
+                }
+            }
+            is YXmlElementType -> {
+                val children = preliminaryList.toList()
+                val attrs = preliminaryMap.toMap()
+                preliminaryList.clear()
+                preliminaryMap.clear()
+                children.forEach { child ->
+                    when (child) {
+                        is AbstractYType -> insertType(length, child)
+                        is YXmlNode -> insert(length, listOf(child))
+                        else -> error("unsupported preliminary XML child: ${child?.let { it::class.qualifiedName }}")
+                    }
+                }
+                attrs.forEach { (key, value) -> setAttr(key, value) }
+            }
+            is YXmlFragment -> {
+                val children = preliminaryList.toList()
+                val attrs = preliminaryMap.toMap()
+                preliminaryList.clear()
+                preliminaryMap.clear()
+                children.forEach { child ->
+                    when (child) {
+                        is AbstractYType -> insertType(length, child)
+                        is YXmlNode -> insert(length, listOf(child))
+                        else -> error("unsupported preliminary XML child: ${child?.let { it::class.qualifiedName }}")
+                    }
+                }
+                attrs.forEach { (key, value) -> setAttr(key, value) }
+            }
+        }
+    }
+
     companion object {
         fun from(delta: List<YArrayDeltaOp>, doc: YDoc = YDoc(), name: String = ""): YArray =
             YArray.from(delta, doc, name)
@@ -88,6 +227,7 @@ sealed class AbstractYType protected constructor(
     private val transactionObservers = mutableListOf<(YEvent, YTransactionEvent?) -> Unit>()
     private val deepObservers = mutableListOf<(YEvent) -> Unit>()
     private val deepTransactionObservers = mutableListOf<(YEvent, YTransactionEvent?) -> Unit>()
+    private val deepEventListObservers = mutableListOf<(List<YEvent>, YTransactionEvent?) -> Unit>()
     private val eventListeners = linkedMapOf<String, MutableList<(YTypeEvent) -> Unit>>()
     private var deltaCache: YDeepDelta? = null
     private var rendererChangeSubscription: Subscription? = null
@@ -116,6 +256,17 @@ sealed class AbstractYType protected constructor(
         return Subscription { deepTransactionObservers.remove(listener) }
     }
 
+    /**
+     * Upstream-style deep observation that receives each changed descendant as a separate event.
+     *
+     * The existing [observeDeep] overloads intentionally keep their aggregate-event ABI. This
+     * opt-in form exposes the Yjs callback shape without changing existing Kotlin callers.
+     */
+    fun observeDeepEvents(listener: (List<YEvent>, YTransactionEvent?) -> Unit): Subscription {
+        deepEventListObservers.add(listener)
+        return Subscription { deepEventListObservers.remove(listener) }
+    }
+
     fun unobserve(listener: (YEvent) -> Unit) {
         observers.remove(listener)
     }
@@ -130,6 +281,10 @@ sealed class AbstractYType protected constructor(
 
     fun unobserveDeep(listener: (YEvent, YTransactionEvent?) -> Unit) {
         deepTransactionObservers.remove(listener)
+    }
+
+    fun unobserveDeepEvents(listener: (List<YEvent>, YTransactionEvent?) -> Unit) {
+        deepEventListObservers.remove(listener)
     }
 
     fun on(eventName: String, listener: (YTypeEvent) -> Unit): Subscription {
@@ -183,7 +338,10 @@ sealed class AbstractYType protected constructor(
         callAllYksCallbacks(callbacks)
     }
 
-    internal val hasDeepObservers: Boolean get() = deepObservers.isNotEmpty() || deepTransactionObservers.isNotEmpty()
+    internal val hasDeepObservers: Boolean
+        get() = deepObservers.isNotEmpty() ||
+            deepTransactionObservers.isNotEmpty() ||
+            deepEventListObservers.isNotEmpty()
 
     internal val hasDeltaListeners: Boolean get() = eventListeners["delta"]?.isNotEmpty() == true
 
@@ -192,6 +350,14 @@ sealed class AbstractYType protected constructor(
     internal fun emitDeep(event: YEvent) {
         val callbacks = deepObservers.toList().map { listener -> { listener(event) } }.toMutableList()
         callbacks.addAll(deepTransactionObservers.toList().map { listener -> { listener(event, event.transaction) } })
+        val upstreamEvents = event.deepEvents
+            .ifEmpty { listOf(event) }
+            .sortedBy { childEvent -> childEvent.path.size }
+        callbacks.addAll(
+            deepEventListObservers.toList().map { listener ->
+                { listener(upstreamEvents, event.transaction) }
+            },
+        )
         callAllYksCallbacks(callbacks)
     }
 
@@ -288,9 +454,28 @@ sealed class AbstractYType protected constructor(
 
     val parent: AbstractYType? get() = doc.parentOf(this)
 
-    val typeRef: Int get() = kind.toTypeRefId()
+    open val typeRef: Int get() = kind.toTypeRefId()
 
-    val legacyTypeRef: Int get() = typeRef
+    open val legacyTypeRef: Int get() = typeRef
+}
+
+/**
+ * Upstream keeps remotely discovered roots as an undecided AbstractType until a concrete
+ * getter is called. This placeholder intentionally exposes no guessed RootKind/type ref.
+ */
+class YUnopenedRoot internal constructor(doc: YDoc, name: String) :
+    AbstractYType(doc, name, RootKind.Array) {
+    override val typeRef: Int
+        get() = error("unopened root '$name' has no concrete type ref")
+
+    override val legacyTypeRef: Int
+        get() = typeRef
+
+    override fun toJson(): Any? = null
+
+    override fun toJSON(): Any? = null
+
+    override fun toString(): String = "YUnopenedRoot(name=$name)"
 }
 
 data class YTypeEvent(
@@ -325,8 +510,22 @@ fun rootKindFromTypeRefId(typeRef: Int): RootKind = when (typeRef) {
 
 fun typeRefId(type: AbstractYType): Int = type.typeRef
 
+/** Matches upstream AbstractType._copy(): preserve the concrete type, not its content. */
+internal fun AbstractYType.emptyContentTypeCopy(): AbstractYType = when (this) {
+    is YUnopenedRoot -> error("an unopened root has no concrete type to copy")
+    is YXmlTextType -> YXmlTextType()
+    is YXmlHook -> YXmlHook(hookName)
+    is YXmlElementType -> YXmlElementType(nodeName)
+    is YXmlFragment -> YXmlFragment()
+    is YArray -> YArray()
+    is YMap -> YMap()
+    is YText -> YText()
+}
+
 class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, name, RootKind.Array), Iterable<Any?> {
-    constructor() : this(YDoc(), "")
+    constructor() : this(YDoc(), "") {
+        markDetached()
+    }
 
     constructor(values: Iterable<Any?>) : this() {
         push(values.toList())
@@ -334,7 +533,14 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
 
     constructor(vararg values: Any?) : this(values.toList())
 
-    val size: Int get() = doc.visibleSequence(name).count { it.content is ItemContent.Value }
+    val size: Int
+        get() {
+            if (warnIfPreliminary()) return 0
+            return doc.visibleSequence(name).count { item ->
+                item.content is ItemContent.Value ||
+                    (item.content is ItemContent.XmlType && item.content.kind == RootKind.Array)
+            }
+        }
 
     val length: Int get() = size
 
@@ -342,14 +548,25 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
 
     fun insert(index: Int, values: List<Any?>) {
         if (values.isEmpty()) return
+        if (isPreliminary) {
+            require(values.none { value -> value === this }) { "shared type cannot contain itself" }
+            preliminaryList.addAll(index.coerceIn(0, preliminaryList.size), values)
+            return
+        }
         val start = index.coerceAtLeast(0)
         require(start <= size) { "insert index is out of bounds" }
+        doc.preflightNestedValue(values)
         doc.transact {
             val anchors = doc.insertionAnchors(name, RootKind.Array, start)
             var origin = anchors.first
             val rightOrigin = anchors.second
             values.forEach { raw ->
-                val content = ItemContent.Value(doc.storeValue(raw, parent = name))
+                val stored = doc.storeValue(raw, parent = name)
+                val content = if (raw is AbstractYType) {
+                    ItemContent.XmlType(stored as YValue.TypeRef, raw.xmlNodeNameOrEmpty(), RootKind.Array)
+                } else {
+                    ItemContent.Value(stored)
+                }
                 val item = StoreItem(
                     id = doc.nextId(),
                     origin = origin,
@@ -369,6 +586,11 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
     }
 
     fun push(values: List<Any?>) {
+        require(values.none { it === this }) { "A shared type cannot contain itself" }
+        if (isPreliminary) {
+            preliminaryList.addAll(values)
+            return
+        }
         insert(size, values)
     }
 
@@ -385,6 +607,12 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
     }
 
     fun delete(index: Int, length: Int = 1) {
+        if (isPreliminary) {
+            if (length <= 0 || preliminaryList.isEmpty()) return
+            val start = index.coerceIn(0, preliminaryList.size)
+            repeat(minOf(length, preliminaryList.size - start)) { preliminaryList.removeAt(start) }
+            return
+        }
         doc.deleteVisible(name, index, length)
     }
 
@@ -392,18 +620,32 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         delete(0, size)
     }
 
-    fun setAttr(key: String, value: Any?): Any? = doc.setTypeAttribute(name, key, value)
+    fun setAttr(key: String, value: Any?): Any? {
+        if (isPreliminary) {
+            preliminaryMap[key] = value
+            return value
+        }
+        return doc.setTypeAttribute(name, key, value)
+    }
 
     fun setAttribute(key: String, value: Any?): Any? = setAttr(key, value)
 
     fun setAttrs(values: Map<String, Any?>): YArray {
+        if (isPreliminary) {
+            values.forEach { (key, value) -> preliminaryMap[key] = value }
+            return this
+        }
+        doc.preflightNestedValue(values.values.toList())
         doc.transact {
             values.toSortedMap().forEach { (key, value) -> setAttr(key, value) }
         }
         return this
     }
 
-    fun getAttr(key: String): Any? = doc.typeAttribute(name, key)
+    fun getAttr(key: String): Any? {
+        if (warnIfPreliminary()) return null
+        return doc.typeAttribute(name, key)
+    }
 
     fun getAttr(key: String, snapshot: Snapshot): Any? =
         doc.mapValueAtSnapshot(this, key, snapshot)?.let(doc::valueToAny)
@@ -412,7 +654,10 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
 
     fun getAttribute(key: String, snapshot: Snapshot): Any? = getAttr(key, snapshot)
 
-    fun getAttrs(): Map<String, Any?> = doc.typeAttributes(name)
+    fun getAttrs(): Map<String, Any?> {
+        if (warnIfPreliminary()) return emptyMap()
+        return doc.typeAttributes(name)
+    }
 
     fun getAttrs(snapshot: Snapshot): Map<String, Any?> =
         doc.mapAtSnapshot(this, snapshot).mapValues { (_, value) -> doc.valueToAny(value) }
@@ -439,7 +684,10 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         getAttrs().forEach { (key, value) -> action(value, key, this) }
     }
 
-    fun hasAttr(key: String): Boolean = doc.hasTypeAttribute(name, key)
+    fun hasAttr(key: String): Boolean {
+        if (warnIfPreliminary()) return false
+        return doc.hasTypeAttribute(name, key)
+    }
 
     fun hasAttr(key: String, snapshot: Snapshot): Boolean =
         doc.mapValueAtSnapshot(this, key, snapshot) != null
@@ -449,6 +697,10 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
     fun hasAttribute(key: String, snapshot: Snapshot): Boolean = hasAttr(key, snapshot)
 
     fun deleteAttr(key: String) {
+        if (isPreliminary) {
+            preliminaryMap.remove(key)
+            return
+        }
         doc.deleteTypeAttribute(name, key)
     }
 
@@ -461,6 +713,10 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
     }
 
     fun clearAttrs() {
+        if (isPreliminary) {
+            preliminaryMap.clear()
+            return
+        }
         doc.transact {
             getAttrs().keys.forEach(::deleteAttr)
         }
@@ -479,9 +735,21 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         return values.subList(normalizedStart, normalizedEnd)
     }
 
-    fun toList(): List<Any?> = doc.visibleSequence(name)
-        .filter { it.content is ItemContent.Value }
-        .map { doc.valueToAny((it.content as ItemContent.Value).value) }
+    fun toList(): List<Any?> {
+        if (warnIfPreliminary()) return emptyList()
+        return doc.visibleSequence(name)
+            .filter { item ->
+                item.content is ItemContent.Value ||
+                    (item.content is ItemContent.XmlType && item.content.kind == RootKind.Array)
+            }
+            .map { item ->
+                when (val content = item.content) {
+                    is ItemContent.Value -> doc.valueToAny(content.value)
+                    is ItemContent.XmlType -> doc.typeFromXmlType(content)
+                    else -> error("item content is not an array value: ${content::class.simpleName}")
+                }
+            }
+    }
 
     fun toArray(): List<Any?> = toList()
 
@@ -505,6 +773,7 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         origin: Any? = null,
         renderer: AbstractRenderer = activeRenderer,
     ) {
+        if (!isPreliminary) doc.preflightNestedValue(delta.map { op -> op.insert })
         doc.transact({ transaction ->
             var renderedIndex = 0
             delta.forEach { op ->
@@ -569,9 +838,21 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
 
     override fun iterator(): Iterator<Any?> = toList().iterator()
 
-    override fun toJson(): List<Any?> = doc.visibleSequence(name)
-        .filter { it.content is ItemContent.Value }
-        .map { doc.valueToJson((it.content as ItemContent.Value).value) }
+    override fun toJson(): List<Any?> {
+        if (warnIfPreliminary()) return emptyList()
+        return doc.visibleSequence(name)
+            .filter { item ->
+                item.content is ItemContent.Value ||
+                    (item.content is ItemContent.XmlType && item.content.kind == RootKind.Array)
+            }
+            .map { item ->
+                when (val content = item.content) {
+                    is ItemContent.Value -> doc.valueToJson(content.value)
+                    is ItemContent.XmlType -> doc.typeFromXmlType(content).toJson()
+                    else -> error("item content is not an array value: ${content::class.simpleName}")
+                }
+            }
+    }
 
     override fun toJSON(): List<Any?> = toList().map(::toYTypeJsonValue)
 
@@ -600,7 +881,9 @@ open class YText internal constructor(
     name: String,
     kind: RootKind = RootKind.Text,
 ) : AbstractYType(doc, name, kind), Iterable<Any?> {
-    constructor() : this(YDoc(), "")
+    constructor() : this(YDoc(), "") {
+        markDetached()
+    }
 
     constructor(text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) : this() {
         insert(0, text, attributes)
@@ -610,12 +893,20 @@ open class YText internal constructor(
         require(kind == RootKind.Text || kind == RootKind.XmlText) { "YText kind must be a text sequence" }
     }
 
-    val length: Int get() = doc.visibleSequence(name).count { it.content.kind == kind }
+    val length: Int
+        get() {
+            if (warnIfPreliminary()) return 0
+            return doc.visibleSequence(name).count { it.content.kind == kind }
+        }
 
     val attrSize: Int get() = getAttrs().size
 
     fun insert(index: Int, text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
         if (text.isEmpty()) return
+        if (isPreliminary) {
+            queuePreliminaryOperation(attributes) { insert(index, text, attributes) }
+            return
+        }
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
         doc.transact {
@@ -636,6 +927,10 @@ open class YText internal constructor(
         origin: Any? = null,
     ) {
         if (text.isEmpty()) return
+        if (isPreliminary) {
+            queuePreliminaryOperation(attributes) { insertText(index, text, attributes, origin) }
+            return
+        }
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
         doc.transact(origin = origin) {
@@ -655,8 +950,17 @@ open class YText internal constructor(
         attributes: Map<String, Any?> = UnspecifiedTextAttributes,
     ) {
         if (values.isEmpty()) return
+        if (isPreliminary) {
+            require(values.none { value -> value === this }) { "shared type cannot contain itself" }
+            val storedValues = values.filterNot { value -> value is String || value is Char }
+            queuePreliminaryOperation(listOf(storedValues, attributes)) { insert(index, values, attributes) }
+            return
+        }
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
+        doc.preflightNestedValue(
+            listOf(values.filterNot { value -> value is String || value is Char }, attributes),
+        )
         doc.transact {
             val normalized = attributes.normalizeOptionalTextAttributes()
             val baseAttributes = normalized.orEmpty()
@@ -665,6 +969,14 @@ open class YText internal constructor(
                     is String -> value.map { ItemContent.Text(it.toString(), baseAttributes, kind = kind) }
                     is Char -> listOf(ItemContent.Text(value.toString(), baseAttributes, kind = kind))
                     null -> error("text embeds must not be null")
+                    is AbstractYType -> listOf(
+                        ItemContent.XmlType(
+                            doc.storeValue(value, parent = name) as YValue.TypeRef,
+                            value.xmlNodeNameOrEmpty(),
+                            kind,
+                            baseAttributes,
+                        ),
+                    )
                     else -> listOf(ItemContent.TextEmbed(doc.storeValue(value, parent = name), baseAttributes, kind = kind))
                 }
             }
@@ -678,13 +990,29 @@ open class YText internal constructor(
         attributes: Map<String, Any?> = emptyMap(),
     ) {
         require(embed != null) { "embed must not be null" }
+        if (isPreliminary) {
+            require(embed !== this) { "shared type cannot contain itself" }
+            queuePreliminaryOperation(listOf(embed, attributes)) { insertEmbed(index, embed, attributes) }
+            return
+        }
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
+        doc.preflightNestedValue(embed)
         doc.transact {
             val normalized = normalizeTextAttributes(attributes)
+            val content = if (embed is AbstractYType) {
+                ItemContent.XmlType(
+                    doc.storeValue(embed, parent = name) as YValue.TypeRef,
+                    embed.xmlNodeNameOrEmpty(),
+                    kind,
+                    normalized,
+                )
+            } else {
+                ItemContent.TextEmbed(doc.storeValue(embed, parent = name), normalized, kind = kind)
+            }
             insertAttributedTextEntries(
                 start,
-                listOf(ItemContent.TextEmbed(doc.storeValue(embed, parent = name), normalized, kind = kind)),
+                listOf(content),
                 normalized,
             )
         }
@@ -692,13 +1020,29 @@ open class YText internal constructor(
 
     fun insertEmbed(index: Int, embed: Any?, attributes: Map<String, Any?> = emptyMap(), origin: Any?) {
         require(embed != null) { "embed must not be null" }
+        if (isPreliminary) {
+            require(embed !== this) { "shared type cannot contain itself" }
+            queuePreliminaryOperation(listOf(embed, attributes)) { insertEmbed(index, embed, attributes, origin) }
+            return
+        }
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
+        doc.preflightNestedValue(embed)
         doc.transact(origin = origin) {
             val normalized = normalizeTextAttributes(attributes)
+            val content = if (embed is AbstractYType) {
+                ItemContent.XmlType(
+                    doc.storeValue(embed, parent = name) as YValue.TypeRef,
+                    embed.xmlNodeNameOrEmpty(),
+                    kind,
+                    normalized,
+                )
+            } else {
+                ItemContent.TextEmbed(doc.storeValue(embed, parent = name), normalized, kind = kind)
+            }
             insertAttributedTextEntries(
                 start,
-                listOf(ItemContent.TextEmbed(doc.storeValue(embed, parent = name), normalized, kind = kind)),
+                listOf(content),
                 normalized,
             )
         }
@@ -729,10 +1073,20 @@ open class YText internal constructor(
     }
 
     fun delete(index: Int, length: Int = 1) {
+        if (isPreliminary) {
+            if (length == 0) return
+            queuePreliminaryOperation { delete(index, length) }
+            return
+        }
         doc.deleteVisible(name, index, length)
     }
 
     fun deleteText(index: Int, length: Int = 1, origin: Any? = null) {
+        if (isPreliminary) {
+            if (length == 0) return
+            queuePreliminaryOperation { deleteText(index, length, origin) }
+            return
+        }
         doc.deleteVisible(name, index, length, origin = origin)
     }
 
@@ -740,18 +1094,28 @@ open class YText internal constructor(
         delete(0, length)
     }
 
-    fun setAttr(key: String, value: Any?): Any? = doc.setTypeAttribute(name, key, value)
+    fun setAttr(key: String, value: Any?): Any? {
+        if (isPreliminary) {
+            queuePreliminaryOperation(value) { setAttr(key, value) }
+            return value
+        }
+        return doc.setTypeAttribute(name, key, value)
+    }
 
     fun setAttribute(key: String, value: Any?): Any? = setAttr(key, value)
 
     fun setAttrs(values: Map<String, Any?>): YText {
+        if (!isPreliminary) doc.preflightNestedValue(values.values.toList())
         doc.transact {
             values.toSortedMap().forEach { (key, value) -> setAttr(key, value) }
         }
         return this
     }
 
-    fun getAttr(key: String): Any? = doc.typeAttribute(name, key)
+    fun getAttr(key: String): Any? {
+        if (warnIfPreliminary()) return null
+        return doc.typeAttribute(name, key)
+    }
 
     fun getAttr(key: String, snapshot: Snapshot): Any? =
         doc.mapValueAtSnapshot(this, key, snapshot)?.let(doc::valueToAny)
@@ -760,7 +1124,10 @@ open class YText internal constructor(
 
     fun getAttribute(key: String, snapshot: Snapshot): Any? = getAttr(key, snapshot)
 
-    fun getAttrs(): Map<String, Any?> = doc.typeAttributes(name)
+    fun getAttrs(): Map<String, Any?> {
+        if (warnIfPreliminary()) return emptyMap()
+        return doc.typeAttributes(name)
+    }
 
     fun getAttrs(snapshot: Snapshot): Map<String, Any?> =
         doc.mapAtSnapshot(this, snapshot).mapValues { (_, value) -> doc.valueToAny(value) }
@@ -787,7 +1154,10 @@ open class YText internal constructor(
         getAttrs().forEach { (key, value) -> action(value, key, this) }
     }
 
-    fun hasAttr(key: String): Boolean = doc.hasTypeAttribute(name, key)
+    fun hasAttr(key: String): Boolean {
+        if (warnIfPreliminary()) return false
+        return doc.hasTypeAttribute(name, key)
+    }
 
     fun hasAttr(key: String, snapshot: Snapshot): Boolean =
         doc.mapValueAtSnapshot(this, key, snapshot) != null
@@ -797,6 +1167,10 @@ open class YText internal constructor(
     fun hasAttribute(key: String, snapshot: Snapshot): Boolean = hasAttr(key, snapshot)
 
     fun deleteAttr(key: String) {
+        if (isPreliminary) {
+            queuePreliminaryOperation { deleteAttr(key) }
+            return
+        }
         doc.deleteTypeAttribute(name, key)
     }
 
@@ -815,6 +1189,11 @@ open class YText internal constructor(
     }
 
     fun format(index: Int, length: Int, attributes: Map<String, Any?>) {
+        if (isPreliminary) {
+            if (length <= 0 || attributes.isEmpty()) return
+            queuePreliminaryOperation(attributes) { format(index, length, attributes) }
+            return
+        }
         val start = index.coerceAtLeast(0)
         require(start <= this.length) { "format range is out of bounds" }
         if (length <= 0 || attributes.isEmpty()) return
@@ -825,6 +1204,11 @@ open class YText internal constructor(
     }
 
     fun formatText(index: Int, length: Int, attributes: Map<String, Any?>, origin: Any? = null) {
+        if (isPreliminary) {
+            if (length <= 0 || attributes.isEmpty()) return
+            queuePreliminaryOperation(attributes) { formatText(index, length, attributes, origin) }
+            return
+        }
         val start = index.coerceAtLeast(0)
         require(start <= this.length) { "format range is out of bounds" }
         if (length <= 0 || attributes.isEmpty()) return
@@ -839,6 +1223,13 @@ open class YText internal constructor(
         origin: Any? = null,
         renderer: AbstractRenderer = activeRenderer,
     ) {
+        if (isPreliminary) {
+            queuePreliminaryOperation(
+                delta.ops.flatMap { op -> listOf(op.insert, op.attributes) },
+            ) { applyDelta(delta, origin, renderer) }
+            return
+        }
+        doc.preflightNestedValue(delta.ops.flatMap { op -> listOf(op.insert, op.attributes) })
         doc.transact({ transaction ->
             var renderedIndex = 0
             delta.ops.forEach { op ->
@@ -850,11 +1241,6 @@ open class YText internal constructor(
                             val index = renderedSequenceIndexToVisibleIndex(this, renderedIndex, renderer)
                             insert(index, insert, op.attributes)
                             renderedIndex += insert.length
-                        } else if (insert is List<*>) {
-                            if (insert.textInsertLength() == 0) return@forEach
-                            val index = renderedSequenceIndexToVisibleIndex(this, renderedIndex, renderer)
-                            insert(index, insert, op.attributes)
-                            renderedIndex += insert.textInsertLength()
                         } else {
                             val index = renderedSequenceIndexToVisibleIndex(this, renderedIndex, renderer)
                             insertEmbed(index, insert, op.attributes)
@@ -893,6 +1279,12 @@ open class YText internal constructor(
     }
 
     fun applyDeltaDeep(delta: YTextDeepDelta, origin: Any? = null) {
+        if (isPreliminary) {
+            queuePreliminaryOperation(
+                listOf(delta.attrs) + delta.delta.ops.flatMap { op -> listOf(op.insert, op.attributes) },
+            ) { applyDeltaDeep(delta, origin) }
+            return
+        }
         doc.transact(origin = origin) {
             clear()
             clearAttrs()
@@ -902,6 +1294,7 @@ open class YText internal constructor(
     }
 
     fun toDelta(): YTextDelta {
+        if (warnIfPreliminary()) return YTextDelta()
         val delta = YTextDelta()
         var pendingText = StringBuilder()
         var pendingAttributes: Map<String, Any?>? = null
@@ -934,6 +1327,12 @@ open class YText internal constructor(
                     delta.insertEmbed(doc.valueToAny(content.value), attributes)
                     pendingAttributes = null
                 }
+                is ItemContent.XmlType -> {
+                    val attributes = textAttributesToPublic(content.textAttributes())
+                    flush()
+                    delta.insertEmbed(doc.typeFromXmlType(content), attributes)
+                    pendingAttributes = null
+                }
                 else -> Unit
             }
         }
@@ -944,11 +1343,15 @@ open class YText internal constructor(
     fun toDeltaDeep(renderer: AbstractRenderer = activeRenderer): YTextDeepDelta =
         renderTextDeepDelta(this, DeepDeltaRenderOptions(renderer = renderer))
 
-    fun toList(): List<Any?> = textItems().map { item ->
-        when (val content = item.content) {
-            is ItemContent.Text -> content.value
-            is ItemContent.TextEmbed -> doc.valueToAny(content.value)
-            else -> null
+    fun toList(): List<Any?> {
+        if (warnIfPreliminary()) return emptyList()
+        return textItems().map { item ->
+            when (val content = item.content) {
+                is ItemContent.Text -> content.value
+                is ItemContent.TextEmbed -> doc.valueToAny(content.value)
+                is ItemContent.XmlType -> doc.typeFromXmlType(content)
+                else -> null
+            }
         }
     }
 
@@ -993,15 +1396,18 @@ open class YText internal constructor(
 
     override fun iterator(): Iterator<Any?> = toList().iterator()
 
-    override fun toString(): String = doc.visibleSequence(name)
-        .filter { it.content.kind == kind }
-        .joinToString(separator = "") { item ->
-            when (val content = item.content) {
-                is ItemContent.Text -> content.value
-                is ItemContent.TextEmbed -> ""
-                else -> ""
+    override fun toString(): String {
+        if (warnIfPreliminary()) return ""
+        return doc.visibleSequence(name)
+            .filter { it.content.kind == kind }
+            .joinToString(separator = "") { item ->
+                when (val content = item.content) {
+                    is ItemContent.Text -> content.value
+                    is ItemContent.TextEmbed -> ""
+                    else -> ""
+                }
             }
-        }
+    }
 
     override fun toJson(): String = toString()
 
@@ -1162,12 +1568,14 @@ private fun normalizeTextSliceIndex(index: Int, size: Int): Int {
 private fun ItemContent.textAttributes(): Map<String, YValue> = when (this) {
     is ItemContent.Text -> attributes
     is ItemContent.TextEmbed -> attributes
+    is ItemContent.XmlType -> attributes
     else -> error("content is not text-like")
 }
 
 private fun ItemContent.baseTextAttributes(): Map<String, YValue> = when (this) {
     is ItemContent.Text -> baseAttributes
     is ItemContent.TextEmbed -> baseAttributes
+    is ItemContent.XmlType -> baseAttributes
     else -> error("content is not text-like")
 }
 
@@ -1180,12 +1588,14 @@ private fun MutableMap<String, YValue>.applyTextFormatAttributes(attributes: Map
 private fun ItemContent.withTextAttributes(attributes: Map<String, YValue>): ItemContent = when (this) {
     is ItemContent.Text -> copy(attributes = attributes)
     is ItemContent.TextEmbed -> copy(attributes = attributes)
+    is ItemContent.XmlType -> copy(attributes = attributes)
     else -> error("content is not text-like")
 }
 
 private fun ItemContent.withoutTextAttributes(): ItemContent = when (this) {
     is ItemContent.Text -> copy(attributes = emptyMap(), baseAttributes = emptyMap())
     is ItemContent.TextEmbed -> copy(attributes = emptyMap(), baseAttributes = emptyMap())
+    is ItemContent.XmlType -> copy(attributes = emptyMap(), baseAttributes = emptyMap())
     else -> error("content is not text-like")
 }
 
@@ -1231,7 +1641,9 @@ open class YMap internal constructor(
 ) :
     AbstractYType(doc, name, kind),
     Iterable<Map.Entry<String, Any?>> {
-    constructor() : this(YDoc(), "")
+    constructor() : this(YDoc(), "") {
+        markDetached()
+    }
 
     constructor(values: Map<String, Any?>) : this() {
         setAttrs(values)
@@ -1247,13 +1659,27 @@ open class YMap internal constructor(
         }
     }
 
-    val size: Int get() = doc.visibleMap(name).size
+    val size: Int
+        get() {
+            if (warnIfPreliminary()) return 0
+            return doc.visibleMap(name).size
+        }
 
     val attrSize: Int get() = size
 
     fun set(key: String, value: Any?): Any? {
+        if (isPreliminary) {
+            require(value !== this) { "shared type cannot contain itself" }
+            preliminaryMap[key] = value
+            return value
+        }
         doc.transact {
-            val content = ItemContent.MapEntry(doc.storeValue(value, parent = name))
+            val stored = doc.storeValue(value, parent = name)
+            val content = if (value is AbstractYType) {
+                ItemContent.XmlType(stored as YValue.TypeRef, value.xmlNodeNameOrEmpty(), kind)
+            } else {
+                ItemContent.MapEntry(stored)
+            }
             val item = StoreItem(
                 id = doc.nextId(),
                 origin = doc.currentMapItemId(name, key),
@@ -1272,13 +1698,21 @@ open class YMap internal constructor(
     fun setAttribute(key: String, value: Any?): Any? = setAttr(key, value)
 
     fun setAttrs(values: Map<String, Any?>): YMap {
+        if (isPreliminary) {
+            values.forEach { (key, value) -> preliminaryMap[key] = value }
+            return this
+        }
+        doc.preflightNestedValue(values.values.toList())
         doc.transact {
             values.forEach { (key, value) -> set(key, value) }
         }
         return this
     }
 
-    fun get(key: String): Any? = doc.visibleMapValue(name, key)?.let { doc.valueToAny(it) }
+    fun get(key: String): Any? {
+        if (warnIfPreliminary()) return null
+        return doc.visibleMapValue(name, key)?.let { doc.valueToAny(it) }
+    }
 
     fun get(key: String, snapshot: Snapshot): Any? =
         doc.mapValueAtSnapshot(this, key, snapshot)?.let(doc::valueToAny)
@@ -1291,7 +1725,10 @@ open class YMap internal constructor(
 
     fun getAttribute(key: String, snapshot: Snapshot): Any? = getAttr(key, snapshot)
 
-    fun has(key: String): Boolean = doc.visibleMapValue(name, key) != null
+    fun has(key: String): Boolean {
+        if (warnIfPreliminary()) return false
+        return doc.visibleMapValue(name, key) != null
+    }
 
     fun has(key: String, snapshot: Snapshot): Boolean = doc.mapValueAtSnapshot(this, key, snapshot) != null
 
@@ -1304,6 +1741,10 @@ open class YMap internal constructor(
     fun hasAttribute(key: String, snapshot: Snapshot): Boolean = hasAttr(key, snapshot)
 
     fun delete(key: String) {
+        if (isPreliminary) {
+            preliminaryMap.remove(key)
+            return
+        }
         doc.deleteMapKey(name, key)
     }
 
@@ -1320,6 +1761,10 @@ open class YMap internal constructor(
     }
 
     fun clear() {
+        if (isPreliminary) {
+            preliminaryMap.clear()
+            return
+        }
         doc.transact {
             keys().forEach(::delete)
         }
@@ -1330,6 +1775,11 @@ open class YMap internal constructor(
     }
 
     fun applyDelta(delta: YMapDelta, origin: Any? = null) {
+        if (!isPreliminary) {
+            doc.preflightNestedValue(
+                delta.ops.values.filter { op -> op.action == YMapDeltaAction.Set }.map { op -> op.value },
+            )
+        }
         doc.transact(origin = origin) {
             delta.ops.forEach { (key, op) ->
                 when (op.action) {
@@ -1394,7 +1844,10 @@ open class YMap internal constructor(
 
     override fun iterator(): Iterator<Map.Entry<String, Any?>> = entries().iterator()
 
-    fun toMap(): Map<String, Any?> = doc.visibleMap(name).mapValues { (_, value) -> doc.valueToAny(value) }
+    fun toMap(): Map<String, Any?> {
+        if (warnIfPreliminary()) return emptyMap()
+        return doc.visibleMap(name).mapValues { (_, value) -> doc.valueToAny(value) }
+    }
 
     fun toMap(snapshot: Snapshot): Map<String, Any?> =
         doc.mapAtSnapshot(this, snapshot).mapValues { (_, value) -> doc.valueToAny(value) }
@@ -1403,9 +1856,12 @@ open class YMap internal constructor(
 
     fun getAttrs(snapshot: Snapshot): Map<String, Any?> = toMap(snapshot)
 
-    override fun toJson(): Map<String, Any?> = doc.visibleMap(name)
-        .mapValues { (_, value) -> doc.valueToJson(value) }
-        .inJavaScriptObjectKeyOrder()
+    override fun toJson(): Map<String, Any?> {
+        if (warnIfPreliminary()) return emptyMap()
+        return doc.visibleMap(name)
+            .mapValues { (_, value) -> doc.valueToJson(value) }
+            .inJavaScriptObjectKeyOrder()
+    }
 
     override fun toJSON(): Map<String, Any?> = toMap()
         .mapValues { (_, value) -> toYTypeJsonValue(value) }
@@ -1432,7 +1888,7 @@ open class YMap internal constructor(
  * JavaScript objects enumerate array-index property names before other strings. Y.Map itself
  * iterates its backing Map in insertion order, but Y.Map#toJSON returns a plain object.
  */
-private fun <T> Map<String, T>.inJavaScriptObjectKeyOrder(): Map<String, T> {
+internal fun <T> Map<String, T>.inJavaScriptObjectKeyOrder(): Map<String, T> {
     val result = linkedMapOf<String, T>()
     entries.asSequence()
         .mapNotNull { entry -> entry.key.toJavaScriptArrayIndexOrNull()?.let { index -> index to entry } }

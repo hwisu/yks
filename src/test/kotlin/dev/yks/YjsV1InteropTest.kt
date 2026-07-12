@@ -4,6 +4,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.absolutePathString
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
@@ -1029,20 +1030,23 @@ class YjsV1InteropTest {
     }
 
     @Test
-    fun unsupportedXmlAndSubdocumentShapesRemainLegacy() {
+    fun unsupportedXmlAndSubdocumentShapesRequireExplicitLosslessApis() {
         val staticXml = YDoc(clientId = 1)
         staticXml.getXmlFragment("xml").push(YXmlElement("p"))
-        assertLegacyYks(encodeStateAsUpdate(staticXml))
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdate(staticXml) }
+        assertLegacyYks(encodeStateAsUpdateLossless(staticXml))
 
         val fragmentAttributes = YDoc(clientId = 1)
         fragmentAttributes.getXmlFragment("xml").setAttr("class", "private")
-        assertLegacyYks(encodeStateAsUpdate(fragmentAttributes))
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdate(fragmentAttributes) }
+        assertLegacyYks(encodeStateAsUpdateLossless(fragmentAttributes))
 
         val nonstandardSubdoc = YDoc(clientId = 1)
         nonstandardSubdoc.getArray("subs").push(
             YDoc(guid = "child", collectionId = "private", shouldLoad = false),
         )
-        assertLegacyYks(encodeStateAsUpdate(nonstandardSubdoc))
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdate(nonstandardSubdoc) }
+        assertLegacyYks(encodeStateAsUpdateLossless(nonstandardSubdoc))
 
         val loadOnlySubdoc = YDoc(clientId = 1)
         loadOnlySubdoc.getArray("subs").push(YDoc(guid = "child"))
@@ -1137,7 +1141,8 @@ class YjsV1InteropTest {
     private fun assertLegacyYks(update: ByteArray) {
         assertTrue(
             update.size >= 4 && update[0] == 'Y'.code.toByte() && update[1] == 'K'.code.toByte() &&
-                update[2] == 'S'.code.toByte() && update[3] in setOf(1.toByte(), 2.toByte(), 3.toByte()),
+                update[2] == 'S'.code.toByte() &&
+                update[3] in setOf(1.toByte(), 2.toByte(), 3.toByte(), 4.toByte()),
         )
     }
 

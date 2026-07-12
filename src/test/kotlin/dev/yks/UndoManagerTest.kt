@@ -381,8 +381,8 @@ class UndoManagerTest {
     fun undoSkipsNoopStackItemsUntilChangeIsPerformedLikeUpstream() {
         val doc = YDoc(clientId = 1)
         val doc2 = YDoc(clientId = 2)
-        doc.observeUpdates { update, _ -> doc2.applyUpdate(update) }
-        doc2.observeUpdates { update, _ -> doc.applyUpdate(update) }
+        doc.observeUpdatesLossless { update, _ -> doc2.applyUpdate(update) }
+        doc2.observeUpdatesLossless { update, _ -> doc.applyUpdate(update) }
         val array = doc.getArray("array")
         val array2 = doc2.getArray("array")
         val map = doc.createMap()
@@ -418,6 +418,37 @@ class UndoManagerTest {
 
         assertEquals("value", map2.getAttr("key"))
         assertEquals("value", (array.get(1) as YMap).getAttr("key"))
+    }
+
+    @Test
+    fun undoDoesNotRestoreOrphanedDescendantWhenCandidateOwnerCannotBeRestored() {
+        val local = YDoc(clientId = 1, gc = false)
+        val remote = YDoc(clientId = 2, gc = false)
+        val root = local.getArray("root")
+        val remoteRoot = remote.getArray("root")
+        val parent = local.createMap()
+        val child = local.createMap()
+        child.set("leaf", "value")
+        parent.set("child", child)
+        root.push(parent)
+        remote.applyUpdate(local.encodeStateAsUpdateLossless(), origin = "sync")
+        val undoManager = UndoManager(
+            root,
+            UndoManagerOptions(captureTimeoutMillis = 0, trackedOrigins = setOf("local")),
+        )
+
+        local.transact(origin = "local") {
+            parent.delete("child")
+        }
+        remote.applyUpdate(local.encodeStateAsUpdateLossless(), origin = "sync")
+        remoteRoot.delete(0)
+        local.applyUpdate(remote.encodeStateAsUpdateLossless(), origin = "sync")
+
+        assertEquals(emptyList(), root.toList())
+        assertTrue(undoManager.canUndo)
+        assertEquals(null, undoManager.undo())
+        assertEquals(emptyMap(), child.toMap())
+        assertFalse(undoManager.canRedo)
     }
 
     @Test
@@ -785,7 +816,7 @@ class UndoManagerTest {
         assertEquals(1, array.length)
         val remaining = array.get(0) as YMap
         assertSame(mapWithAttr, remaining)
-        assertEquals(setOf("hi"), remaining.attrKeys())
+        assertEquals(emptySet(), remaining.attrKeys())
     }
 
     @Test

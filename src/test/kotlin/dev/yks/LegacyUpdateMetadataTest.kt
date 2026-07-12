@@ -164,7 +164,7 @@ class LegacyUpdateMetadataTest {
         val rootName = "__yjs_inherit__:1:0"
         val source = YDoc(clientId = 2)
         source.getXmlFragment(rootName).push(YXmlElement("p"))
-        val update = encodeStateAsUpdate(source)
+        val update = encodeStateAsUpdateLossless(source)
         val target = YDoc(clientId = 3)
 
         assertEquals(2, update[3].toInt())

@@ -205,6 +205,7 @@ class YXmlTest {
             element.createTreeWalker().map { node ->
                 when (node) {
                     is YXmlElement -> node.nodeName
+                    is YXmlSnapshotText -> node.toJSON()
                     is YXmlText -> node.toJson()
                 }
             }.toList(),
@@ -250,11 +251,11 @@ class YXmlTest {
         paragraph.push(listOf(YXmlText("hello")))
         fragment.push(listOf(paragraph))
 
-        right.applyUpdate(left.encodeStateAsUpdate())
+        right.applyUpdate(left.encodeStateAsUpdateLossless())
         assertEquals(left.getXmlFragment("xml").toString(), right.getXmlFragment("xml").toString())
 
         left.getXmlFragment("xml").push(listOf(YXmlElement("br")))
-        right.applyUpdate(left.encodeStateAsUpdate(right.encodeStateVector()))
+        right.applyUpdate(left.encodeStateAsUpdateLossless(right.encodeStateVector()))
 
         assertEquals("<p id=\"one\">hello</p><br></br>", right.getXmlFragment("xml").toString())
         assertEquals(left.toJson(), right.toJson())
@@ -333,7 +334,7 @@ class YXmlTest {
         )
 
         fragment.applyDelta(delta)
-        val remote = createDocFromUpdate(doc.encodeStateAsUpdate())
+        val remote = createDocFromUpdate(doc.encodeStateAsUpdateLossless())
 
         assertEquals("<em><strong>A</strong></em><em>B</em><em><strong>C</strong></em>", fragment.toString())
         assertEquals(delta, fragment.toDelta())
@@ -391,7 +392,7 @@ class YXmlTest {
 
         fragment.push(YXmlElement("b"), YXmlElement("c"))
         fragment.unshift(listOf(YXmlElement("a")))
-        right.applyUpdate(left.encodeStateAsUpdate())
+        right.applyUpdate(left.encodeStateAsUpdateLossless())
 
         assertEquals("<a></a><b></b><c></c>", fragment.toString())
         assertEquals(fragment.toString(), right.getXmlFragment("xml").toString())
@@ -422,7 +423,7 @@ class YXmlTest {
 
         fragment.applyDelta(listOf(YArrayDeltaOp(insert = listOf(YXmlElement("a"), YXmlElement("b")))))
         fragment.applyDelta(listOf(YArrayDeltaOp(retain = 1), YArrayDeltaOp(insert = listOf("tail"))))
-        right.applyUpdate(left.encodeStateAsUpdate())
+        right.applyUpdate(left.encodeStateAsUpdateLossless())
 
         assertEquals("<a></a>tail<b></b>", right.getXmlFragment("xml").toString())
 
@@ -502,8 +503,12 @@ class YXmlTest {
         source.getXmlFragment("xml").push(listOf(YXmlElement("root").also { it.push(listOf(YXmlText("x"))) }))
 
         val clone = cloneDoc(source)
-        val fromUpdate = createDocFromUpdate(source.encodeStateAsUpdate())
+        val fromUpdate = createDocFromUpdate(source.encodeStateAsUpdateLossless())
 
+        assertEquals(source.toJson(), clone.toJson())
+        assertEquals(emptyMap(), fromUpdate.toJson())
+        clone.getXmlFragment("xml")
+        fromUpdate.getXmlFragment("xml")
         assertEquals(mapOf("xml" to listOf(mapOf("nodeName" to "root", "attributes" to emptyMap<String, Any?>(), "children" to listOf("x")))), clone.toJson())
         assertEquals(source.toJson(), fromUpdate.toJson())
     }
@@ -700,6 +705,7 @@ class YXmlTest {
 
         element.push(listOf(YXmlText("head")))
         element.push(liveText, liveSpan)
+        doc.getXmlFragment("root").push(element)
 
         assertEquals("head", (element.get(0) as YXmlText).toJson())
         assertNull(element.getType(0))

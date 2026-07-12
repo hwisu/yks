@@ -75,7 +75,10 @@ class ContentTest {
         assertEquals(contentTypeRefNumber, typeContent.getRef())
         assertEquals(listOf(type), typeContent.getContent())
         assertIs<ContentType>(copiedType)
-        assertEquals(listOf("x"), (copiedType.type as YArray).toList())
+        assertIs<YArray>(copiedType.type)
+        assertFalse(copiedType.type === type)
+        assertTrue(copiedType.type.binding is YTypeBinding.Detached)
+        assertEquals(emptyList(), copiedType.type.toList())
         assertFalse(typeContent.mergeWith(ContentType(type)))
     }
 

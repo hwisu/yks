@@ -12,9 +12,9 @@ npm run interop:generate
 npm run test:interop
 ```
 
-The Node suite currently contains 78 tests. This number includes fixture
+The Node suite currently contains 92 tests. This number includes fixture
 semantics, upstream self-roundtrips, and verifier regression tests; it does not
-mean that all 78 tests execute Kotlin code.
+mean that all 92 tests execute Kotlin code.
 
 Run the Kotlin-facing compatibility gate, or the complete Gradle gate:
 
@@ -61,15 +61,15 @@ node interop/yjs-v1/verify-update-sequence.mjs nested-map-update base.bin diff.b
 The committed fixtures and Kotlin interop tests cover both upstream-to-Kotlin
 decoding and Kotlin-to-upstream application for:
 
-- packed text/array content, binary data, maps, and owner-first nested types;
+- packed text/array content, binary data, maps, and owner-first/replayed preliminary nested types;
 - lib0 values including `undefined`, null, negative zero, special floating
   point values, signed 64-bit BigInt values, and object property order;
 - origin/right-origin anchors, inherited parents, out-of-order dependencies,
   duplicate delivery, and multi-client convergence;
 - rich-text markers, overlapping formatting, embeds, format removal,
   snapshots, and standard root transaction update events;
-- live XML ownership, attributes, formatted `Y.XmlText`, root
-  pre-materialization, cross-client content, and deletion;
+- live XML ownership, attributes, formatted `Y.XmlText`, deferred explicit root
+  materialization, cross-client content, and deletion;
 - direct/default/optioned subdocuments, duplicate GUID instances, lifecycle
   events, text/XML-text placement, and insert-before-delete sequences;
 - delete sets, GC versus Skip semantics, and large `ContentDeleted`/GC ranges;
@@ -95,15 +95,20 @@ regenerates fixtures and fails if the working tree changes.
 
 ## Scope and remaining gaps
 
-The standard writer is lossless-first. Unsupported Kotlin-only shapes use the
-private `YKS\x03` envelope instead of silently dropping data. JavaScript Yjs
-cannot apply that envelope. Current private cases include compact/static XML,
-root-fragment attributes, pre-populated detached child-before-owner types, and
-nonstandard subdocument options such as `collectionId` or suggestion metadata.
+Upstream-named writer APIs are standard-only. Unsupported Kotlin-only shapes
+throw `UnsupportedYjsStandardUpdateException`; the corresponding explicit
+`*Lossless` APIs may use a private YKS envelope instead of dropping data. The
+latest private version is `YKS\x04`; the writer selects `YKS\x02` through
+`YKS\x04` according to the metadata required, while the reader accepts
+`YKS\x01` through `YKS\x04`. JavaScript Yjs cannot apply those envelopes.
+Current lossless-only cases include compact/static XML, root-fragment
+attributes, and nonstandard subdocument options such as `collectionId` or
+suggestion metadata. All apply and decode APIs accept both standard and private
+input.
 
-Root XML kind and a root element node name are absent from Yjs wire, so an
-ambiguous receiver must pre-materialize the expected root. `Y.XmlHook` does not
-yet have a fully matching public Kotlin map-style surface.
+Root XML kind and a root element node name are absent from Yjs wire. An applied
+ambiguous root remains unopened until an explicit typed getter supplies that
+schema; local clone/snapshot helpers retain root metadata known at capture time.
 
 The fixture scenarios and seeded differential test are not a production-scale
 benchmark or adversarial fuzzer; applications should still add fixtures for

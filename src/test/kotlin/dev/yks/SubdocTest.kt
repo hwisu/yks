@@ -193,7 +193,7 @@ class SubdocTest {
         )
         source.getMap("subdocs").setAttr("sub", subdoc)
 
-        target.applyUpdate(source.encodeStateAsUpdate())
+        target.applyUpdate(source.encodeStateAsUpdateLossless())
         val remote = target.getMap("subdocs").getAttr("sub") as YDoc
 
         assertEquals("sub", remote.guid)
@@ -305,7 +305,7 @@ class SubdocTest {
         subdoc.isSuggestionDoc = true
         source.getMap("subdocs").setAttr("sub", subdoc)
 
-        target.applyUpdate(source.encodeStateAsUpdate())
+        target.applyUpdate(source.encodeStateAsUpdateLossless())
         val remote = target.getMap("subdocs").getAttr("sub") as YDoc
 
         assertEquals("updated", remote.guid)

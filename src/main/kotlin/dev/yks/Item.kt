@@ -103,16 +103,9 @@ internal sealed class ItemContent {
         val ref: YValue.TypeRef,
         val nodeName: String,
         override val kind: RootKind = RootKind.XmlFragment,
-    ) : ItemContent() {
-        init {
-            require(kind == RootKind.XmlFragment || kind == RootKind.XmlElement || kind == RootKind.XmlHook) {
-                "XML type content must belong to an XML sequence"
-            }
-            require(ref.kind == RootKind.Text || ref.kind == RootKind.XmlElement || ref.kind == RootKind.XmlHook || ref.kind == RootKind.XmlText) {
-                "XML sequence type children must be XML node or text refs"
-            }
-        }
-    }
+        val attributes: Map<String, YValue> = emptyMap(),
+        val baseAttributes: Map<String, YValue> = attributes,
+    ) : ItemContent()
 
     data class Deleted(
         override val kind: RootKind,

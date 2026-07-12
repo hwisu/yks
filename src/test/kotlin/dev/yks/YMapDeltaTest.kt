@@ -106,7 +106,7 @@ class YMapDeltaTest {
     }
 
     @Test
-    fun mapObserverDeltaUsesTransactionStartAsPreviousValueLikeUpstream() {
+    fun mapObserverDeltaUsesTransactionStartAndChangedSubsLikeUpstream() {
         val doc = YDoc(clientId = 1)
         val map = doc.getMap("meta")
         val events = mutableListOf<YEvent>()
@@ -135,7 +135,7 @@ class YMapDeltaTest {
             map.deleteAttr("c")
         }
         assertTrue(events.last().mapDelta.isEmpty())
-        assertTrue(events.last().keysChanged.isEmpty())
+        assertEquals(setOf("c"), events.last().keysChanged)
 
         doc.transact {
             map.setAttr("d", 1)

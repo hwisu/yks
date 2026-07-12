@@ -5,7 +5,9 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -78,13 +80,98 @@ class UpdateApiTest {
     }
 
     @Test
-    fun mergeUpdatesReturnsSingleInputUpdateUnchanged() {
+    fun mergeUpdatesValidateAndNormalizeSingleInputByFormat() {
         val source = YDoc(clientId = 1)
         source.getText("body").insert(0, "x")
-        val update = source.encodeStateAsUpdate()
+        val updateV1 = source.encodeStateAsUpdate()
+        val updateV2 = source.encodeStateAsUpdateV2()
 
-        assertSame(update, mergeUpdates(listOf(update)))
-        assertSame(update, mergeUpdatesV2(listOf(update)))
+        val mergedV1 = mergeUpdates(listOf(updateV1))
+        val mergedV2 = mergeUpdatesV2(listOf(updateV2))
+        val normalizedLosslessV2 = mergeUpdatesV2Lossless(listOf(updateV1))
+
+        assertContentEquals(updateV1, mergedV1)
+        assertContentEquals(updateV2, mergedV2)
+        assertFalse(normalizedLosslessV2.contentEquals(updateV1))
+        assertEquals(0, normalizedLosslessV2.first().toInt())
+        assertEquals("x", createDocFromUpdate(mergedV1).getText("body").toString())
+        assertEquals("x", createDocFromUpdateV2(mergedV2).getText("body").toString())
+        assertEquals("x", createDocFromUpdateV2(normalizedLosslessV2).getText("body").toString())
+    }
+
+    @Test
+    fun mergeUpdatesV2LosslessPreservesPrivateSingleInputWithoutReturningV1() {
+        val source = YDoc(clientId = 1)
+        source.getXmlFragment("xml").push(YXmlElement("p").also { element ->
+            element.push(YXmlText("private"))
+        })
+        val privateUpdate = source.encodeStateAsUpdateLossless()
+
+        val merged = mergeUpdatesV2Lossless(listOf(privateUpdate))
+
+        assertTrue(privateUpdate.hasPrivateUpdateMagic())
+        assertTrue(merged.hasPrivateUpdateMagic())
+        assertFalse(merged === privateUpdate)
+        assertEquals("<p>private</p>", createDocFromUpdateV2(merged).getXmlFragment("xml").toString())
+    }
+
+    @Test
+    fun mergeUpdatesV2NormalizesEmptyAndDeleteOnlyV1Inputs() {
+        val emptyV1 = encodeStateAsUpdate(YDoc(clientId = 1))
+        val expectedEmptyV2 = encodeStateAsUpdateV2(YDoc(clientId = 2))
+
+        assertContentEquals(expectedEmptyV2, mergeUpdatesV2(listOf(emptyV1)))
+        assertContentEquals(expectedEmptyV2, mergeUpdatesV2Lossless(listOf(emptyV1)))
+        assertEquals(UpdateMeta(emptyMap(), emptyMap()), parseUpdateMetaV2(emptyV1))
+
+        val source = YDoc(clientId = 3)
+        val text = source.getText("body")
+        text.insert(0, "x")
+        val baseline = source.encodeStateAsUpdate()
+        val deleteUpdates = mutableListOf<ByteArray>()
+        source.observeUpdates { update, _ -> deleteUpdates.add(update) }
+        text.delete(0, 1)
+        val deleteOnlyV1 = deleteUpdates.single()
+
+        val normalized = listOf(
+            mergeUpdatesV2(listOf(deleteOnlyV1)),
+            mergeUpdatesV2Lossless(listOf(deleteOnlyV1)),
+        )
+        normalized.forEach { update ->
+            val target = createDocFromUpdate(baseline)
+            applyUpdateV2(target, update)
+            assertEquals("", target.getText("body").toString())
+        }
+        assertEquals(UpdateMeta(emptyMap(), emptyMap()), parseUpdateMetaV2(deleteOnlyV1))
+    }
+
+    @Test
+    fun losslessMergeKeepsSparsePrivateContinuityIndependentOfInputOrder() {
+        val source = YDoc(clientId = 1)
+        val map = source.getMap("map")
+        repeat(6) { index -> map.set("k$index", index) }
+        val sparseRange = listOf(IdRange(clock = 5, len = 1))
+
+        val strictV1 = writeStructs(source, 1, sparseRange)
+        val losslessV1 = writeStructsLossless(source, 1, sparseRange)
+        val strictV2 = writeStructsV2(source, 1, sparseRange)
+        val losslessV2 = writeStructsV2Lossless(source, 1, sparseRange)
+
+        assertFalse(strictV1.hasPrivateUpdateMagic())
+        assertFalse(strictV2.hasPrivateUpdateMagic())
+        assertTrue(losslessV1.hasPrivateUpdateMagic())
+        assertTrue(losslessV2.hasPrivateUpdateMagic())
+
+        listOf(
+            mergeUpdatesLossless(listOf(strictV1, losslessV1)) to false,
+            mergeUpdatesLossless(listOf(losslessV1, strictV1)) to false,
+            mergeUpdatesV2Lossless(listOf(strictV2, losslessV2)) to true,
+            mergeUpdatesV2Lossless(listOf(losslessV2, strictV2)) to true,
+        ).forEach { (update, isV2) ->
+            assertTrue(update.hasPrivateUpdateMagic())
+            val restored = if (isV2) createDocFromUpdateV2(update) else createDocFromUpdate(update)
+            assertEquals(5L, restored.getMap("map").get("k5"))
+        }
     }
 
     @Test
@@ -457,7 +544,10 @@ class UpdateApiTest {
 
         assertFalse(update.contentEquals(asV2))
         assertContentEquals(update, backToV1)
-        assertEquals(source.toJson(), createDocFromUpdateV2(asV2).toJson())
+        val converted = createDocFromUpdateV2(asV2)
+        assertEquals(emptyMap(), converted.toJson())
+        converted.getArray("items")
+        assertEquals(source.toJson(), converted.toJson())
 
         asV2[0] = (asV2[0].toInt() xor 1).toByte()
         assertFalse(update.contentEquals(asV2))
@@ -544,9 +634,9 @@ class UpdateApiTest {
                 element.push(listOf(YXmlText("hello")))
             },
         ))
-        val update = source.encodeStateAsUpdate()
+        val update = source.encodeStateAsUpdateLossless()
 
-        val obfuscated = obfuscateUpdate(update)
+        val obfuscated = obfuscateUpdateLossless(update)
         val decoded = decodeUpdate(update)
         val decodedObfuscated = decodeUpdate(obfuscated)
         val obfuscatedDoc = createDocFromUpdate(obfuscated)
@@ -619,10 +709,10 @@ class UpdateApiTest {
             ),
         ))
 
-        val obfuscated = createDocFromUpdate(obfuscateUpdate(source.encodeStateAsUpdate()))
+        val obfuscated = createDocFromUpdate(obfuscateUpdateLossless(source.encodeStateAsUpdateLossless()))
         val preservedFormatting = createDocFromUpdate(
-            obfuscateUpdate(
-                source.encodeStateAsUpdate(),
+            obfuscateUpdateLossless(
+                source.encodeStateAsUpdateLossless(),
                 ObfuscatorOptions(formatting = false),
             ),
         )
@@ -655,8 +745,8 @@ class UpdateApiTest {
         source.getXmlFragment("live-xml").push(liveElement)
 
         val obfuscated = createDocFromUpdate(
-            obfuscateUpdate(
-                source.encodeStateAsUpdate(),
+            obfuscateUpdateLossless(
+                source.encodeStateAsUpdateLossless(),
                 ObfuscatorOptions(formatting = false, subdocs = false, name = false),
             ),
         )
@@ -763,6 +853,325 @@ class UpdateApiTest {
         assertNull(encodeUpdateMessageFromTransaction(beforeEvent))
         assertTrue(decodeUpdate(writeStructsFromTransaction(beforeEvent)).structs.isEmpty())
     }
+
+    @Test
+    fun standardWritersRejectPrivateShapesAndLosslessWritersPreserveThem() {
+        val standardSource = YDoc(clientId = 9).also { it.getText("body").insert(0, "standard") }
+        assertFalse(encodeStateAsUpdateLossless(standardSource).hasPrivateUpdateMagic())
+        assertFalse(encodeStateAsUpdateV2Lossless(standardSource).hasPrivateUpdateMagic())
+
+        val source = YDoc(clientId = 1)
+        source.getXmlFragment("xml").push(YXmlElement("p"))
+
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdate(source) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdateV2(source) }
+
+        val losslessV1 = encodeStateAsUpdateLossless(source)
+        val losslessV2 = encodeStateAsUpdateV2Lossless(source)
+        assertTrue(losslessV1.hasPrivateUpdateMagic())
+        assertTrue(losslessV2.hasPrivateUpdateMagic())
+        assertEquals("<p></p>", createDocFromUpdate(losslessV1).getXmlFragment("xml").toString())
+        assertEquals("<p></p>", createDocFromUpdateV2(losslessV2).getXmlFragment("xml").toString())
+    }
+
+    @Test
+    fun attributedSharedTypeUsesPrivateV4AndRoundTripsLosslessly() {
+        val source = YDoc(clientId = 1)
+        val child = source.createMap().also { it.set("name", "Ada") }
+        source.getText("body").insertEmbed(0, child, mapOf("bold" to true, "level" to 2L))
+        source.getXmlFragment("private").setAttr("scope", "kotlin-only")
+
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdate(source) }
+        val update = encodeStateAsUpdateLossless(source)
+
+        assertTrue(update.hasPrivateUpdateMagic())
+        assertEquals(4, update[3].toInt())
+
+        val restored = createDocFromUpdate(update)
+        val restoredDelta = restored.getText("body").toDelta()
+        val restoredOp = restoredDelta.ops.single()
+        val restoredChild = restoredOp.insert as YMap
+
+        assertEquals(mapOf("bold" to true, "level" to 2L), restoredOp.attributes)
+        assertEquals("Ada", restoredChild.get("name"))
+        assertEquals("kotlin-only", restored.getXmlFragment("private").getAttr("scope"))
+        assertContentEquals(update, encodeStateAsUpdateLossless(restored))
+    }
+
+    @Test
+    fun losslessStructSelectionsKeepFormattedContentTypeMetadataInV1AndV2() {
+        val source = YDoc(clientId = 1)
+        val body = source.getText("body")
+        body.insertEmbed(0, YMap())
+        body.format(0, 1, mapOf("bold" to true))
+        val owner = getTypeStructs(body).single { struct -> struct.content is ContentType }
+        val ranges = listOf(IdRange(owner.id.clock, owner.length))
+        val selected = createIdSet().also { idSet ->
+            idSet.add(owner.id.client, owner.id.clock, owner.length)
+        }
+
+        val strictV1 = writeStructs(source, owner.id.client, ranges)
+        val strictV2 = writeStructsV2(source, owner.id.client, ranges)
+        val losslessV1ByRange = writeStructsLossless(source, owner.id.client, ranges)
+        val losslessV1ByIdSet = writeStructsFromIdSetLossless(source, selected)
+        val losslessV2ByRange = writeStructsV2Lossless(source, owner.id.client, ranges)
+        val losslessV2ByIdSet = writeStructsFromIdSetV2Lossless(source, selected)
+
+        assertFalse(strictV1.hasPrivateUpdateMagic())
+        assertFalse(strictV2.hasPrivateUpdateMagic())
+        listOf(
+            losslessV1ByRange,
+            losslessV1ByIdSet,
+            losslessV2ByRange,
+            losslessV2ByIdSet,
+        ).forEach { update ->
+            assertTrue(update.hasPrivateUpdateMagic())
+            assertEquals(4, update[3].toInt())
+        }
+        assertContentEquals(losslessV1ByRange, losslessV1ByIdSet)
+        assertContentEquals(losslessV2ByRange, losslessV2ByIdSet)
+
+        val restoredV1 = createDocFromUpdate(losslessV1ByRange)
+        val restoredV2 = createDocFromUpdateV2(losslessV2ByIdSet)
+        assertEquals(mapOf("bold" to true), restoredV1.getText("body").toDelta().ops.single().attributes)
+        assertEquals(mapOf("bold" to true), restoredV2.getText("body").toDelta().ops.single().attributes)
+    }
+
+    @Test
+    fun losslessSparseNestedStructWaitsForItsOwnerInV1AndV2() {
+        val source = YDoc(clientId = 1, gc = false)
+        val child = YMap(mapOf("key" to "value"))
+        source.getArray("root").push(child)
+        val childRange = listOf(IdRange(clock = 1, len = 1))
+        val ownerRange = listOf(IdRange(clock = 0, len = 1))
+
+        fun verify(
+            childUpdate: ByteArray,
+            ownerUpdate: ByteArray,
+            apply: (YDoc, ByteArray) -> Unit,
+        ) {
+            val target = YDoc(clientId = 2, gc = false)
+
+            apply(target, childUpdate)
+
+            assertTrue(target.rootNames().isEmpty())
+            assertTrue(target.share.isEmpty())
+            assertTrue(target.store.stateVector().isEmpty())
+            assertNotNull(target.store.pendingStructs)
+
+            apply(target, ownerUpdate)
+
+            assertNull(target.store.pendingStructs)
+            assertEquals(mapOf(1L to 2L), target.store.stateVector())
+            val restoredChild = assertIs<YMap>(target.getArray("root").get(0))
+            assertEquals(mapOf("key" to "value"), restoredChild.toMap())
+        }
+
+        verify(
+            writeStructsLossless(source, 1, childRange),
+            writeStructsLossless(source, 1, ownerRange),
+            ::applyUpdate,
+        )
+        verify(
+            writeStructsV2Lossless(source, 1, childRange),
+            writeStructsV2Lossless(source, 1, ownerRange),
+            ::applyUpdateV2,
+        )
+    }
+
+    @Test
+    fun losslessStructSelectionsKeepFormattedTextAndEmbedMetadata() {
+        val textSource = YDoc(clientId = 1)
+        val text = textSource.getText("body")
+        text.insert(0, "x")
+        text.format(0, 1, mapOf("bold" to true))
+        val textStruct = getTypeStructs(text).single { struct -> struct.content is ContentString }
+
+        val embedSource = YDoc(clientId = 2)
+        val embedText = embedSource.getText("body")
+        embedText.insertEmbed(0, mapOf("id" to 7L))
+        embedText.format(0, 1, mapOf("italic" to true))
+        val embedStruct = getTypeStructs(embedText).single { struct -> struct.content is ContentEmbed }
+
+        listOf(
+            Triple(encodeStateAsUpdateLossless(textSource), false, mapOf("bold" to true)),
+            Triple(encodeStateAsUpdateV2Lossless(textSource), true, mapOf("bold" to true)),
+            Triple(encodeStateAsUpdateLossless(embedSource), false, mapOf("italic" to true)),
+            Triple(encodeStateAsUpdateV2Lossless(embedSource), true, mapOf("italic" to true)),
+        ).forEach { (completeUpdate, isV2, expectedAttributes) ->
+            assertFalse(completeUpdate.hasPrivateUpdateMagic())
+            val restored = if (isV2) createDocFromUpdateV2(completeUpdate) else createDocFromUpdate(completeUpdate)
+            assertEquals(expectedAttributes, restored.getText("body").toDelta().ops.single().attributes)
+        }
+
+        val selections = listOf(
+            writeStructsLossless(
+                textSource,
+                textStruct.id.client,
+                listOf(IdRange(textStruct.id.clock, textStruct.length)),
+            ) to mapOf("bold" to true),
+            writeStructsV2Lossless(
+                textSource,
+                textStruct.id.client,
+                listOf(IdRange(textStruct.id.clock, textStruct.length)),
+            ) to mapOf("bold" to true),
+            writeStructsLossless(
+                embedSource,
+                embedStruct.id.client,
+                listOf(IdRange(embedStruct.id.clock, embedStruct.length)),
+            ) to mapOf("italic" to true),
+            writeStructsV2Lossless(
+                embedSource,
+                embedStruct.id.client,
+                listOf(IdRange(embedStruct.id.clock, embedStruct.length)),
+            ) to mapOf("italic" to true),
+        )
+
+        selections.forEach { (update, expectedAttributes) ->
+            assertTrue(update.hasPrivateUpdateMagic())
+            val restored = createDocFromUpdateV2(update)
+            assertEquals(expectedAttributes, restored.getText("body").toDelta().ops.single().attributes)
+        }
+    }
+
+    @Test
+    fun unrelatedFormatMarkerDoesNotAuthorizeLossyTextSelection() {
+        val source = YDoc(clientId = 1)
+        val text = source.getText("body")
+        text.insert(0, "xyz")
+        text.format(0, 1, mapOf("bold" to true))
+        text.format(2, 1, mapOf("bold" to true))
+
+        val liveItems = source.typeChildren(text).filterNot(StoreItem::deleted)
+        val formattedText = liveItems.single { item ->
+            val content = item.content as? ItemContent.Text
+            content?.value == "x" && content.attributes == mapOf("bold" to YValue.Bool(true))
+        }
+        val textIndex = liveItems.indexOf(formattedText)
+        val unrelatedMarker = liveItems.drop(textIndex + 1).first { item ->
+            val content = item.content as? ItemContent.NativeTextFormat
+            content?.key == "bold" && content.value == YValue.Bool(true)
+        }
+        val selected = createIdSet().also { ids ->
+            ids.add(formattedText.id)
+            ids.add(unrelatedMarker.id)
+        }
+
+        val selectedV1 = writeStructsFromIdSetLossless(source, selected)
+        val selectedV2 = writeStructsFromIdSetV2Lossless(source, selected)
+
+        assertTrue(selectedV1.hasPrivateUpdateMagic())
+        assertTrue(selectedV2.hasPrivateUpdateMagic())
+        assertEquals(
+            mapOf("bold" to true),
+            createDocFromUpdate(selectedV1).getText("body").toDelta().ops.single().attributes,
+        )
+    }
+
+    @Test
+    fun standardTransformsRejectPrivateInputEvenOnIdentityAndSingleUpdatePaths() {
+        val source = YDoc(clientId = 1)
+        source.getXmlFragment("xml").push(YXmlElement("p"))
+        val privateUpdate = encodeStateAsUpdateLossless(source)
+        val stateVector = encodeStateVector(YDoc(clientId = 2))
+        val representable = YDoc(clientId = 3).also { it.getText("body").insert(0, "ok") }
+        val representablePrivate = LegacyUpdateCodec.encode(
+            UpdateCodec.decode(encodeStateAsUpdate(representable)),
+        )
+
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { mergeUpdates(listOf(privateUpdate)) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { diffUpdate(privateUpdate, stateVector) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { convertUpdateFormat(privateUpdate) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { convertUpdateFormatV1ToV2(privateUpdate) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> {
+            intersectUpdateWithContentIds(privateUpdate, createContentIdsFromUpdate(privateUpdate))
+        }
+        assertTrue(representablePrivate.hasPrivateUpdateMagic())
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { mergeUpdates(listOf(representablePrivate)) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { diffUpdate(representablePrivate, stateVector) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { convertUpdateFormat(representablePrivate) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { convertUpdateFormatV1ToV2(representablePrivate) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { obfuscateUpdate(representablePrivate) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> {
+            intersectUpdateWithContentIds(
+                representablePrivate,
+                createContentIdsFromUpdate(representablePrivate),
+            )
+        }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { mergeUpdatesV2(listOf(representablePrivate)) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { diffUpdateV2(representablePrivate, stateVector) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { convertUpdateFormatV2ToV1(representablePrivate) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { obfuscateUpdateV2(representablePrivate) }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> {
+            intersectUpdateWithContentIdsV2(
+                representablePrivate,
+                createContentIdsFromUpdateV2(representablePrivate),
+            )
+        }
+
+        assertTrue(mergeUpdatesLossless(listOf(privateUpdate)).hasPrivateUpdateMagic())
+        assertTrue(diffUpdateLossless(privateUpdate, stateVector).hasPrivateUpdateMagic())
+        assertTrue(convertUpdateFormatLossless(privateUpdate).hasPrivateUpdateMagic())
+        assertTrue(convertUpdateFormatV1ToV2Lossless(privateUpdate).hasPrivateUpdateMagic())
+        assertTrue(
+            intersectUpdateWithContentIdsLossless(
+                privateUpdate,
+                createContentIdsFromUpdate(privateUpdate),
+            ).hasPrivateUpdateMagic(),
+        )
+    }
+
+    @Test
+    fun updateChannelsSeparateStandardAndLosslessPayloads() {
+        val source = YDoc(clientId = 1)
+        val standard = mutableListOf<ByteArray>()
+        val standardV2 = mutableListOf<ByteArray>()
+        val lossless = mutableListOf<ByteArray>()
+        val onceLossless = mutableListOf<ByteArray>()
+        val onceLosslessV2 = mutableListOf<ByteArray>()
+        val removedLossless = mutableListOf<ByteArray>()
+        val removedLosslessV2 = mutableListOf<ByteArray>()
+        source.onUpdate { update, _, _, _ -> standard.add(update) }
+        source.onUpdateV2 { update, _, _, _ -> standardV2.add(update) }
+        source.onUpdateLossless { update, _, _, _ -> lossless.add(update) }
+        val onceListener: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit = { update, _, _, _ ->
+            onceLossless.add(update)
+        }
+        val removedListener: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit = { update, _, _, _ ->
+            removedLossless.add(update)
+        }
+        val onceV2Listener: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit = { update, _, _, _ ->
+            onceLosslessV2.add(update)
+        }
+        val removedV2Listener: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit = { update, _, _, _ ->
+            removedLosslessV2.add(update)
+        }
+        source.once("updateLossless", onceListener)
+        source.once("updateV2Lossless", onceV2Listener)
+        source.on("updateLossless", removedListener)
+        source.on("updateV2Lossless", removedV2Listener)
+        source.off("updateLossless", removedListener)
+        source.off("updateV2Lossless", removedV2Listener)
+
+        assertFailsWith<UnsupportedYjsStandardUpdateException> {
+            source.getXmlFragment("xml").push(YXmlElement("p"))
+        }
+
+        assertTrue(standard.isEmpty())
+        assertTrue(standardV2.isEmpty())
+        assertEquals(1, lossless.size)
+        assertEquals(1, onceLossless.size)
+        assertEquals(1, onceLosslessV2.size)
+        assertTrue(removedLossless.isEmpty())
+        assertTrue(removedLosslessV2.isEmpty())
+        assertTrue(lossless.single().hasPrivateUpdateMagic())
+        assertTrue(onceLossless.single().hasPrivateUpdateMagic())
+        assertTrue(onceLosslessV2.single().hasPrivateUpdateMagic())
+    }
+
+    private fun ByteArray.hasPrivateUpdateMagic(): Boolean =
+        size >= 4 && this[0] == 'Y'.code.toByte() && this[1] == 'K'.code.toByte() &&
+            this[2] == 'S'.code.toByte() && this[3] in setOf(1.toByte(), 2.toByte(), 3.toByte(), 4.toByte())
 
     private fun DecodedUpdateStruct.structuralFields(): List<Any?> = listOf(
         id,

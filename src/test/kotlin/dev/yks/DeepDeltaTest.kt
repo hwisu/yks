@@ -440,6 +440,7 @@ class DeepDeltaTest {
     fun liveXmlElementApplyDeltaDeepRebuildsAttributesAndLiveChildren() {
         val doc = YDoc(clientId = 1)
         val element = doc.createXmlElement("p")
+        doc.getXmlFragment("root").push(element)
         element.setAttr("stale", true)
         element.push(YXmlText("old"))
 

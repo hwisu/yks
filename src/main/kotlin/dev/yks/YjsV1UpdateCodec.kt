@@ -6,14 +6,50 @@ private const val INFO_HAS_RIGHT_ORIGIN = 0x40
 private const val INFO_HAS_ORIGIN = 0x80
 internal const val YJS_MAX_SAFE_INTEGER: Long = 9_007_199_254_740_991L
 
+/**
+ * Thrown when an upstream-compatible update API cannot represent the requested state as a
+ * genuine Yjs update. Call the corresponding `*Lossless` API when the private YKS envelope is
+ * an acceptable transport.
+ */
+class UnsupportedYjsStandardUpdateException internal constructor(
+    val format: String,
+    detail: String = "update cannot be represented as a genuine Yjs $format update",
+) : IllegalArgumentException(
+    "$detail; use the corresponding *Lossless API",
+)
+
+internal fun requireStandardYjsUpdateInput(update: ByteArray, format: String) {
+    if (update.hasLegacyMagic()) {
+        throw UnsupportedYjsStandardUpdateException(
+            format,
+            "private YKS input is not accepted by a standard Yjs $format update API",
+        )
+    }
+}
+
 /** Byte-exact implementation of the uncompressed Yjs update V1 envelope. */
 internal object UpdateCodec {
     fun encode(update: DocumentUpdate): ByteArray = BinaryEncoder()
         .also { encoder -> write(encoder, update) }
         .toByteArray()
 
+    fun encodeLossless(update: DocumentUpdate): ByteArray = BinaryEncoder()
+        .also { encoder -> writeLossless(encoder, update) }
+        .toByteArray()
+
     fun encodeV2(update: DocumentUpdate): ByteArray {
-        if (!update.allowV1 || !update.isSupportedStandardUpdate(isV2 = true)) return LegacyUpdateCodec.encode(update)
+        update.requireStandardUpdate(isV2 = true)
+        return encodeV2Standard(update)
+    }
+
+    fun encodeV2Lossless(update: DocumentUpdate): ByteArray {
+        if (!update.canEncodeStandard(isV2 = true, preservePrivateMetadata = true)) {
+            return LegacyUpdateCodec.encode(update)
+        }
+        return encodeV2Standard(update)
+    }
+
+    private fun encodeV2Standard(update: DocumentUpdate): ByteArray {
         val encoder = UpdateEncoderV2()
         encoder.forceV2Envelope()
         val itemsByClient = update.items
@@ -51,11 +87,13 @@ internal object UpdateCodec {
     }
 
     fun write(encoder: BinaryEncoder, update: DocumentUpdate): BinaryEncoder {
-        if (!update.allowV1 || !update.isSupportedStandardUpdate(isV2 = false)) {
-            return LegacyUpdateCodec.write(encoder, update)
-        }
+        update.requireStandardUpdate(isV2 = false)
         return writeV1(encoder, update)
     }
+
+    fun writeLossless(encoder: BinaryEncoder, update: DocumentUpdate): BinaryEncoder =
+        if (update.canEncodeStandard(isV2 = false, preservePrivateMetadata = true)) writeV1(encoder, update)
+        else LegacyUpdateCodec.write(encoder, update)
 
     private fun writeV1(encoder: BinaryEncoder, update: DocumentUpdate): BinaryEncoder {
         val itemsByClient = update.items
@@ -107,15 +145,45 @@ internal object UpdateCodec {
 
     fun decode(decoder: BinaryDecoder): DocumentUpdate = decode(decoder.readRemainingBytes())
 
-    fun decodeV2(bytes: ByteArray): DocumentUpdate =
-        if (bytes.isNotEmpty() && bytes[0] != 0.toByte()) decode(bytes) else decodeV2(UpdateDecoderV2(bytes))
+    fun decodeV2(bytes: ByteArray): DocumentUpdate {
+        if (bytes.isNotEmpty() && bytes[0] != 0.toByte()) return decode(bytes)
+        return decodeZeroPrefixedV2OrV1(
+            decodeV2 = { decodeV2(UpdateDecoderV2(bytes)) },
+            decodeV1 = { decode(bytes) },
+        )
+    }
 
     fun parseMetaV2(bytes: ByteArray): UpdateMeta {
         if (bytes.isNotEmpty() && bytes[0] != 0.toByte()) return parseMeta(bytes)
-        val from = linkedMapOf<Long, Long>()
-        val to = linkedMapOf<Long, Long>()
-        decodeV2(UpdateDecoderV2(bytes), from, to)
-        return UpdateMeta(from, to)
+        return decodeZeroPrefixedV2OrV1(
+            decodeV2 = {
+                val from = linkedMapOf<Long, Long>()
+                val to = linkedMapOf<Long, Long>()
+                decodeV2(UpdateDecoderV2(bytes), from, to)
+                UpdateMeta(from, to)
+            },
+            decodeV1 = { parseMeta(bytes) },
+        )
+    }
+
+    /**
+     * A genuine V2 update starts with feature flag zero, but a V1 update with no structs does as
+     * well. Prefer V2 for this API and retry as V1 when the V2 envelope is structurally invalid.
+     * This keeps empty and delete-only V1 updates usable on the compatibility path without
+     * changing the interpretation of any valid V2 envelope.
+     */
+    private inline fun <T> decodeZeroPrefixedV2OrV1(
+        decodeV2: () -> T,
+        decodeV1: () -> T,
+    ): T = try {
+        decodeV2()
+    } catch (v2Error: RuntimeException) {
+        try {
+            decodeV1()
+        } catch (v1Error: RuntimeException) {
+            v2Error.addSuppressed(v1Error)
+            throw v2Error
+        }
     }
 
     fun decodeV2(
@@ -429,7 +497,7 @@ internal object UpdateCodec {
 
     private fun writeTypeContentV2(encoder: UpdateEncoderV2, kind: RootKind, nodeName: String = "") {
         encoder.writeTypeRef(kind.typeRefId())
-        if (kind == RootKind.XmlElement || kind == RootKind.XmlHook) encoder.writeString(nodeName)
+        if (kind == RootKind.XmlElement || kind == RootKind.XmlHook) encoder.writeKey(nodeName)
     }
 
     private fun writeValueContent(encoder: BinaryEncoder, value: YValue) {
@@ -507,7 +575,7 @@ internal object UpdateCodec {
         contentFormatRefNumber -> WireContent.Format(decoder.readKey(), decoder.readJSON())
         contentTypeRefNumber -> {
             val kind = rootKindFromTypeRefId(decoder.readTypeRef())
-            val nodeName = if (kind == RootKind.XmlElement || kind == RootKind.XmlHook) decoder.readString() else ""
+            val nodeName = if (kind == RootKind.XmlElement || kind == RootKind.XmlHook) decoder.readKey() else ""
             WireContent.Type(kind, nestedTypeName(id), nodeName)
         }
         contentAnyRefNumber -> WireContent.AnyContent(List(decoder.readLen().toDecodedCount()) { decoder.readAny() })
@@ -558,6 +626,101 @@ internal object UpdateCodec {
     }
 }
 
+private fun DocumentUpdate.canEncodeStandard(
+    isV2: Boolean,
+    preservePrivateMetadata: Boolean = false,
+): Boolean =
+    allowV1 &&
+        isSupportedStandardUpdate(isV2) &&
+        (
+            !preservePrivateMetadata ||
+                (hasStandardClockContinuitySemantics() && hasStandardContentMetadata())
+        )
+
+/**
+ * Standard text-like content has no field for YKS' rendered/base text attributes. Rendered
+ * attributes are still standard-representable when matching native ContentFormat markers are
+ * present in the same update. A range/id-set selection can omit those markers, in which case a
+ * lossless writer must retain the item metadata in a private envelope.
+ */
+private fun DocumentUpdate.hasStandardContentMetadata(): Boolean {
+    fun metadata(content: ItemContent): Pair<Map<String, YValue>, Map<String, YValue>>? = when (content) {
+        is ItemContent.Text -> content.attributes to content.baseAttributes
+        is ItemContent.TextEmbed -> content.attributes to content.baseAttributes
+        is ItemContent.XmlType -> content.attributes to content.baseAttributes
+        else -> null
+    }
+
+    // Only text sequences can reconstruct rendered attributes from ContentFormat markers.
+    // Deleted content does not participate in that reconstruction and private base attributes
+    // have no standard-wire representation at all.
+    if (items.any { item ->
+            val (attributes, baseAttributes) = metadata(item.content) ?: return@any false
+            baseAttributes.isNotEmpty() ||
+                (item.content.kind !in setOf(RootKind.Text, RootKind.XmlText) && attributes.isNotEmpty()) ||
+                (item.deleted && attributes.isNotEmpty())
+        }
+    ) return false
+
+    val orderingStore = StructStore()
+    items.forEach { item -> check(orderingStore.add(item)) { "duplicate item while checking text metadata: ${item.id}" } }
+    val textParents = items.asSequence()
+        .filter { item ->
+            item.parentSub == null &&
+                item.content.kind in setOf(RootKind.Text, RootKind.XmlText) &&
+                (item.content is ItemContent.Text ||
+                    item.content is ItemContent.TextEmbed ||
+                    item.content is ItemContent.XmlType ||
+                    item.content is ItemContent.NativeTextFormat)
+        }
+        .map { item -> item.parent }
+        .toSet()
+
+    return textParents.all { parent ->
+        val activeByKind = linkedMapOf<RootKind, MutableMap<String, YValue>>()
+        orderingStore.sequence(parent).all itemLoop@{ item ->
+            val content = item.content
+            if (item.deleted) return@itemLoop true
+            when (content) {
+                is ItemContent.NativeTextFormat -> {
+                    val active = activeByKind.getOrPut(content.kind) { linkedMapOf() }
+                    if (content.value == YValue.Null) active.remove(content.key) else active[content.key] = content.value
+                    true
+                }
+                is ItemContent.Text,
+                is ItemContent.TextEmbed,
+                is ItemContent.XmlType -> {
+                    val (attributes, _) = checkNotNull(metadata(content))
+                    attributes == activeByKind[content.kind].orEmpty()
+                }
+                else -> true
+            }
+        }
+    }
+}
+
+/**
+ * Standard Yjs wire always requires the receiver to own every earlier client clock. A local
+ * item marked as not requiring continuity is therefore losslessly representable only while
+ * there is no omitted clock before it. Strict APIs may intentionally adopt standard Yjs
+ * incremental semantics; *Lossless APIs must retain the Kotlin metadata via YKS when needed.
+ */
+private fun DocumentUpdate.hasStandardClockContinuitySemantics(): Boolean =
+    items.groupBy { item -> item.id.client }.values.all { clientItems ->
+        var coveredUntil = 0L
+        clientItems.sortedBy { item -> item.id.clock }.all { item ->
+            val gapChangesSemantics = item.id.clock > coveredUntil && !item.requiresClockContinuity
+            coveredUntil = maxOf(coveredUntil, checkedClockAdd(item.id.clock, item.length))
+            !gapChangesSemantics
+        }
+    }
+
+private fun DocumentUpdate.requireStandardUpdate(isV2: Boolean) {
+    if (!canEncodeStandard(isV2)) {
+        throw UnsupportedYjsStandardUpdateException(if (isV2) "V2" else "V1")
+    }
+}
+
 private fun DocumentUpdate.isSupportedStandardUpdate(isV2: Boolean): Boolean {
     if (!deleteSet.hasYjsSafeRanges()) return false
     if (parentItemIds.values.any { id -> !id.isYjsSafeId() }) return false
@@ -574,18 +737,16 @@ private fun DocumentUpdate.isSupportedStandardUpdate(isV2: Boolean): Boolean {
         val sorted = clientItems.sortedBy { item -> item.id.clock }
         if (!sorted.hasValidTextSurrogatePairs()) return@all false
         val startClock = sorted.first().id.clock
-        var expectedClock = startClock
+        var previousEnd = startClock
         if (sorted.any { item ->
-                val contiguous = item.id.clock == expectedClock
-                expectedClock = checkedClockAdd(item.id.clock, item.length)
-                !contiguous
+                val overlapsPrevious = item.id.clock < previousEnd
+                previousEnd = checkedClockAdd(item.id.clock, item.length)
+                overlapsPrevious
             }
         ) return@all false
         sorted.all { item ->
             item.content.isSupportedStandardContent(isV2) &&
                 item.hasCompatibleV1ParentKind(items, parentKinds) &&
-                (startClock > 0 || item.origin == null || items.containsId(item.origin)) &&
-                (startClock > 0 || item.rightOrigin == null || items.containsId(item.rightOrigin)) &&
                 item.hasResolvableV1Parent(parentItems) &&
                 item.hasConsistentInheritedMetadata(items)
         }
@@ -624,6 +785,7 @@ private fun StoreItem.hasResolvableV1Parent(parentItems: Map<String, Id>): Boole
 private fun StoreItem.hasConsistentInheritedMetadata(items: List<StoreItem>): Boolean {
     val anchor = origin ?: rightOrigin ?: return true
     val anchorItem = items.firstOrNull { candidate -> candidate.containsId(anchor) } ?: return true
+    if (unresolvedParent is UnresolvedYjsParent.Inherit) return true
     return anchorItem.parent == parent && anchorItem.parentSub == parentSub
 }
 
@@ -649,7 +811,8 @@ private fun StoreItem.hasCompatibleV1ParentKind(
                 ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.MapEntry }
         }
         is ItemContent.Value -> nestedKind?.let { kind -> kind == RootKind.Array }
-            ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.Value }
+            ?: items.filter { item -> item.parent == parent && item.parentSub == null }
+                .all { item -> item.content.kind == RootKind.Array }
         is ItemContent.Text,
         is ItemContent.TextEmbed,
         is ItemContent.NativeTextFormat -> nestedKind?.let { kind -> kind == content.kind }
@@ -657,14 +820,23 @@ private fun StoreItem.hasCompatibleV1ParentKind(
                 item.content.kind == content.kind &&
                     (item.content is ItemContent.Text ||
                         item.content is ItemContent.TextEmbed ||
+                        item.content is ItemContent.XmlType ||
                         item.content is ItemContent.NativeTextFormat)
-            }
+        }
         is ItemContent.XmlType -> {
-            val xmlSequenceKinds = setOf(RootKind.XmlFragment, RootKind.XmlElement, RootKind.XmlHook)
+            val xmlSequenceKinds = setOf(
+                RootKind.Array,
+                RootKind.Map,
+                RootKind.Text,
+                RootKind.XmlFragment,
+                RootKind.XmlElement,
+                RootKind.XmlHook,
+                RootKind.XmlText,
+            )
             content.kind in xmlSequenceKinds &&
                 (nestedKind?.let { kind -> kind == content.kind }
                     ?: items.filter { item -> item.parent == parent && item.parentSub == null }.all { item ->
-                        item.content is ItemContent.XmlType && item.content.kind == content.kind
+                        item.content.kind == content.kind
                     })
         }
         is ItemContent.Deleted -> true
@@ -690,8 +862,15 @@ private fun ItemContent.isSupportedStandardContent(isV2: Boolean): Boolean = whe
             if (isV2) value.isSupportedAnyValue(topLevel = false) else value.isSupportedJsonValue()
     is ItemContent.XmlNode -> false
     is ItemContent.XmlType ->
-        kind in setOf(RootKind.XmlFragment, RootKind.XmlElement, RootKind.XmlHook) &&
-            ref.kind in setOf(RootKind.XmlElement, RootKind.XmlHook, RootKind.XmlText)
+        kind in setOf(
+            RootKind.Array,
+            RootKind.Map,
+            RootKind.Text,
+            RootKind.XmlFragment,
+            RootKind.XmlElement,
+            RootKind.XmlHook,
+            RootKind.XmlText,
+        ) && baseAttributes.isEmpty()
     is ItemContent.Deleted -> true
 }
 
@@ -910,16 +1089,19 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
         resolvedKinds[item.id]?.let { return it }
         check(item.id !in seen) { "cyclic Yjs kind reference at ${item.id}" }
         val parentSub = resolveParentSub(item)
+        val ownerKind = when (val reference = item.parent) {
+            is ParentReference.Nested -> (containing(reference.id)?.content as? WireContent.Type)?.kind
+            is ParentReference.Inherit -> containing(reference.id)
+                ?.takeUnless { anchor -> anchor.content is WireContent.Deleted }
+                ?.let { anchor -> resolveKind(anchor, seen + item.id) }
+            is ParentReference.Root -> null
+        }
         val kind = if (parentSub != null) {
-            RootKind.Map
+            ownerKind?.takeIf { it == RootKind.XmlHook } ?: RootKind.Map
         } else {
-            when (val reference = item.parent) {
-                is ParentReference.Nested -> (containing(reference.id)?.content as? WireContent.Type)?.kind
-                is ParentReference.Inherit -> containing(reference.id)
-                    ?.takeUnless { anchor -> anchor.content is WireContent.Deleted }
-                    ?.let { anchor -> resolveKind(anchor, seen + item.id) }
-                is ParentReference.Root -> null
-            } ?: item.content.inferRootKind(parentSub)
+            item.content.definitiveSequenceKindOrNull()
+                ?: ownerKind
+                ?: item.content.inferRootKind(parentSub)
         }
         resolvedKinds[item.id] = kind
         return kind
@@ -989,6 +1171,18 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
     }
 }
 
+private fun WireContent.definitiveSequenceKindOrNull(): RootKind? = when (this) {
+    is WireContent.StringContent,
+    is WireContent.Embed,
+    is WireContent.Format -> RootKind.Text
+    is WireContent.Json,
+    is WireContent.Binary,
+    is WireContent.AnyContent -> RootKind.Array
+    is WireContent.Deleted,
+    is WireContent.Doc,
+    is WireContent.Type -> null
+}
+
 private fun WireContent.inferRootKind(parentSub: String?): RootKind = when {
     parentSub != null -> RootKind.Map
     this is WireContent.StringContent || this is WireContent.Embed || this is WireContent.Format -> RootKind.Text
@@ -1008,7 +1202,15 @@ private fun WireContent.toItemContents(kind: RootKind): List<ItemContent> = when
     is WireContent.Json -> values.map { value -> value.toSequenceContent(kind) }
     is WireContent.AnyContent -> values.map { value -> value.toSequenceContent(kind) }
     is WireContent.Type -> listOf(
-        if (kind == RootKind.XmlFragment || kind == RootKind.XmlElement || kind == RootKind.XmlHook) {
+        if (
+            kind == RootKind.XmlFragment ||
+            kind == RootKind.XmlElement ||
+            kind == RootKind.XmlHook ||
+            kind == RootKind.Array ||
+            kind == RootKind.Map ||
+            kind == RootKind.Text ||
+            kind == RootKind.XmlText
+        ) {
             ItemContent.XmlType(YValue.TypeRef(this.kind, name), nodeName, kind)
         } else {
             val value = YValue.TypeRef(this.kind, name)
@@ -1024,12 +1226,12 @@ private fun WireContent.Format.toItemContent(kind: RootKind): ItemContent =
 private fun Any?.toSequenceContent(kind: RootKind): ItemContent {
     val value = YValue.from(this)
     return when (kind) {
-        RootKind.Map -> ItemContent.MapEntry(value)
+        RootKind.Map,
+        RootKind.XmlHook -> ItemContent.MapEntry(value)
         RootKind.Text,
         RootKind.XmlText -> ItemContent.TextEmbed(value, kind = kind)
         RootKind.XmlFragment,
-        RootKind.XmlElement,
-        RootKind.XmlHook -> ItemContent.XmlNode(xmlNodeFromDeltaValue(this).toValue(), kind)
+        RootKind.XmlElement -> ItemContent.XmlNode(xmlNodeFromDeltaValue(this).toValue(), kind)
         RootKind.Array -> ItemContent.Value(value)
     }
 }
@@ -1102,4 +1304,4 @@ private fun gcParentName(client: Long): String = "__yjs_gc__:$client"
 
 private fun ByteArray.hasLegacyMagic(): Boolean =
     size >= 4 && this[0] == 'Y'.code.toByte() && this[1] == 'K'.code.toByte() &&
-        this[2] == 'S'.code.toByte() && this[3] in setOf(1.toByte(), 2.toByte(), 3.toByte())
+        this[2] == 'S'.code.toByte() && this[3] in setOf(1.toByte(), 2.toByte(), 3.toByte(), 4.toByte())

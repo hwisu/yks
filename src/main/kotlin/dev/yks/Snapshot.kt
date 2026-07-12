@@ -1,8 +1,15 @@
 package dev.yks
 
+data class SnapshotRootType(
+    val kind: RootKind,
+    val xmlElementNodeName: String? = null,
+)
+
 data class Snapshot(
     val ds: IdSet,
     val sv: StateVector,
+    /** Local adaptation metadata; standard snapshot encoding intentionally contains only ds/sv. */
+    val roots: Map<String, SnapshotRootType> = emptyMap(),
 ) {
     constructor(deleteSet: DeleteSet, stateVector: StateVector) : this(deleteSet.toIdSet(), stateVector.toMap())
 
@@ -17,7 +24,11 @@ fun createSnapshot(deleteSet: IdSet, stateVector: StateVector): Snapshot =
 
 val emptySnapshot: Snapshot = createSnapshot(createIdSet(), emptyMap())
 
-fun snapshot(doc: YDoc): Snapshot = createSnapshot(doc.deleteSet(), doc.stateVector())
+fun snapshot(doc: YDoc): Snapshot = Snapshot(
+    ds = doc.deleteSet().toIdSet(),
+    sv = doc.stateVector().toMap(),
+    roots = doc.concreteRootMetadata(),
+)
 
 @Suppress("UNCHECKED_CAST")
 fun splitSnapshotAffectedStructs(transaction: YTransaction, snapshot: Snapshot) {
@@ -33,6 +44,7 @@ fun splitSnapshotAffectedStructs(transaction: YTransaction, snapshot: Snapshot) 
 
 fun createDocFromSnapshot(originDoc: YDoc, snapshot: Snapshot, newDoc: YDoc = YDoc()): YDoc {
     check(!originDoc.gc) { "Garbage-collection must be disabled in `originDoc`!" }
+    newDoc.preMaterializeRoots(snapshot.roots)
     newDoc.applyUpdate(originDoc.encodeSnapshotAsUpdate(snapshot), origin = "snapshot")
     return newDoc
 }

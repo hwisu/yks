@@ -121,7 +121,7 @@ class YTypeApiAliasTest {
         assertEquals(listOf("a", 1L, mapOf("flag" to true), null, nested), array.toArray())
         assertEquals(mapOf("kind" to "external"), nested.toMap())
         assertTrue(nested.doc === doc)
-        assertFalse(nested === externalNested)
+        assertSame(externalNested, nested)
 
         val remote = createDocFromUpdate(doc.encodeStateAsUpdate())
         assertEquals(listOf("a", 1L, mapOf("flag" to true), null, mapOf("kind" to "external")), remote.getArray("items").toJson())
@@ -260,7 +260,7 @@ class YTypeApiAliasTest {
         assertEquals(xml.toDeltaDeep(), xmlCopy.toDeltaDeep())
 
         val remote = YDoc(clientId = 3)
-        remote.applyUpdate(target.encodeStateAsUpdate())
+        remote.applyUpdate(target.encodeStateAsUpdateLossless())
 
         assertEquals(arrayCopy.toDeltaDeep(), remote.getArray("items").toDeltaDeep())
         assertEquals(textCopy.toDeltaDeep(), remote.getText("body").toDeltaDeep())
@@ -289,7 +289,7 @@ class YTypeApiAliasTest {
         insertedText.insert(insertedText.length, "!")
         insertedXml.push(YXmlText("tail"))
 
-        target.applyUpdate(source.encodeStateAsUpdate())
+        target.applyUpdate(source.encodeStateAsUpdateLossless())
         val remoteRoot = target.getMap("root")
 
         assertEquals(mapOf("after" to "insert", "number" to 1L, "string" to "hello"), (remoteRoot.getAttr("m1") as YMap).toMap())

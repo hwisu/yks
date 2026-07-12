@@ -420,6 +420,8 @@ class NestedTypeTest {
 
         right.applyUpdate(left.encodeStateAsUpdate())
 
+        assertEquals(emptyMap(), right.toJson())
+        right.getMap("root")
         assertEquals(
             mapOf("root" to mapOf("child" to mapOf("value" to "created-before-parent-ref"))),
             right.toJson(),

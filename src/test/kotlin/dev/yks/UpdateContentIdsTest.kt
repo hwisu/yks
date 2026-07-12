@@ -194,7 +194,7 @@ class UpdateContentIdsTest {
     }
 
     @Test
-    fun intersectUpdateWithContentIdsKeepsSparseMidStreamSelections() {
+    fun losslessIntersectUpdateWithContentIdsKeepsSparseMidStreamSelections() {
         val source = YDoc(clientId = 1)
         source.transact {
             repeat(10) { index -> source.getMap("m").setAttr("k$index", index) }
@@ -202,7 +202,7 @@ class UpdateContentIdsTest {
         val update = source.encodeStateAsUpdate()
         val contentIds = createContentIdsFromUpdate(update)
 
-        val chunk = intersectUpdateWithContentIds(
+        val chunk = intersectUpdateWithContentIdsLossless(
             update,
             ContentIds(
                 inserts = createIdSet().also { it.add(1, 5, 2) },
@@ -215,7 +215,7 @@ class UpdateContentIdsTest {
         assertEquals(listOf(1L, 1L), structs.map { it.length })
         assertEquals(mapOf("k5" to 5L, "k6" to 6L), createDocFromUpdate(chunk).getMap("m").toMap())
 
-        val splitChunk = intersectUpdateWithContentIds(
+        val splitChunk = intersectUpdateWithContentIdsLossless(
             update,
             ContentIds(
                 inserts = createIdSet().also { selected ->
@@ -335,7 +335,8 @@ class UpdateContentIdsTest {
         )
         val target = createDocFromUpdateV2(filtered)
 
-        assertEquals(mapOf("items" to listOf("right")), target.toJson())
+        assertEquals(emptyMap(), target.toJson())
+        assertEquals(listOf("right"), target.getArray("items").toList())
     }
 
     private fun idSet(vararg triples: Long): IdSet {

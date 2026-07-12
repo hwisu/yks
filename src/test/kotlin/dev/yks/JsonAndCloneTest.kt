@@ -25,7 +25,20 @@ class JsonAndCloneTest {
     }
 
     @Test
-    fun documentToJsonDiscoversRootsFromRemoteUpdates() {
+    fun documentJsonUsesJavaScriptObjectPropertyOrderForRootNames() {
+        val doc = YDoc(clientId = 1)
+        doc.getArray("10")
+        doc.getArray("2")
+        doc.getArray("01")
+        doc.getArray("root")
+
+        val expected = listOf("2", "10", "01", "root")
+        assertEquals(expected, doc.toJson().keys.toList())
+        assertEquals(expected, doc.toJSON().keys.toList())
+    }
+
+    @Test
+    fun documentToJsonSkipsRemoteRootsUntilConcreteGettersOpenThem() {
         val source = YDoc(clientId = 1)
         source.getArray("array").push(listOf("remote"))
         source.getMap("map").set("count", 1)
@@ -34,7 +47,14 @@ class JsonAndCloneTest {
         val target = YDoc(clientId = 2)
         target.applyUpdate(source.encodeStateAsUpdate())
 
+        assertEquals(emptyMap(), target.toJson())
+        assertEquals(emptyMap(), target.toJSON())
+        target.getArray("array")
+        assertEquals(mapOf("array" to listOf("remote")), target.toJson())
+        target.getMap("map")
+        target.getText("text")
         assertEquals(source.toJson(), target.toJson())
+        assertEquals(source.toJSON(), target.toJSON())
     }
 
     @Test
@@ -79,6 +99,8 @@ class JsonAndCloneTest {
 
         val clone = cloneDoc(source)
 
+        clone.getText("body")
+        clone.getArray("items")
         assertEquals(source.toJson(), clone.toJson())
         assertEquals(source.getText("body").toDelta(), clone.getText("body").toDelta())
 
@@ -122,6 +144,7 @@ class JsonAndCloneTest {
         val cloned = cloneDoc(source, options.copy(clientId = 9, guid = "cloned-doc"))
 
         listOf(created, createdV2, cloned).forEach { doc ->
+            doc.getText("body")
             assertEquals(source.toJson(), doc.toJson())
             assertEquals("collection", doc.collectionid)
             assertFalse(doc.gc)
@@ -149,6 +172,8 @@ class JsonAndCloneTest {
 
         val doc = createDocFromUpdate(mergeUpdates(listOf(left.encodeStateAsUpdate(), right.encodeStateAsUpdate())))
 
+        assertEquals(emptyMap(), doc.toJson())
+        doc.getArray("items")
         assertEquals(mapOf("items" to listOf("left", "right")), doc.toJson())
     }
 }

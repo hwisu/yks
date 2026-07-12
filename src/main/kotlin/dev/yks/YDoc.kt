@@ -73,11 +73,23 @@ class YDoc(
 
     val store: StructStore = StructStore(this)
     private val rootTypes = linkedMapOf<String, AbstractYType>()
+    private val unopenedRootEntries = linkedMapOf<String, YUnopenedRoot>()
+    private val shareView: Map<String, AbstractYType> = object : AbstractMap<String, AbstractYType>() {
+        override val entries: Set<Map.Entry<String, AbstractYType>>
+            get() = rootNames().mapTo(linkedSetOf()) { name ->
+                java.util.AbstractMap.SimpleImmutableEntry(name, sharedRootEntry(name)!!)
+            }
+
+        override fun get(key: String): AbstractYType? = sharedRootEntry(key)
+
+        override fun containsKey(key: String): Boolean = key in rootNames()
+    }
     private val nestedTypes = linkedMapOf<String, AbstractYType>()
     private val nestedNames = linkedSetOf<String>()
     private val referencedNestedNames = linkedSetOf<String>()
     private val pendingNestedReferenceStack = mutableListOf<MutableSet<String>>()
     private val pendingStoreParentStack = mutableListOf<String?>()
+    private val pendingPreliminaryAttachments = linkedMapOf<String, AbstractYType>()
     private val subdocsByInstanceId = linkedMapOf<String, YDoc>()
     private val subdocObservers = mutableListOf<(YSubdocEvent) -> Unit>()
     private val subdocEventListeners = mutableListOf<(YSubdocEvent, YDoc, YTransactionEvent?) -> Unit>()
@@ -109,6 +121,8 @@ class YDoc(
     private val updateListeners = mutableListOf<(ByteArray, Any?) -> Unit>()
     private val updateEventListeners = mutableListOf<(ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit>()
     private val updateV2EventListeners = mutableListOf<(ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit>()
+    private val updateLosslessEventListeners = mutableListOf<(ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit>()
+    private val updateV2LosslessEventListeners = mutableListOf<(ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit>()
     private val transactionListeners = mutableListOf<(YTransactionEvent) -> Unit>()
     private var currentTransaction: Transaction? = null
     private var isEmittingTransactions = false
@@ -118,13 +132,14 @@ class YDoc(
     internal val subdocInstanceId: String = randomGuid()
 
     val share: Map<String, AbstractYType>
-        get() = rootNames().mapNotNull { name -> rootType(name)?.let { type -> name to type } }.toMap()
+        get() = shareView
 
     @get:JvmName("getSubdocsProperty")
     val subdocs: Set<YDoc>
         get() = getSubdocs()
 
-    operator fun get(name: String): AbstractYType = rootType(name) ?: getArray(name)
+    operator fun get(name: String): AbstractYType =
+        rootType(name) ?: unopenedRoot(name) ?: getArray(name)
 
     fun get(name: String, kind: RootKind): AbstractYType = when (kind) {
         RootKind.Array -> getArray(name)
@@ -138,7 +153,7 @@ class YDoc(
 
     fun get(name: String, typeRef: Int): AbstractYType = get(name, rootKindFromTypeRefId(typeRef))
 
-    fun getOrNull(name: String): AbstractYType? = rootType(name)
+    fun getOrNull(name: String): AbstractYType? = rootType(name) ?: unopenedRoot(name)
 
     fun get(): YArray = getArray("")
 
@@ -178,21 +193,15 @@ class YDoc(
         createNestedType(RootKind.XmlText) { nestedName -> YXmlTextType(this, nestedName) }
 
     fun toJson(): Map<String, Any?> {
-        return rootNames()
-            .mapNotNull { name ->
-                val type = rootType(name) ?: return@mapNotNull null
-                name to type.toJson()
-            }
-            .toMap()
+        return rootTypes
+            .mapValues { (_, type) -> type.toJson() }
+            .inJavaScriptObjectKeyOrder()
     }
 
     fun toJSON(): Map<String, Any?> {
-        return rootNames()
-            .mapNotNull { name ->
-                val type = rootType(name) ?: return@mapNotNull null
-                name to type.toJSON()
-            }
-            .toMap()
+        return rootTypes
+            .mapValues { (_, type) -> type.toJSON() }
+            .inJavaScriptObjectKeyOrder()
     }
 
     fun load() {
@@ -214,7 +223,7 @@ class YDoc(
     fun destroy() {
         if (isDestroyed) return
         val childSubdocs = getSubdocs()
-        val sharedTypes = rootTypes.values.distinctBy { it.name }
+        val sharedTypes = (rootTypes.values + unopenedRootEntries.values).distinctBy { it.name }
         isDestroyed = true
         sharedTypes.forEach { type -> type.destroy() }
         childSubdocs.forEach { subdoc ->
@@ -245,6 +254,8 @@ class YDoc(
         updateListeners.clear()
         updateEventListeners.clear()
         updateV2EventListeners.clear()
+        updateLosslessEventListeners.clear()
+        updateV2LosslessEventListeners.clear()
         transactionListeners.clear()
     }
 
@@ -275,6 +286,8 @@ class YDoc(
         when (eventName) {
             "update" -> onUpdate(listener)
             "updateV2" -> onUpdateV2(listener)
+            "updateLossless" -> onUpdateLossless(listener)
+            "updateV2Lossless" -> onUpdateV2Lossless(listener)
             else -> error("event '$eventName' does not provide update callback arguments")
         }
 
@@ -392,6 +405,8 @@ class YDoc(
         when (eventName) {
             "update" -> updateEventListeners.remove(listener)
             "updateV2" -> updateV2EventListeners.remove(listener)
+            "updateLossless" -> updateLosslessEventListeners.remove(listener)
+            "updateV2Lossless" -> updateV2LosslessEventListeners.remove(listener)
         }
     }
 
@@ -507,6 +522,14 @@ class YDoc(
         return Subscription { updateListeners.remove(listener) }
     }
 
+    fun observeUpdatesLossless(listener: (update: ByteArray, origin: Any?) -> Unit): Subscription {
+        val wrapper: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit = { update, origin, _, _ ->
+            listener(update, origin)
+        }
+        updateLosslessEventListeners.add(wrapper)
+        return Subscription { updateLosslessEventListeners.remove(wrapper) }
+    }
+
     fun onUpdate(listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit): Subscription {
         updateEventListeners.add(listener)
         return Subscription { updateEventListeners.remove(listener) }
@@ -515,6 +538,20 @@ class YDoc(
     fun onUpdateV2(listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit): Subscription {
         updateV2EventListeners.add(listener)
         return Subscription { updateV2EventListeners.remove(listener) }
+    }
+
+    fun onUpdateLossless(
+        listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit,
+    ): Subscription {
+        updateLosslessEventListeners.add(listener)
+        return Subscription { updateLosslessEventListeners.remove(listener) }
+    }
+
+    fun onUpdateV2Lossless(
+        listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit,
+    ): Subscription {
+        updateV2LosslessEventListeners.add(listener)
+        return Subscription { updateV2LosslessEventListeners.remove(listener) }
     }
 
     fun observeBeforeAllTransactions(listener: () -> Unit): Subscription {
@@ -566,7 +603,7 @@ class YDoc(
         val items = store.allItems()
             .filter { item -> item.id.clock < (snapshot.sv[item.id.client] ?: 0) }
             .map { item -> item.copy(deleted = snapshot.ds.hasId(item.id)) }
-        return UpdateCodec.encode(
+        return UpdateCodec.encodeLossless(
             DocumentUpdate(items, snapshot.deleteSet, store.parentItemIds(), store.parentKinds()),
         )
     }
@@ -588,6 +625,25 @@ class YDoc(
             ?.let { pendingUpdate -> diffUpdate(pendingUpdate, encodedStateVector) }
             ?.let(updates::add)
         return if (updates.size == 1) updates.single() else mergeUpdates(updates)
+    }
+
+    fun encodeStateAsUpdateLossless(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
+        val stateVector = decodeStateVector(encodedStateVector)
+        val updates = mutableListOf(
+            UpdateCodec.encodeLossless(
+                DocumentUpdate(
+                    store.itemsSince(stateVector),
+                    store.deleteSet(),
+                    store.parentItemIds(),
+                    store.parentKinds(),
+                ),
+            ),
+        )
+        pendingDeleteSetUpdate()?.let(updates::add)
+        pendingStructsView()?.update
+            ?.let { pendingUpdate -> diffUpdateLossless(pendingUpdate, encodedStateVector) }
+            ?.let(updates::add)
+        return if (updates.size == 1) updates.single() else mergeUpdatesLossless(updates)
     }
 
     internal fun encodeStateAsUpdateV2(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
@@ -612,6 +668,30 @@ class YDoc(
             ?.let(UpdateCodec::encodeV2)
             ?.let(updates::add)
         return if (updates.size == 1) updates.single() else mergeUpdatesV2(updates)
+    }
+
+    internal fun encodeStateAsUpdateV2Lossless(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
+        val stateVector = decodeStateVector(encodedStateVector)
+        val updates = mutableListOf(
+            UpdateCodec.encodeV2Lossless(
+                DocumentUpdate(
+                    store.itemsSince(stateVector),
+                    store.deleteSet(),
+                    store.parentItemIds(),
+                    store.parentKinds(),
+                ),
+            ),
+        )
+        pendingDeleteSetUpdate()
+            ?.let(UpdateCodec::decode)
+            ?.let(UpdateCodec::encodeV2Lossless)
+            ?.let(updates::add)
+        pendingStructsView()?.update
+            ?.let { pendingUpdate -> diffUpdateLossless(pendingUpdate, encodedStateVector) }
+            ?.let(UpdateCodec::decode)
+            ?.let(UpdateCodec::encodeV2Lossless)
+            ?.let(updates::add)
+        return if (updates.size == 1) updates.single() else mergeUpdatesV2Lossless(updates)
     }
 
     fun applyUpdate(update: ByteArray, origin: Any? = null) {
@@ -659,7 +739,7 @@ class YDoc(
         if (pendingItems.isEmpty()) return null
         return PendingStructs(
             missing = pendingItems.missingDependencies(),
-            update = UpdateCodec.encode(
+            update = UpdateCodec.encodeLossless(
                 DocumentUpdate(
                     pendingItems.toList(),
                     DeleteSet.empty(),
@@ -680,7 +760,7 @@ class YDoc(
     internal fun pendingDeleteSetUpdate(): ByteArray? {
         val pendingIds = diffIdSet(pendingDeletes.toIdSet(), store.deleteSet().toIdSet())
         if (pendingIds.isEmpty()) return null
-        return UpdateCodec.encode(DocumentUpdate(emptyList(), pendingIds.toDeleteSet()))
+        return UpdateCodec.encodeLossless(DocumentUpdate(emptyList(), pendingIds.toDeleteSet()))
     }
 
     internal fun setPendingDeleteSetUpdate(update: ByteArray?) {
@@ -758,21 +838,7 @@ class YDoc(
         }?.id
     }
 
-    internal fun rootType(name: String): AbstractYType? {
-        rootTypes[name]?.let { return it }
-        val kind = store.allItems().firstOrNull { it.parent == name && it.parentSub == null }?.content?.kind
-            ?: store.allItems().firstOrNull { it.parent == name }?.content?.kind
-            ?: return null
-        return when (kind) {
-            RootKind.Array -> getArray(name)
-            RootKind.Map -> getMap(name)
-            RootKind.Text -> getText(name)
-            RootKind.XmlFragment -> getXmlFragment(name)
-            RootKind.XmlElement -> getXmlElement(name, name)
-            RootKind.XmlHook,
-            RootKind.XmlText -> error("XML node type refs cannot be document roots")
-        }
-    }
+    internal fun rootType(name: String): AbstractYType? = rootTypes[name]
 
     fun rootNames(): Set<String> {
         return (rootTypes.keys + store.allItems().map { it.parent })
@@ -781,12 +847,25 @@ class YDoc(
             .toSortedSet()
     }
 
+    private fun sharedRootEntry(name: String): AbstractYType? {
+        rootTypes[name]?.let { return it }
+        return unopenedRoot(name)
+    }
+
+    private fun unopenedRoot(name: String): YUnopenedRoot? {
+        if (name !in rootNames()) return null
+        return unopenedRootEntries.getOrPut(name) { YUnopenedRoot(this, name) }
+    }
+
+    internal fun concreteRootTypes(): Map<String, AbstractYType> = rootTypes.toMap()
+
     internal fun knownParentKinds(): Map<String, RootKind> = buildMap {
         rootTypes.forEach { (name, type) -> put(name, type.kind) }
         nestedTypes.forEach { (name, type) -> put(name, type.kind) }
     }
 
     internal fun storeValue(value: Any?, parent: String? = null): YValue {
+        preflightNestedValue(value)
         pendingNestedReferenceStack.add(linkedSetOf())
         pendingStoreParentStack.add(parent)
         return try {
@@ -794,6 +873,42 @@ class YDoc(
         } finally {
             pendingStoreParentStack.removeAt(pendingStoreParentStack.lastIndex)
             pendingNestedReferenceStack.removeAt(pendingNestedReferenceStack.lastIndex)
+        }
+    }
+
+    internal fun preflightNestedValue(value: Any?) {
+        validateStoreValue(value)
+        preparePreliminaryGraph(value)
+    }
+
+    /** Preflights only shared-type identity/binding for APIs that transform non-YValue inputs. */
+    internal fun preflightSharedTypes(value: Any?) {
+        preparePreliminaryGraph(value)
+    }
+
+    private fun validateStoreValue(value: Any?) {
+        when (value) {
+            null,
+            is YValue,
+            is AbstractYType,
+            is Boolean,
+            is Byte,
+            is Short,
+            is Int,
+            is Long,
+            is java.math.BigInteger,
+            is Float,
+            is Double,
+            is String,
+            is ByteArray -> Unit
+            is YDoc -> require(value !== this) { "a document cannot contain itself as a subdoc" }
+            is List<*> -> value.forEach(::validateStoreValue)
+            is Array<*> -> value.forEach(::validateStoreValue)
+            is Map<*, *> -> value.forEach { (key, nested) ->
+                require(key is String) { "YValue map keys must be strings" }
+                validateStoreValue(nested)
+            }
+            else -> error("unsupported YValue type: ${value::class.qualifiedName}")
         }
     }
 
@@ -881,8 +996,7 @@ class YDoc(
         return currentMapItem(parent, key)
             ?.takeIf { item -> !item.deleted }
             ?.content
-            ?.let { it as? ItemContent.MapEntry }
-            ?.value
+            ?.mapContentValue()
     }
 
     internal fun visibleMap(parent: String): Map<String, YValue> {
@@ -891,6 +1005,11 @@ class YDoc(
             .toMap(linkedMapOf())
     }
 
+    private fun visibleMapItemIds(parent: String): Map<String, Id> =
+        mapKeysInInsertionOrder(parent)
+            .mapNotNull { key -> currentVisibleMapItemId(parent, key)?.let { key to it } }
+            .toMap(linkedMapOf())
+
     internal fun mapValueAtSnapshot(type: AbstractYType, key: String, snapshot: Snapshot): YValue? {
         require(type.doc === this) { "type must belong to this document" }
         val item = mapItemOrder(type.name, key)
@@ -898,8 +1017,7 @@ class YDoc(
             .firstOrNull { item -> item.id.clock < (snapshot.sv[item.id.client] ?: 0) }
             ?: return null
         if (snapshot.ds.hasId(item.id)) return null
-        val content = item.content as? ItemContent.MapEntry ?: return null
-        return content.value
+        return item.content.mapContentValue()
     }
 
     internal fun mapAtSnapshot(type: AbstractYType, snapshot: Snapshot): Map<String, YValue> {
@@ -942,6 +1060,12 @@ class YDoc(
     private fun rememberMapKey(item: StoreItem) {
         val key = item.parentSub ?: return
         mapKeyOrders.getOrPut(item.parent) { linkedSetOf() }.add(key)
+    }
+
+    private fun ItemContent.mapContentValue(): YValue? = when (this) {
+        is ItemContent.MapEntry -> value
+        is ItemContent.XmlType -> ref.takeIf { kind == RootKind.Map || kind == RootKind.XmlHook }
+        else -> null
     }
 
     internal fun mapItemOrder(parent: String, key: String): List<StoreItem> {
@@ -1017,7 +1141,13 @@ class YDoc(
     }
 
     internal fun arrayAtSnapshot(type: YArray, snapshot: Snapshot): List<Any?> =
-        sequenceAtSnapshot(type, snapshot).map { item -> valueToAny((item.content as ItemContent.Value).value) }
+        sequenceAtSnapshot(type, snapshot).map(::arrayItemValue)
+
+    internal fun arrayItemValue(item: StoreItem): Any? = when (val content = item.content) {
+        is ItemContent.Value -> valueToAny(content.value)
+        is ItemContent.XmlType -> typeFromXmlType(content)
+        else -> error("item content is not an array value: ${content::class.simpleName}")
+    }
 
     internal fun textDeltaAtSnapshot(type: YText, snapshot: Snapshot): YTextDelta {
         val delta = YTextDelta()
@@ -1052,6 +1182,12 @@ class YDoc(
                     delta.insertEmbed(valueToAny(content.value), attrs)
                     pendingAttributes = null
                 }
+                is ItemContent.XmlType -> {
+                    val attrs = textAttributesToPublic(content.textAttributesOrEmpty())
+                    flush()
+                    delta.insertEmbed(typeFromXmlType(content), attrs)
+                    pendingAttributes = null
+                }
                 else -> Unit
             }
         }
@@ -1073,6 +1209,7 @@ class YDoc(
             when (val content = item.content) {
                 is ItemContent.Text -> content.value
                 is ItemContent.TextEmbed -> valueToAny(content.value)
+                is ItemContent.XmlType -> typeFromXmlType(content)
                 else -> null
             }
         }
@@ -1080,8 +1217,8 @@ class YDoc(
     internal fun xmlFragmentAtSnapshot(type: YXmlFragment, snapshot: Snapshot): List<Any?> =
         sequenceAtSnapshot(type, snapshot).map { item -> xmlNodeAtSnapshot(item.content, snapshot).toJson() }
 
-    internal fun xmlFragmentArrayAtSnapshot(type: YXmlFragment, snapshot: Snapshot): List<YXmlNode> =
-        sequenceAtSnapshot(type, snapshot).map { item -> xmlNodeAtSnapshot(item.content, snapshot) }
+    internal fun xmlFragmentArrayAtSnapshot(type: YXmlFragment, snapshot: Snapshot): List<Any?> =
+        sequenceAtSnapshot(type, snapshot).map { item -> xmlArrayValueAtSnapshot(item.content) }
 
     internal fun xmlFragmentStringAtSnapshot(
         type: YXmlFragment,
@@ -1090,7 +1227,7 @@ class YDoc(
     ): String = renderXmlFragmentString(
         name = type.name,
         attrs = mapAtSnapshot(type, snapshot).mapValues { (_, value) -> valueToAny(value) },
-        nodes = xmlFragmentArrayAtSnapshot(type, snapshot),
+        nodes = sequenceAtSnapshot(type, snapshot).map { item -> xmlNodeAtSnapshot(item.content, snapshot) },
         forceTag = forceTag,
     )
 
@@ -1099,17 +1236,25 @@ class YDoc(
         return xmlChildrenToDelta(nodes)
     }
 
+    /** Upstream list/delta snapshot helpers expose every ContentType as the same live instance. */
+    private fun xmlArrayValueAtSnapshot(content: ItemContent): Any? = when (content) {
+        is ItemContent.XmlNode -> content.value.toNode()
+        is ItemContent.XmlType -> typeFromXmlType(content)
+        else -> error("item content is not an XML snapshot child: ${content::class.simpleName}")
+    }
+
     private fun xmlNodeAtSnapshot(content: ItemContent, snapshot: Snapshot): YXmlNode = when (content) {
         is ItemContent.XmlNode -> content.value.toNode()
         is ItemContent.XmlType -> when (val type = typeFromXmlType(content)) {
+            is YXmlTextType -> YXmlSnapshotText(textDeltaAtSnapshot(type, snapshot))
             is YText -> YXmlText(textStringAtSnapshot(type, snapshot))
             is YXmlElementType -> YXmlElement(type.nodeName).also { element ->
                 element.setAttrs(type.getAttrs(snapshot))
                 element.push(sequenceAtSnapshot(type, snapshot).map { item -> xmlNodeAtSnapshot(item.content, snapshot) })
             }
-            is YXmlTextType -> YXmlText(type.toString())
             is YXmlHook -> YXmlText(type.toString())
-            else -> error("unsupported XML snapshot child type: ${type::class.simpleName}")
+            is YXmlFragment -> YXmlText(xmlFragmentStringAtSnapshot(type, snapshot))
+            else -> YXmlText("[object Object]")
         }
         else -> error("item content is not an XML snapshot child: ${content::class.simpleName}")
     }
@@ -1156,7 +1301,8 @@ class YDoc(
                 reapplyTextFormats(item.parent)
             }
             currentTransaction?.addedItems?.add(item)
-            currentTransaction?.changedParents?.add(item.parent)
+            currentTransaction?.markChanged(item.parent, item.parentSub)
+            attachAndReplayPreliminaryTypes(item.content, item.id)
             deletePreviousMapCurrentIfSuperseded(item, previousMapCurrent)
         }
     }
@@ -1167,7 +1313,7 @@ class YDoc(
             check(store.add(item)) { "duplicate local item id: ${item.id}" }
             applyTextFormat(item)
             currentTransaction?.addedItems?.add(item)
-            currentTransaction?.changedParents?.add(item.parent)
+            currentTransaction?.markChanged(item.parent, item.parentSub)
         }
     }
 
@@ -1270,7 +1416,7 @@ class YDoc(
                     previousRestoredByParent[parentKey] = sourcePosition to item.id
                 }
                 currentTransaction?.addedItems?.add(item)
-                currentTransaction?.changedParents?.add(item.parent)
+                currentTransaction?.markChanged(item.parent, item.parentSub)
             }
             rememberRedoneRangeEnds(restoredPairs, originalPositions)
             restored.forEachIndexed { index, item ->
@@ -1291,7 +1437,7 @@ class YDoc(
                 .forEach { (parent, kind) ->
                     captureParentBefore(parent, kind)
                     reapplyTextFormats(parent)
-                    currentTransaction?.changedParents?.add(parent)
+                    currentTransaction?.markChanged(parent, null)
                 }
         }
         return restored
@@ -1319,7 +1465,7 @@ class YDoc(
             currentTransaction?.deleteSet?.addAll(expandedDeleteSet)
             newlyDeleted.forEach {
                 currentTransaction?.deletedItems?.add(it)
-                currentTransaction?.changedParents?.add(it.parent)
+                currentTransaction?.markChanged(it.parent, it.parentSub)
             }
             newlyDeleted
                 .filter { item -> item.content.isTextFormatControl() }
@@ -1327,7 +1473,7 @@ class YDoc(
                 .toSet()
                 .forEach { parent ->
                     reapplyTextFormats(parent)
-                    currentTransaction?.changedParents?.add(parent)
+                    currentTransaction?.markChanged(parent, null)
                 }
         }
     }
@@ -1393,7 +1539,7 @@ class YDoc(
                         }
                         rememberNestedRefs(item.content)
                         currentTransaction?.addedItems?.add(item)
-                        currentTransaction?.changedParents?.add(item.parent)
+                        currentTransaction?.markChanged(item.parent, item.parentSub)
                         if (wasPendingDelete) {
                             currentTransaction?.deleteSet?.add(item.id, item.length)
                             currentTransaction?.deletedItems?.add(item.copy(deleted = false))
@@ -1423,10 +1569,14 @@ class YDoc(
                 val parentItem = store.getStoreItem(unresolved.id) ?: return item
                 if (parentItem.isGc) return item.asRemoteGc()
                 val ref = parentItem.content.directTypeRef() ?: return item
-                val kind = if (item.parentSub != null) RootKind.Map else ref.kind
+                val parentKind = if (item.parentSub != null && ref.kind != RootKind.XmlHook) {
+                    RootKind.Map
+                } else {
+                    ref.kind
+                }
                 return item.copy(
                     parent = ref.name,
-                    content = item.content.withRemoteParentKind(kind),
+                    content = item.content.withRemoteParentKind(parentKind),
                     deleted = item.deleted || parentItem.deleted,
                     unresolvedParent = null,
                 )
@@ -1435,7 +1585,9 @@ class YDoc(
                 val anchor = store.getStoreItem(unresolved.id) ?: return item
                 if (anchor.isGc) return item.asRemoteGc()
                 val inheritedKind = when {
-                    anchor.parentSub != null -> RootKind.Map
+                    anchor.parentSub != null -> knownParentKinds()[anchor.parent]
+                        ?.takeIf { kind -> kind == RootKind.XmlHook }
+                        ?: RootKind.Map
                     anchor.content is ItemContent.Deleted -> item.content.kind
                     else -> anchor.content.kind
                 }
@@ -1449,7 +1601,7 @@ class YDoc(
             null -> return knownParentKinds()[item.parent]?.let { kind ->
                 item.copy(
                     content = item.content.withRemoteParentKind(
-                        if (item.parentSub != null) RootKind.Map else kind,
+                        if (item.parentSub != null && kind != RootKind.XmlHook) RootKind.Map else kind,
                     ),
                 )
             } ?: item
@@ -1497,7 +1649,8 @@ class YDoc(
             when (val content = item.content) {
                 is ItemContent.NativeTextFormat -> activeNativeAttributes[content.key] = content.value
                 is ItemContent.Text,
-                is ItemContent.TextEmbed -> {
+                is ItemContent.TextEmbed,
+                is ItemContent.XmlType -> {
                     val attributes = content.effectiveTextAttributes(activeNativeAttributes)
                     setTextAttributes(item, attributes)?.let(changed::add)
                 }
@@ -1648,18 +1801,12 @@ class YDoc(
     }
 
     private fun createTransactionEvent(transaction: Transaction): YTransactionEvent {
-        val update = UpdateCodec.encode(
+        val update = UpdateCodec.encodeLossless(
             DocumentUpdate(
                 transaction.addedItems,
                 transaction.deleteSet,
                 store.parentItemIds(),
                 store.parentKinds(),
-                allowV1 = transaction.addedItems.all { item ->
-                    !item.parent.startsWith("__yks_nested__:") &&
-                        item.content !is ItemContent.XmlType &&
-                        (item.content as? ItemContent.Value)?.value !is YValue.TypeRef &&
-                        (item.content as? ItemContent.MapEntry)?.value !is YValue.TypeRef
-                },
             ),
         )
         val insertSet = transaction.addedItems.toIdSet()
@@ -1694,15 +1841,16 @@ class YDoc(
 
     private fun emit(transaction: Transaction, event: YTransactionEvent) {
         val callbacks = mutableListOf<() -> Unit>()
-        val updateV2 by lazy {
-            UpdateCodec.encodeV2(
-                DocumentUpdate(
-                    transaction.addedItems,
-                    transaction.deleteSet,
-                    store.parentItemIds(),
-                    store.parentKinds(),
-                ),
-            )
+        val transactionUpdate = DocumentUpdate(
+            transaction.addedItems,
+            transaction.deleteSet,
+            store.parentItemIds(),
+            store.parentKinds(),
+        )
+        val standardUpdate by lazy { UpdateCodec.encode(transactionUpdate) }
+        val standardUpdateV2 by lazy { UpdateCodec.encodeV2(transactionUpdate) }
+        val losslessUpdateV2 by lazy {
+            UpdateCodec.encodeV2Lossless(transactionUpdate)
         }
         beforeObserverCallsListeners.toList().forEach { listener ->
             callbacks.add { listener(event) }
@@ -1750,31 +1898,74 @@ class YDoc(
             }
         }
         updateListeners.toList().forEach { listener ->
-            callbacks.add { listener(event.update, transaction.origin) }
+            callbacks.add { listener(standardUpdate, transaction.origin) }
         }
         updateEventListeners.toList().forEach { listener ->
+            callbacks.add { listener(standardUpdate, transaction.origin, this, event) }
+        }
+        if (eventListeners["update"].orEmpty().isNotEmpty()) {
+            callbacks.add {
+                emitDocEvent(
+                    YDocEvent(
+                        name = "update",
+                        update = standardUpdate,
+                        origin = transaction.origin,
+                        transaction = event,
+                    ),
+                )
+            }
+        }
+        updateV2EventListeners.toList().forEach { listener ->
+            callbacks.add { listener(standardUpdateV2, transaction.origin, this, event) }
+        }
+        if (eventListeners["updateV2"].orEmpty().isNotEmpty()) {
+            callbacks.add {
+                emitDocEvent(
+                    YDocEvent(
+                        name = "updateV2",
+                        update = standardUpdateV2,
+                        origin = transaction.origin,
+                        transaction = event,
+                    ),
+                )
+            }
+        }
+        updateLosslessEventListeners.toList().forEach { listener ->
             callbacks.add { listener(event.update, transaction.origin, this, event) }
         }
-        callbacks.addAll(
-            docEventCallbacks(
-                "update",
-                YDocEvent(name = "update", update = event.update, origin = transaction.origin, transaction = event),
-            ),
-        )
-        updateV2EventListeners.toList().forEach { listener ->
-            callbacks.add { listener(updateV2, transaction.origin, this, event) }
+        if (eventListeners["updateLossless"].orEmpty().isNotEmpty()) {
+            callbacks.add {
+                emitDocEvent(
+                    YDocEvent(
+                        name = "updateLossless",
+                        update = event.update,
+                        origin = transaction.origin,
+                        transaction = event,
+                    ),
+                )
+            }
         }
-        callbacks.addAll(
-            docEventCallbacks(
-                "updateV2",
-                YDocEvent(name = "updateV2", update = updateV2, origin = transaction.origin, transaction = event),
-            ),
-        )
+        updateV2LosslessEventListeners.toList().forEach { listener ->
+            callbacks.add { listener(losslessUpdateV2, transaction.origin, this, event) }
+        }
+        if (eventListeners["updateV2Lossless"].orEmpty().isNotEmpty()) {
+            callbacks.add {
+                emitDocEvent(
+                    YDocEvent(
+                        name = "updateV2Lossless",
+                        update = losslessUpdateV2,
+                        origin = transaction.origin,
+                        transaction = event,
+                    ),
+                )
+            }
+        }
         callAllYksCallbacks(callbacks)
     }
 
     internal fun changedParentsFor(transaction: Transaction): Set<String> =
         transaction.changedParents.filterTo(linkedSetOf()) { parent ->
+            if (parent in transaction.preliminaryReplayedParents) return@filterTo false
             val type = typeForParent(parent) ?: return@filterTo false
             val typeItemId = typeRefItemId(type) ?: return@filterTo true
             transaction.addedItems.none { item -> item.id == typeItemId }
@@ -1856,13 +2047,14 @@ class YDoc(
         }
         val callbacks = mutableListOf<() -> Unit>()
         grouped.forEach { (ancestor, events) ->
+            val sortedEvents = events.sortedBy { childEvent -> childEvent.path.size }
             ancestor.clearCache()
-            val insertSet = events.first().insertSet
-            val deleteSet = events.first().deleteSet
-            val event = if (events.size == 1) {
-                val only = events.single()
+            val insertSet = sortedEvents.first().insertSet
+            val deleteSet = sortedEvents.first().deleteSet
+            val event = if (sortedEvents.size == 1) {
+                val only = sortedEvents.single()
                 if (only.target == ancestor) {
-                    only.copy(deepEvents = events)
+                    only.copy(deepEvents = sortedEvents)
                 } else {
                     YEvent(
                         target = ancestor,
@@ -1874,7 +2066,7 @@ class YDoc(
                         currentTarget = ancestor,
                         path = only.path,
                         changedTarget = only.target,
-                        deepEvents = events,
+                        deepEvents = sortedEvents,
                     )
                 }
             } else {
@@ -1884,16 +2076,16 @@ class YDoc(
                     update = update,
                     insertSet = insertSet,
                     deleteSet = deleteSet,
-                    transaction = events.firstOrNull()?.transaction,
+                    transaction = sortedEvents.firstOrNull()?.transaction,
                     currentTarget = ancestor,
                     changedTarget = ancestor,
-                    deepEvents = events,
+                    deepEvents = sortedEvents,
                 )
             }
             if (ancestor.hasDeepObservers) {
                 callbacks.add { ancestor.emitDeep(event) }
             }
-            if (ancestor.hasDeltaListeners && events.any { it.target != ancestor }) {
+            if (ancestor.hasDeltaListeners && sortedEvents.any { it.target != ancestor }) {
                 callbacks.add { ancestor.emitDelta(event) }
             }
         }
@@ -1915,7 +2107,10 @@ class YDoc(
             return
         }
         val captured = when (snapshotKind) {
-            RootKind.Map -> ParentSnapshot.MapSnapshot(visibleMap(parent))
+            RootKind.Map -> ParentSnapshot.MapSnapshot(
+                values = visibleMap(parent),
+                itemIds = visibleMapItemIds(parent),
+            )
             RootKind.Array,
             RootKind.Text,
             RootKind.XmlFragment,
@@ -1933,11 +2128,15 @@ class YDoc(
         before: ParentSnapshot?,
     ): YEvent {
         val update = event.update
+        val changedSubs = transaction.changedParentSubs[type.name].orEmpty()
+        val changedKeys = changedSubs.filterNotNull().toSet()
         val mapChanges = before?.mapSnapshot()?.let { mapBefore ->
             diffMapChanges(
                 before = mapBefore.values,
                 after = visibleMap(type.name),
-                changedKeys = changedMapKeys(type.name, transaction),
+                beforeItemIds = mapBefore.itemIds,
+                afterItemIds = visibleMapItemIds(type.name),
+                changedKeys = changedKeys,
             )
         }.orEmpty()
         val sequenceBefore = before?.sequenceSnapshot()
@@ -1963,7 +2162,10 @@ class YDoc(
         } else {
             YTextDelta()
         }
-        val childListChanged = arrayDelta.isNotEmpty() || textDelta.ops.isNotEmpty()
+        // Yjs derives these flags from the transaction's changed subs, not from the
+        // resulting delta. Preserve the signal even when a transaction inserts and then
+        // deletes the same child, or adds and then removes the same attribute.
+        val childListChanged = null in changedSubs
         return YEvent(
             target = type,
             origin = transaction.origin,
@@ -1971,7 +2173,7 @@ class YDoc(
             insertSet = event.insertSet,
             deleteSet = event.deleteSet,
             transaction = event,
-            keysChanged = mapChanges.keys,
+            keysChanged = changedKeys,
             mapChanges = mapChanges,
             mapDelta = mapChanges.toMapDelta(),
             name = mapChanges.keys.singleOrNull(),
@@ -1982,15 +2184,11 @@ class YDoc(
         )
     }
 
-    private fun changedMapKeys(parent: String, transaction: Transaction): Set<String> =
-        (transaction.addedItems.asSequence() + transaction.deletedItems.asSequence())
-            .filter { item -> item.parent == parent }
-            .mapNotNull { item -> item.parentSub }
-            .toSortedSet()
-
     private fun diffMapChanges(
         before: Map<String, YValue>,
         after: Map<String, YValue>,
+        beforeItemIds: Map<String, Id>,
+        afterItemIds: Map<String, Id>,
         changedKeys: Set<String>,
     ): Map<String, YMapChange> {
         return (before.keys + after.keys + changedKeys).sorted().mapNotNull { key ->
@@ -2001,7 +2199,8 @@ class YDoc(
             when {
                 !oldPresent && newPresent -> key to YMapChange(YMapChangeAction.Add, null, newValue?.let(::valueToAny))
                 oldPresent && !newPresent -> key to YMapChange(YMapChangeAction.Delete, oldValue?.let(::valueToAny), null)
-                oldPresent && newPresent && (oldValue != newValue || key in changedKeys) -> key to YMapChange(
+                oldPresent && newPresent &&
+                    (oldValue != newValue || beforeItemIds[key] != afterItemIds[key]) -> key to YMapChange(
                     YMapChangeAction.Update,
                     oldValue?.let(::valueToAny),
                     newValue?.let(::valueToAny),
@@ -2013,13 +2212,18 @@ class YDoc(
 
     private fun diffArrayDelta(before: List<StoreItem>, after: List<StoreItem>): List<YArrayDeltaOp> {
         return diffSequence(before, after) { items ->
-            listOf(YArrayDeltaOp(insert = items.map { valueToAny((it.content as ItemContent.Value).value) }))
+            listOf(YArrayDeltaOp(insert = items.map(::arrayItemValue)))
         }
     }
 
     private fun diffXmlDelta(before: List<StoreItem>, after: List<StoreItem>): List<YArrayDeltaOp> {
         return diffSequence(before, after) { items ->
-            listOf(YArrayDeltaOp(insert = items.map { it.content.toXmlEventJson(this) }))
+            listOf(YArrayDeltaOp(insert = items.map { item ->
+                when (val content = item.content) {
+                    is ItemContent.XmlType -> typeFromXmlType(content)
+                    else -> content.toXmlEventJson(this)
+                }
+            }))
         }
     }
 
@@ -2046,6 +2250,11 @@ class YDoc(
                 is ItemContent.TextEmbed -> {
                     flush()
                     delta.insertEmbed(valueToAny(content.value), attrs)
+                    pendingAttrs = null
+                }
+                is ItemContent.XmlType -> {
+                    flush()
+                    delta.insertEmbed(typeFromXmlType(content), attrs)
                     pendingAttrs = null
                 }
                 else -> Unit
@@ -2130,13 +2339,43 @@ class YDoc(
             return existing as T
         }
         require(name !in nestedNames) { "nested type '$name' cannot be opened as a root type" }
-        return factory().also { rootTypes[name] = it }
+        return factory().also { type ->
+            rootTypes[name] = type
+            unopenedRootEntries.remove(name)
+            normalizeAmbiguousRootContent(name, kind)
+        }
+    }
+
+    /**
+     * A root ContentType does not carry its parent type on Yjs wire. The decoder therefore
+     * keeps a best-effort kind until the receiver opens that root with a concrete getter.
+     * Retag the complete direct sequence here; map attributes keep map semantics.
+     */
+    private fun normalizeAmbiguousRootContent(name: String, kind: RootKind) {
+        var changed = false
+        store.allItems()
+            .asSequence()
+            .filter { item -> item.parent == name && item.parentSub == null }
+            .forEach { item ->
+                val normalized = item.content.withRemoteParentKind(kind)
+                if (normalized != item.content) {
+                    checkNotNull(store.replaceContent(item.id, normalized)) {
+                        "root item disappeared while materializing '$name'"
+                    }
+                    changed = true
+                }
+            }
+        if (kind == RootKind.Text && changed) {
+            reapplyTextFormats(name)
+        }
     }
 
     private fun <T : AbstractYType> createNestedType(kind: RootKind, factory: (String) -> T): T {
         val name = nextNestedTypeName()
         return factory(name).also { type ->
             check(type.kind == kind) { "nested type factory returned ${type.kind}, expected $kind" }
+            type.markDetached()
+            type.reserve(this, name)
             nestedTypes[name] = type
             nestedNames.add(name)
         }
@@ -2226,7 +2465,10 @@ class YDoc(
             RootKind.XmlElement -> YXmlElementType(this, ref.name, xmlNodeName ?: ref.name)
             RootKind.XmlHook -> YXmlHook(this, ref.name, xmlNodeName ?: ref.name)
             RootKind.XmlText -> YXmlTextType(this, ref.name)
-        }.also { nestedTypes[ref.name] = it }
+        }.also { type ->
+            type.markDecodedNested(this, ref.name, store.parentItemIds()[ref.name])
+            nestedTypes[ref.name] = type
+        }
     }
 
     internal fun typeFromXmlType(content: ItemContent.XmlType): AbstractYType =
@@ -2262,6 +2504,15 @@ class YDoc(
         }
     }
 
+    private fun attachAndReplayPreliminaryTypes(content: ItemContent, ownerId: Id) {
+        content.nestedTypeRefNames().forEach { name ->
+            val type = pendingPreliminaryAttachments.remove(name) ?: return@forEach
+            type.integrateReserved(this, ownerId)
+            currentTransaction?.preliminaryReplayedParents?.add(type.name)
+            type.replayPreliminaryContent()
+        }
+    }
+
     private fun registerNestedTypeRefValue(ref: YValue.TypeRef): YValue.TypeRef {
         require(rootTypes[ref.name] == null) { "root shared types cannot be inserted as nested content" }
         require(ref.name != pendingStoreParentStack.lastOrNull()) { "shared type '${ref.name}' cannot contain itself" }
@@ -2271,14 +2522,114 @@ class YDoc(
     }
 
     private fun registerNestedTypeValue(value: AbstractYType): AbstractYType {
-        val local = if (value.doc === this) value else value.cloneValueInto(this) as AbstractYType
-        require(rootTypes[local.name] == null) { "root shared types cannot be inserted as nested content" }
-        require(local.name != pendingStoreParentStack.lastOrNull()) { "shared type '${local.name}' cannot contain itself" }
-        require(!hasNestedTypeReference(local.name)) { "shared type '${local.name}' is already defined" }
-        pendingNestedReferenceStack.lastOrNull()?.add(local.name) ?: referencedNestedNames.add(local.name)
-        nestedTypes[local.name] = local
-        nestedNames.add(local.name)
-        return local
+        val reserved = value.binding as? YTypeBinding.Reserved
+            ?: error("shared type must be detached or reserved before insertion; clone it explicitly to reuse content")
+        require(reserved.doc === this) { "shared type is reserved for another document" }
+        require(rootTypes[value.name] == null) { "root shared types cannot be inserted as nested content" }
+        require(value.name != pendingStoreParentStack.lastOrNull()) { "shared type '${value.name}' cannot contain itself" }
+        require(!hasNestedTypeReference(value.name)) { "shared type '${value.name}' is already defined" }
+        pendingNestedReferenceStack.lastOrNull()?.add(value.name) ?: referencedNestedNames.add(value.name)
+        nestedTypes[value.name] = value
+        nestedNames.add(value.name)
+        pendingPreliminaryAttachments[value.name] = value
+        return value
+    }
+
+    private fun preparePreliminaryGraph(value: Any?) {
+        val visiting = java.util.IdentityHashMap<AbstractYType, Boolean>()
+        val visited = java.util.IdentityHashMap<AbstractYType, Boolean>()
+        val ordered = mutableListOf<AbstractYType>()
+
+        lateinit var visitValue: (Any?) -> Unit
+        lateinit var visitType: (AbstractYType) -> Unit
+
+        visitValue = { raw ->
+            when (raw) {
+                is AbstractYType -> visitType(raw)
+                is YTextDelta -> raw.ops.forEach { op ->
+                    visitValue(op.insert)
+                    visitValue(op.attributes)
+                }
+                is YTextDeepDelta -> {
+                    visitValue(raw.attrs)
+                    visitValue(raw.delta)
+                }
+                is YArrayDeepDelta -> {
+                    visitValue(raw.attrs)
+                    raw.delta.forEach { op -> visitValue(op.insert) }
+                }
+                is YMapDeepDelta -> visitValue(raw.attrs)
+                is YXmlFragmentDeepDelta -> {
+                    visitValue(raw.attrs)
+                    raw.delta.forEach { op -> visitValue(op.insert) }
+                }
+                is YXmlElementDeepDelta -> {
+                    visitValue(raw.attrs)
+                    raw.children.forEach { child -> visitValue(child) }
+                }
+                is Map<*, *> -> raw.forEach { (key, nested) ->
+                    require(key is String) { "YValue map keys must be strings" }
+                    visitValue(nested)
+                }
+                is Iterable<*> -> raw.forEach { nested -> visitValue(nested) }
+                is Array<*> -> raw.forEach { nested -> visitValue(nested) }
+                else -> Unit
+            }
+        }
+
+        visitType = { type ->
+            require(visiting[type] != true) { "shared type graph contains a cycle" }
+            require(visited[type] != true) { "shared type instance occurs more than once in the inserted graph" }
+            when (val current = type.binding) {
+                YTypeBinding.Detached -> Unit
+                is YTypeBinding.Reserved -> {
+                    require(current.doc === this) { "shared type is reserved for another document" }
+                    require(!hasNestedTypeReference(current.name)) { "shared type '${current.name}' is already defined" }
+                }
+                is YTypeBinding.Root -> require(false) { "root shared types cannot be inserted as nested content" }
+                is YTypeBinding.Nested -> require(false) {
+                    "shared type is already integrated; clone it explicitly before reinsertion"
+                }
+            }
+            validatePreliminaryContent(type)
+            visiting[type] = true
+            ordered.add(type)
+            type.preliminaryGraphValues().forEach { nested -> visitValue(nested) }
+            visiting.remove(type)
+            visited[type] = true
+        }
+
+        visitValue(value)
+        ordered.forEach { type ->
+            if (type.binding is YTypeBinding.Detached) {
+                val reservedName = nextNestedTypeName()
+                type.reserve(this, reservedName)
+                nestedTypes[reservedName] = type
+                nestedNames.add(reservedName)
+            }
+            pendingPreliminaryAttachments[type.name] = type
+        }
+    }
+
+    private fun validatePreliminaryContent(type: AbstractYType) {
+        when (type) {
+            is YUnopenedRoot -> error("an unopened root cannot be inserted as preliminary content")
+            is YArray -> {
+                type.preliminaryList.forEach(::validateStoreValue)
+                type.preliminaryMap.values.forEach(::validateStoreValue)
+            }
+            is YMap -> type.preliminaryMap.values.forEach(::validateStoreValue)
+            is YText -> type.preliminaryOperationValues.forEach(::validateStoreValue)
+            is YXmlElementType,
+            is YXmlFragment -> {
+                type.preliminaryList.forEach { child ->
+                    require(child is AbstractYType || child is YXmlNode) {
+                        "unsupported preliminary XML child: ${child?.let { it::class.qualifiedName }}"
+                    }
+                }
+                type.preliminaryMap.values.forEach(::validateStoreValue)
+            }
+        }
     }
 
     private fun hasNestedTypeReference(name: String): Boolean =
@@ -2533,6 +2884,8 @@ class YDoc(
         val loadedSubdocs = linkedSetOf<YDoc>()
         val meta: MutableMap<Any?, Any?> = linkedMapOf()
         val changedParents = linkedSetOf<String>()
+        val changedParentSubs = linkedMapOf<String, MutableSet<String?>>()
+        val preliminaryReplayedParents = linkedSetOf<String>()
         val beforeParents = linkedMapOf<String, ParentSnapshot>()
         var afterState: StateVector = beforeState
         var update: ByteArray = ByteArray(0)
@@ -2543,6 +2896,11 @@ class YDoc(
                 removedSubdocs.isEmpty() &&
                 loadedSubdocs.isEmpty() &&
                 changedParents.isEmpty()
+
+        fun markChanged(parent: String, parentSub: String?) {
+            changedParents.add(parent)
+            changedParentSubs.getOrPut(parent) { linkedSetOf() }.add(parentSub)
+        }
     }
 
     companion object {
@@ -2596,11 +2954,11 @@ class YTransaction internal constructor(
 
     fun deletes(client: Long, clock: Long): Boolean = deletes(Id(client, clock))
 
-    internal fun addChangedType(type: AbstractYType) {
+    internal fun addChangedType(type: AbstractYType, parentSub: String? = null) {
         require(type.doc === doc) { "type must belong to this transaction's document" }
         val typeItemId = doc.typeRefItemId(type)
         if (typeItemId == null || transaction.addedItems.none { item -> item.id == typeItemId }) {
-            transaction.changedParents.add(type.name)
+            transaction.markChanged(type.name, parentSub)
         }
     }
 }
@@ -2785,7 +3143,8 @@ private fun List<StoreItem>.withNativeTextFormatting(): MutableList<StoreItem> {
             when (val content = item.content) {
                 is ItemContent.NativeTextFormat -> activeAttributes[content.key] = content.value
                 is ItemContent.Text,
-                is ItemContent.TextEmbed -> add(
+                is ItemContent.TextEmbed,
+                is ItemContent.XmlType -> add(
                     item.copy(content = content.withTextAttributesOrNull(content.effectiveTextAttributes(activeAttributes))!!),
                 )
                 else -> Unit
@@ -2802,18 +3161,21 @@ private fun ItemContent.retargetTextFormat(restoredByOriginal: Map<Id, Id>): Ite
 private fun ItemContent.textAttributesOrEmpty(): Map<String, YValue> = when (this) {
     is ItemContent.Text -> attributes
     is ItemContent.TextEmbed -> attributes
+    is ItemContent.XmlType -> attributes
     else -> emptyMap()
 }
 
 private fun ItemContent.baseTextAttributesOrEmpty(): Map<String, YValue> = when (this) {
     is ItemContent.Text -> baseAttributes
     is ItemContent.TextEmbed -> baseAttributes
+    is ItemContent.XmlType -> baseAttributes
     else -> emptyMap()
 }
 
 private fun ItemContent.withTextAttributesOrNull(attributes: Map<String, YValue>): ItemContent? = when (this) {
     is ItemContent.Text -> copy(attributes = attributes)
     is ItemContent.TextEmbed -> copy(attributes = attributes)
+    is ItemContent.XmlType -> copy(attributes = attributes)
     else -> null
 }
 
@@ -2833,7 +3195,9 @@ private fun ItemContent.isTextFormatControl(): Boolean =
     this is ItemContent.TextFormat || this is ItemContent.NativeTextFormat
 
 private fun ItemContent.isTextCountable(): Boolean =
-    this is ItemContent.Text || this is ItemContent.TextEmbed
+    this is ItemContent.Text ||
+        this is ItemContent.TextEmbed ||
+        (this is ItemContent.XmlType && kind in setOf(RootKind.Text, RootKind.XmlText))
 
 private fun MutableList<StoreItem>.replaceTextAttributes(index: Int, attributes: Map<String, YValue>) {
     if (attributes.isEmpty()) return
@@ -2853,6 +3217,7 @@ private fun MutableList<StoreItem>.replaceTextAttributes(index: Int, attributes:
 private fun ItemContent.sameTextContentAs(other: ItemContent): Boolean = when {
     this is ItemContent.Text && other is ItemContent.Text -> value == other.value
     this is ItemContent.TextEmbed && other is ItemContent.TextEmbed -> value == other.value
+    this is ItemContent.XmlType && other is ItemContent.XmlType -> ref == other.ref
     else -> false
 }
 
@@ -2967,7 +3332,10 @@ data class YDocEvent(
 
 internal sealed class ParentSnapshot {
     data class SequenceSnapshot(val kind: RootKind, val items: List<StoreItem>) : ParentSnapshot()
-    data class MapSnapshot(val values: Map<String, YValue>) : ParentSnapshot()
+    data class MapSnapshot(
+        val values: Map<String, YValue>,
+        val itemIds: Map<String, Id>,
+    ) : ParentSnapshot()
     data class CombinedSnapshot(
         val sequence: SequenceSnapshot? = null,
         val map: MapSnapshot? = null,

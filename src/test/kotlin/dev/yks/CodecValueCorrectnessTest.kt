@@ -141,7 +141,8 @@ class CodecValueCorrectnessTest {
         val child = YDoc(clientId = 2, guid = "child", shouldLoad = false)
         parent.getArray("items").push(listOf(listOf(child)))
 
-        val update = encodeStateAsUpdate(parent)
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdate(parent) }
+        val update = encodeStateAsUpdateLossless(parent)
         assertTrue(update.hasYksMagic())
 
         val target = createDocFromUpdate(update)
@@ -192,17 +193,25 @@ class CodecValueCorrectnessTest {
         val unsafe = YJS_MAX_SAFE_INTEGER + 2
         val rangeDoc = YDoc(clientId = 2)
         applyUpdate(rangeDoc, contentDeletedUpdate(unsafe))
-        val rangeRelay = encodeStateAsUpdate(rangeDoc)
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdate(rangeDoc) }
+        val rangeRelay = encodeStateAsUpdateLossless(rangeDoc)
         assertTrue(rangeRelay.hasYksMagic())
         assertEquals(unsafe, decodeUpdate(rangeRelay).structs.single().length)
 
         val deleteSet = DeleteSet.empty().also { set -> set.add(Id(1, unsafe), 1) }
-        assertTrue(UpdateCodec.encode(DocumentUpdate(emptyList(), deleteSet)).hasYksMagic())
-        assertTrue(UpdateCodec.encodeV2(DocumentUpdate(emptyList(), deleteSet)).hasYksMagic())
+        assertFailsWith<UnsupportedYjsStandardUpdateException> {
+            UpdateCodec.encode(DocumentUpdate(emptyList(), deleteSet))
+        }
+        assertFailsWith<UnsupportedYjsStandardUpdateException> {
+            UpdateCodec.encodeV2(DocumentUpdate(emptyList(), deleteSet))
+        }
+        assertTrue(UpdateCodec.encodeLossless(DocumentUpdate(emptyList(), deleteSet)).hasYksMagic())
+        assertTrue(UpdateCodec.encodeV2Lossless(DocumentUpdate(emptyList(), deleteSet)).hasYksMagic())
 
         val valueDoc = YDoc(clientId = 3)
         valueDoc.getText("body").insertEmbed(0, Long.MAX_VALUE)
-        val valueUpdate = encodeStateAsUpdate(valueDoc)
+        assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdate(valueDoc) }
+        val valueUpdate = encodeStateAsUpdateLossless(valueDoc)
         assertTrue(valueUpdate.hasYksMagic())
         assertEquals(Long.MAX_VALUE, createDocFromUpdate(valueUpdate).getText("body").toDelta().ops.single().insert)
     }

@@ -179,6 +179,19 @@ class RendererTest {
     }
 
     @Test
+    fun diffRendererRelaysLosslessOnlyXmlStateInternally() {
+        val prev = YDoc(clientId = 1, gc = false)
+        val next = YDoc(clientId = 2, gc = false)
+        val renderer = createDiffRenderer(prev, next)
+        renderer.suggestionMode = false
+
+        next.getXmlFragment("xml").push(YXmlElement("p").also { it.push(YXmlText("private")) })
+
+        assertEquals("<p>private</p>", prev.getXmlFragment("xml").toString())
+        renderer.destroy()
+    }
+
+    @Test
     fun diffRendererRejectAllChangesRemovesSuggestedInsertsFromNextDoc() {
         val prev = YDoc(clientId = 1)
         prev.getText("body").insert(0, "a")

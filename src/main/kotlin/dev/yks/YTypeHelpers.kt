@@ -164,6 +164,7 @@ fun insertContentHelper(
 }
 
 fun typeListLength(type: AbstractYType): Int = when (type) {
+    is YUnopenedRoot -> error("open root '${type.name}' with a concrete getter first")
     is YArray -> type.length
     is YText -> type.length
     is YXmlFragment -> type.length
@@ -189,6 +190,7 @@ fun typeListInsertGenerics(type: AbstractYType, index: Int, content: List<Any?>)
     require(index <= typeListLength(type)) { "insert index is out of bounds" }
     if (content.isEmpty()) return
     when (type) {
+        is YUnopenedRoot -> error("open root '${type.name}' with a concrete getter first")
         is YArray -> type.insert(index, content)
         is YText -> type.insert(index, content)
         is YXmlFragment -> {
@@ -239,6 +241,7 @@ fun typeListPushGenerics(type: AbstractYType, content: List<Any?>) {
 
 fun typeListDelete(type: AbstractYType, index: Int, length: Int) {
     when (type) {
+        is YUnopenedRoot -> error("open root '${type.name}' with a concrete getter first")
         is YArray -> type.delete(index, length)
         is YText -> type.delete(index, length)
         is YXmlFragment -> type.delete(index, length)
@@ -419,6 +422,7 @@ private fun yTypeHelperValuesEqual(left: Any?, right: Any?): Boolean = when {
 }
 
 private fun typeListValues(type: AbstractYType): List<Any?> = when (type) {
+    is YUnopenedRoot -> error("open root '${type.name}' with a concrete getter first")
     is YArray -> type.toList()
     is YText -> type.toList()
     is YXmlFragment -> type.toList()

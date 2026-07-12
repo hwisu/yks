@@ -321,12 +321,22 @@ class UndoManager private constructor(
         try {
             val insertedItemsToDelete = stackItem.insertedItems.filter { options.deleteFilter(it.toItemStruct(doc)) }
             val insertedIdsToDelete = insertedItemsToDelete.map { item -> item.id }.toSet()
-            val deletedItemsToRestore = stackItem.deletedItems.filter { restore ->
+            val restoreCandidates = stackItem.deletedItems.filter { restore ->
                 val source = restore.item
                 val key = source.parentSub ?: return@filter true
                 if (options.shouldIgnoreRemoteAttributeChanges()) return@filter true
                 val currentId = doc.currentVisibleMapItemId(source.parent, key) ?: return@filter true
                 currentId == source.id || currentId in insertedIdsToDelete
+            }
+            val restoreCandidatesById = restoreCandidates.associate { restore -> restore.item.id to restore.item }
+            val restoreEligibility = mutableMapOf<Id, Boolean>()
+            val deletedItemsToRestore = restoreCandidates.filter { restore ->
+                canRestoreIntoCurrentParent(
+                    item = restore.item,
+                    restoreCandidatesById = restoreCandidatesById,
+                    eligibility = restoreEligibility,
+                    visiting = linkedSetOf(),
+                )
             }
             var restoredItems = emptyList<StoreItem>()
             var deletedItems = emptyList<StoreItem>()
@@ -385,6 +395,39 @@ class UndoManager private constructor(
         return names.any { scopeName ->
             item.parent == scopeName || doc.pathBetween(scopeName, item.parent) != null
         }
+    }
+
+    /**
+     * Yjs does not redo a child when its original nested-type owner was deleted remotely and
+     * cannot itself be redone by the same stack item. A later ContentType with the same logical
+     * parent name is not enough: without a local `redone` link it is a distinct owner.
+     */
+    private fun canRestoreIntoCurrentParent(
+        item: StoreItem,
+        restoreCandidatesById: Map<Id, StoreItem>,
+        eligibility: MutableMap<Id, Boolean>,
+        visiting: MutableSet<Id>,
+    ): Boolean {
+        eligibility[item.id]?.let { return it }
+        if (!visiting.add(item.id)) return false
+        val result = run {
+            val parentType = doc.typeForParent(item.parent) ?: return@run true
+            val ownerId = (parentType.binding as? YTypeBinding.Nested)?.ownerId ?: return@run true
+            val owner = doc.getItem(ownerId) ?: return@run false
+            if (!owner.deleted) return@run true
+            val followed = doc.followRedone(ownerId)
+            if (followed != ownerId && doc.getItem(followed)?.deleted == false) return@run true
+            val ownerCandidate = restoreCandidatesById[followed] ?: restoreCandidatesById[ownerId]
+            ownerCandidate != null && canRestoreIntoCurrentParent(
+                item = ownerCandidate,
+                restoreCandidatesById = restoreCandidatesById,
+                eligibility = eligibility,
+                visiting = visiting,
+            )
+        }
+        visiting.remove(item.id)
+        eligibility[item.id] = result
+        return result
     }
 
     private fun StackItem.merge(other: StackItem): StackItem = StackItem(

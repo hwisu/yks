@@ -70,7 +70,7 @@ class YEventTest {
         val array = doc.getArray("items")
         val nestedText = doc.createText()
         val renderer = object : BaseRenderer() {
-            override val attributed: IdSet = createIdSet().also { it.add(1, 0, 1) }
+            override val attributed: IdSet = createIdSet().also { it.add(1, 1, 1) }
 
             override fun readContent(
                 contents: MutableList<AttributedContent>,
@@ -80,7 +80,7 @@ class YEventTest {
                 content: AbstractContent,
                 renderBehavior: Int,
             ) {
-                if (client == 1L && clock == 0L) return
+                if (client == 1L && clock == 1L) return
                 super.readContent(contents, client, clock, deleted, content, renderBehavior)
             }
         }
@@ -504,12 +504,13 @@ class YEventTest {
         val text = doc.createText()
         val events = mutableListOf<YEvent>()
         text.insert(0, "hi", mapOf("bold" to true))
+        doc.getXmlFragment("root").push(element)
         element.observe { events.add(it) }
 
         element.push(text)
 
         val event = events.single()
-        assertEquals(listOf(YArrayDeltaOp(insert = listOf("hi"))), event.delta)
+        assertEquals(listOf(YArrayDeltaOp(insert = listOf(text))), event.delta)
         assertEquals(
             listOf(YTextDeepDelta(delta = YTextDelta().insert("hi", mapOf("bold" to true)))),
             event.deltaDeep,
@@ -525,6 +526,7 @@ class YEventTest {
         val events = mutableListOf<YEvent>()
         text.insert(0, "hi")
         element.push(text)
+        doc.getXmlFragment("root").push(element)
         element.observeDeep { events.add(it) }
 
         text.format(0, 2, mapOf("bold" to true))
@@ -549,6 +551,7 @@ class YEventTest {
         val text = doc.createXmlText()
         val deltas = mutableListOf<Any>()
         val deepDeltas = mutableListOf<Any>()
+        doc.getXmlFragment("root").push(text)
         text.observe { event ->
             deltas.add(event.delta)
             deepDeltas.add(event.deltaDeep)

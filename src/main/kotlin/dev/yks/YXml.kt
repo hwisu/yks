@@ -30,12 +30,49 @@ class YXmlText(
     override fun toString(): String = renderXmlText(text, attributes)
 }
 
+/**
+ * Immutable XML-text view captured at a document snapshot.
+ *
+ * A live [YXmlTextType] may contain multiple formatted runs and embeds, which cannot be
+ * represented by the single-run [YXmlText] value. Keeping the delta here preserves its XML
+ * serialization while still returning a defensive [YXmlNode] from the snapshot APIs.
+ */
+internal class YXmlSnapshotText(
+    private val delta: YTextDelta,
+) : YXmlNode() {
+    private val plainText: String = delta.ops.joinToString(separator = "") { op -> op.insert as? String ?: "" }
+
+    internal override fun toValue(): YXmlNodeValue = YXmlNodeValue.Text(plainText)
+
+    override fun clone(): YXmlNode = YXmlSnapshotText(YTextDelta(delta.ops))
+
+    override fun toJson(): String = plainText
+
+    override fun toJSON(): String = toString()
+
+    override fun toString(): String = renderXmlTextDelta(delta)
+
+    internal fun toDetachedType(): YXmlTextType = YXmlTextType().also { text ->
+        text.applyDelta(YTextDelta(delta.ops))
+    }
+}
+
+sealed class YXmlSharedType protected constructor(
+    doc: YDoc,
+    name: String,
+    kind: RootKind,
+) : AbstractYType(doc, name, kind)
+
 class YXmlElementType internal constructor(
     doc: YDoc,
     name: String,
     val nodeName: String = name,
     kind: RootKind = RootKind.XmlElement,
-) : AbstractYType(doc, name, kind), Iterable<Any?> {
+) : YXmlSharedType(doc, name, kind), Iterable<Any?> {
+    constructor(nodeName: String) : this(YDoc(), "", nodeName) {
+        markDetached()
+    }
+
     internal constructor(
         doc: YDoc,
         nodeName: String,
@@ -47,7 +84,11 @@ class YXmlElementType internal constructor(
         require(nodeName.isNotBlank()) { "XML element name must not be blank" }
     }
 
-    val length: Int get() = xmlItems().size
+    val length: Int
+        get() {
+            if (warnIfPreliminary()) return preliminaryList.size
+            return xmlItems().size
+        }
 
     val attrSize: Int get() = getAttrs().size
 
@@ -57,18 +98,32 @@ class YXmlElementType internal constructor(
 
     val prevSibling: Any? get() = xmlSibling(this, offset = -1)
 
-    fun setAttr(key: String, value: Any?): Any? = doc.setTypeAttribute(name, key, value)
+    fun setAttr(key: String, value: Any?): Any? {
+        if (isPreliminary) {
+            preliminaryMap[key] = value
+            return value
+        }
+        return doc.setTypeAttribute(name, key, value)
+    }
 
     fun setAttribute(key: String, value: Any?): Any? = setAttr(key, value)
 
     fun setAttrs(values: Map<String, Any?>): YXmlElementType {
+        if (isPreliminary) {
+            values.forEach { (key, value) -> preliminaryMap[key] = value }
+            return this
+        }
+        doc.preflightNestedValue(values.values.toList())
         doc.transact {
             values.toSortedMap().forEach { (key, value) -> setAttr(key, value) }
         }
         return this
     }
 
-    fun getAttr(key: String): Any? = doc.typeAttribute(name, key)
+    fun getAttr(key: String): Any? {
+        if (warnIfPreliminary()) return null
+        return doc.typeAttribute(name, key)
+    }
 
     fun getAttr(key: String, snapshot: Snapshot): Any? =
         doc.mapValueAtSnapshot(this, key, snapshot)?.let(doc::valueToAny)
@@ -77,7 +132,10 @@ class YXmlElementType internal constructor(
 
     fun getAttribute(key: String, snapshot: Snapshot): Any? = getAttr(key, snapshot)
 
-    fun getAttrs(): Map<String, Any?> = doc.typeAttributes(name)
+    fun getAttrs(): Map<String, Any?> {
+        if (warnIfPreliminary()) return emptyMap()
+        return doc.typeAttributes(name)
+    }
 
     fun getAttributes(): Map<String, Any?> = getAttrs()
 
@@ -106,7 +164,10 @@ class YXmlElementType internal constructor(
         getAttrs().forEach { (key, value) -> action(value, key, this) }
     }
 
-    fun hasAttr(key: String): Boolean = doc.hasTypeAttribute(name, key)
+    fun hasAttr(key: String): Boolean {
+        if (warnIfPreliminary()) return false
+        return doc.hasTypeAttribute(name, key)
+    }
 
     fun hasAttr(key: String, snapshot: Snapshot): Boolean =
         doc.mapValueAtSnapshot(this, key, snapshot) != null
@@ -116,6 +177,10 @@ class YXmlElementType internal constructor(
     fun hasAttribute(key: String, snapshot: Snapshot): Boolean = hasAttr(key, snapshot)
 
     fun deleteAttr(key: String) {
+        if (isPreliminary) {
+            preliminaryMap.remove(key)
+            return
+        }
         doc.deleteTypeAttribute(name, key)
     }
 
@@ -128,6 +193,10 @@ class YXmlElementType internal constructor(
     }
 
     fun clearAttrs() {
+        if (isPreliminary) {
+            preliminaryMap.clear()
+            return
+        }
         doc.transact {
             getAttrs().keys.forEach(::deleteAttr)
         }
@@ -135,8 +204,27 @@ class YXmlElementType internal constructor(
 
     fun insert(index: Int, nodes: List<YXmlNode>) {
         if (nodes.isEmpty()) return
+        val insertionValues = nodes.map(YXmlNode::toRichSnapshotInsertionValue)
+        if (isPreliminary) {
+            preliminaryList.addAll(index.coerceIn(0, preliminaryList.size), insertionValues)
+            return
+        }
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
+        if (insertionValues.any { child -> child is AbstractYType }) {
+            doc.transact {
+                var insertionIndex = start
+                insertionValues.forEach { child ->
+                    when (child) {
+                        is AbstractYType -> insertType(insertionIndex, child)
+                        is YXmlNode -> insert(insertionIndex, listOf(child))
+                        else -> error("unsupported XML snapshot child: ${child::class.qualifiedName}")
+                    }
+                    insertionIndex++
+                }
+            }
+            return
+        }
         doc.transact {
             val anchors = doc.insertionAnchors(name, kind, start)
             var origin = anchors.first
@@ -162,8 +250,14 @@ class YXmlElementType internal constructor(
 
     fun insertTypes(index: Int, types: List<AbstractYType>) {
         if (types.isEmpty()) return
+        if (isPreliminary) {
+            require(types.none { type -> type === this }) { "shared type cannot contain itself" }
+            preliminaryList.addAll(index.coerceIn(0, preliminaryList.size), types)
+            return
+        }
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
+        doc.preflightNestedValue(types)
         doc.transact {
             val anchors = doc.insertionAnchors(name, kind, start)
             var origin = anchors.first
@@ -218,6 +312,12 @@ class YXmlElementType internal constructor(
     }
 
     fun delete(index: Int, length: Int = 1) {
+        if (isPreliminary) {
+            if (length <= 0 || preliminaryList.isEmpty()) return
+            val start = index.coerceIn(0, preliminaryList.size)
+            repeat(minOf(length, preliminaryList.size - start)) { preliminaryList.removeAt(start) }
+            return
+        }
         doc.deleteVisible(name, index, length)
     }
 
@@ -244,7 +344,10 @@ class YXmlElementType internal constructor(
 
     fun toList(): List<Any?> = toArray()
 
-    fun toArray(): List<Any?> = xmlItems().map { it.content.toXmlChild(doc) }
+    fun toArray(): List<Any?> {
+        if (warnIfPreliminary()) return emptyList()
+        return xmlItems().map { it.content.toXmlChild(doc) }
+    }
 
     fun toDelta(): List<YArrayDeltaOp> = xmlChildrenToDelta(toArray())
 
@@ -270,6 +373,7 @@ class YXmlElementType internal constructor(
     }
 
     fun applyDelta(delta: List<YArrayDeltaOp>, origin: Any? = null) {
+        if (!isPreliminary) doc.preflightSharedTypes(delta.map { op -> op.insert })
         doc.transact(origin = origin) {
             var index = 0
             delta.forEach { op ->
@@ -378,6 +482,10 @@ class YXmlTextType internal constructor(
     doc: YDoc,
     name: String = "",
 ) : YText(doc, name, RootKind.XmlText) {
+    constructor() : this(YDoc(), "") {
+        markDetached()
+    }
+
     val nextSibling: Any? get() = xmlSibling(this, offset = 1)
 
     val prevSibling: Any? get() = xmlSibling(this, offset = -1)
@@ -388,13 +496,7 @@ class YXmlTextType internal constructor(
             cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
         }
 
-    override fun toString(): String = toDelta().ops.joinToString(separator = "") { op ->
-        when (val insert = op.insert) {
-            is String -> renderXmlText(insert, op.attributes)
-            null -> ""
-            else -> renderXmlText(xmlAttrValueToString(insert), op.attributes)
-        }
-    }
+    override fun toString(): String = renderXmlTextDelta(toDelta())
 }
 
 /**
@@ -409,7 +511,9 @@ class YXmlHook internal constructor(
     name: String,
     val hookName: String,
 ) : YMap(doc, name, RootKind.XmlHook) {
-    constructor(hookName: String) : this(YDoc(), "", hookName)
+    constructor(hookName: String) : this(YDoc(), "", hookName) {
+        markDetached()
+    }
 
     init {
         require(hookName.isNotBlank()) { "XML hook name must not be blank" }
@@ -659,9 +763,11 @@ class YXmlElement(val nodeName: String) : YXmlNode(), Iterable<YXmlNode> {
 }
 
 class YXmlFragment internal constructor(doc: YDoc, name: String) :
-    AbstractYType(doc, name, RootKind.XmlFragment),
+    YXmlSharedType(doc, name, RootKind.XmlFragment),
     Iterable<Any?> {
-    constructor() : this(YDoc(), "")
+    constructor() : this(YDoc(), "") {
+        markDetached()
+    }
 
     constructor(nodes: Collection<YXmlNode>) : this() {
         push(nodes.toList())
@@ -669,7 +775,11 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
 
     constructor(vararg nodes: YXmlNode) : this(nodes.toList())
 
-    val length: Int get() = xmlItems().size
+    val length: Int
+        get() {
+            if (warnIfPreliminary()) return preliminaryList.size
+            return xmlItems().size
+        }
 
     val attrSize: Int get() = getAttrs().size
 
@@ -677,8 +787,27 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
 
     fun insert(index: Int, nodes: List<YXmlNode>) {
         if (nodes.isEmpty()) return
+        val insertionValues = nodes.map(YXmlNode::toRichSnapshotInsertionValue)
+        if (isPreliminary) {
+            preliminaryList.addAll(index.coerceIn(0, preliminaryList.size), insertionValues)
+            return
+        }
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
+        if (insertionValues.any { child -> child is AbstractYType }) {
+            doc.transact {
+                var insertionIndex = start
+                insertionValues.forEach { child ->
+                    when (child) {
+                        is AbstractYType -> insertType(insertionIndex, child)
+                        is YXmlNode -> insert(insertionIndex, listOf(child))
+                        else -> error("unsupported XML snapshot child: ${child::class.qualifiedName}")
+                    }
+                    insertionIndex++
+                }
+            }
+            return
+        }
         doc.transact {
             val anchors = doc.insertionAnchors(name, RootKind.XmlFragment, start)
             var origin = anchors.first
@@ -704,8 +833,14 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
 
     fun insertTypes(index: Int, types: List<AbstractYType>) {
         if (types.isEmpty()) return
+        if (isPreliminary) {
+            require(types.none { type -> type === this }) { "shared type cannot contain itself" }
+            preliminaryList.addAll(index.coerceIn(0, preliminaryList.size), types)
+            return
+        }
         val start = index.coerceAtLeast(0)
         require(start <= length) { "insert index is out of bounds" }
+        doc.preflightNestedValue(types)
         doc.transact {
             val anchors = doc.insertionAnchors(name, RootKind.XmlFragment, start)
             var origin = anchors.first
@@ -760,21 +895,41 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
     }
 
     fun delete(index: Int, length: Int = 1) {
+        if (isPreliminary) {
+            if (length <= 0 || preliminaryList.isEmpty()) return
+            val start = index.coerceIn(0, preliminaryList.size)
+            repeat(minOf(length, preliminaryList.size - start)) { preliminaryList.removeAt(start) }
+            return
+        }
         doc.deleteVisible(name, index, length)
     }
 
-    fun setAttr(key: String, value: Any?): Any? = doc.setTypeAttribute(name, key, value)
+    fun setAttr(key: String, value: Any?): Any? {
+        if (isPreliminary) {
+            preliminaryMap[key] = value
+            return value
+        }
+        return doc.setTypeAttribute(name, key, value)
+    }
 
     fun setAttribute(key: String, value: Any?): Any? = setAttr(key, value)
 
     fun setAttrs(values: Map<String, Any?>): YXmlFragment {
+        if (isPreliminary) {
+            values.forEach { (key, value) -> preliminaryMap[key] = value }
+            return this
+        }
+        doc.preflightNestedValue(values.values.toList())
         doc.transact {
             values.toSortedMap().forEach { (key, value) -> setAttr(key, value) }
         }
         return this
     }
 
-    fun getAttr(key: String): Any? = doc.typeAttribute(name, key)
+    fun getAttr(key: String): Any? {
+        if (warnIfPreliminary()) return null
+        return doc.typeAttribute(name, key)
+    }
 
     fun getAttr(key: String, snapshot: Snapshot): Any? =
         doc.mapValueAtSnapshot(this, key, snapshot)?.let(doc::valueToAny)
@@ -783,7 +938,10 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
 
     fun getAttribute(key: String, snapshot: Snapshot): Any? = getAttr(key, snapshot)
 
-    fun getAttrs(): Map<String, Any?> = doc.typeAttributes(name)
+    fun getAttrs(): Map<String, Any?> {
+        if (warnIfPreliminary()) return emptyMap()
+        return doc.typeAttributes(name)
+    }
 
     fun getAttributes(): Map<String, Any?> = getAttrs()
 
@@ -812,7 +970,10 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
         getAttrs().forEach { (key, value) -> action(value, key, this) }
     }
 
-    fun hasAttr(key: String): Boolean = doc.hasTypeAttribute(name, key)
+    fun hasAttr(key: String): Boolean {
+        if (warnIfPreliminary()) return false
+        return doc.hasTypeAttribute(name, key)
+    }
 
     fun hasAttr(key: String, snapshot: Snapshot): Boolean =
         doc.mapValueAtSnapshot(this, key, snapshot) != null
@@ -822,6 +983,10 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
     fun hasAttribute(key: String, snapshot: Snapshot): Boolean = hasAttr(key, snapshot)
 
     fun deleteAttr(key: String) {
+        if (isPreliminary) {
+            preliminaryMap.remove(key)
+            return
+        }
         doc.deleteTypeAttribute(name, key)
     }
 
@@ -834,6 +999,10 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
     }
 
     fun clearAttrs() {
+        if (isPreliminary) {
+            preliminaryMap.clear()
+            return
+        }
         doc.transact {
             getAttrs().keys.forEach(::deleteAttr)
         }
@@ -858,7 +1027,10 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
 
     fun toList(): List<Any?> = toArray()
 
-    fun toArray(): List<Any?> = xmlItems().map { it.content.toXmlChild(doc) }
+    fun toArray(): List<Any?> {
+        if (warnIfPreliminary()) return emptyList()
+        return xmlItems().map { it.content.toXmlChild(doc) }
+    }
 
     fun toDelta(): List<YArrayDeltaOp> = xmlChildrenToDelta(toArray())
 
@@ -873,6 +1045,7 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
         origin: Any? = null,
         renderer: AbstractRenderer = activeRenderer,
     ) {
+        if (!isPreliminary) doc.preflightSharedTypes(delta.map { op -> op.insert })
         doc.transact({ transaction ->
             var renderedIndex = 0
             delta.forEach { op ->
@@ -1104,12 +1277,39 @@ internal fun ItemContent.toXmlNode(doc: YDoc): YXmlNode = when (this) {
         is YXmlElementType -> type.toNode()
         is YXmlTextType -> YXmlText(type.toString())
         is YXmlHook -> YXmlText(type.toString())
-        else -> error("unsupported XML fragment type child: ${type::class.simpleName}")
+        is YXmlFragment -> YXmlText(type.toString())
+        else -> YXmlText("[object Object]")
     }
     else -> error("item content is not an XML fragment child: ${this::class.simpleName}")
 }
 
-private fun YXmlNode.copyNode(): YXmlNode = toValue().toNode()
+private fun YXmlNode.copyNode(): YXmlNode = clone()
+
+/**
+ * Rich snapshot text cannot be represented by the single-run static XML text value. Promote
+ * only the snapshot subtree that needs it to detached live XML types before insertion.
+ */
+private fun YXmlNode.toRichSnapshotInsertionValue(): Any = when (this) {
+    is YXmlSnapshotText -> toDetachedType()
+    is YXmlText -> this
+    is YXmlElement -> {
+        val convertedChildren = toList().map(YXmlNode::toRichSnapshotInsertionValue)
+        if (convertedChildren.none { child -> child is AbstractYType }) {
+            this
+        } else {
+            YXmlElementType(nodeName).also { element ->
+                element.setAttrs(getAttrs())
+                convertedChildren.forEach { child ->
+                    when (child) {
+                        is AbstractYType -> element.push(child)
+                        is YXmlNode -> element.push(child)
+                        else -> error("unsupported XML snapshot child: ${child::class.qualifiedName}")
+                    }
+                }
+            }
+        }
+    }
+}
 
 private fun xmlSibling(type: AbstractYType, offset: Int): Any? {
     val parent = type.parent ?: return null
@@ -1277,6 +1477,15 @@ private fun renderXmlText(text: String, attributes: Map<String, Any?>): String {
     val closing = formats.keys.toList().asReversed().joinToString(separator = "") { name -> "</$name>" }
     return opening + text + closing
 }
+
+internal fun renderXmlTextDelta(delta: YTextDelta): String =
+    delta.ops.joinToString(separator = "") { op ->
+        when (val insert = op.insert) {
+            is String -> renderXmlText(insert, op.attributes)
+            null -> ""
+            else -> renderXmlText(xmlAttrValueToString(insert), op.attributes)
+        }
+    }
 
 private fun xmlFormatAttrsToString(value: Any?): String = when (value) {
     is Map<*, *> -> value.entries
