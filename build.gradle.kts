@@ -1,10 +1,12 @@
+import java.util.zip.ZipFile
+
 plugins {
     kotlin("jvm") version "2.2.20"
     `maven-publish`
 }
 
 group = "dev.yks"
-version = providers.gradleProperty("releaseVersion").getOrElse("0.1.0-SNAPSHOT")
+version = providers.gradleProperty("releaseVersion").getOrElse("0.1.1-SNAPSHOT")
 
 val semanticVersionPattern = Regex(
     """^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$""",
@@ -16,6 +18,14 @@ kotlin {
 
 java {
     withSourcesJar()
+}
+
+val legalNoticeFiles = listOf("LICENSE", "THIRD_PARTY_NOTICES")
+
+tasks.withType<Jar>().configureEach {
+    from(legalNoticeFiles.map { rootProject.file(it) }) {
+        into("META-INF")
+    }
 }
 
 tasks.test {
@@ -59,6 +69,13 @@ publishing {
                 name.set("YKS")
                 description.set("Kotlin/JVM implementation of the Yjs document model and update protocol.")
                 url.set("https://github.com/hwisu/yks")
+                licenses {
+                    license {
+                        name.set("MIT License")
+                        url.set("https://github.com/hwisu/yks/blob/main/LICENSE")
+                        distribution.set("repo")
+                    }
+                }
                 developers {
                     developer {
                         id.set("hwisu")
@@ -84,6 +101,49 @@ publishing {
             }
         }
     }
+}
+
+val publicationMetadataTest = tasks.register("publicationMetadataTest") {
+    description = "Verifies license metadata in the Maven POM and published JARs."
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    dependsOn("generatePomFileForMavenJavaPublication", "jar", "sourcesJar")
+
+    doLast {
+        val expectedNotices = legalNoticeFiles.associateWith { rootProject.file(it).readBytes() }
+        val pomFile = layout.buildDirectory.file("publications/mavenJava/pom-default.xml").get().asFile
+        val pomText = pomFile.readText()
+        listOf(
+            "<name>MIT License</name>",
+            "<url>https://github.com/hwisu/yks/blob/main/LICENSE</url>",
+            "<distribution>repo</distribution>",
+        ).forEach { fragment ->
+            check(fragment in pomText) {
+                "Generated Maven POM is missing license metadata: $fragment"
+            }
+        }
+
+        listOf(
+            tasks.named<Jar>("jar").get().archiveFile.get().asFile,
+            tasks.named<Jar>("sourcesJar").get().archiveFile.get().asFile,
+        ).forEach { artifact ->
+            ZipFile(artifact).use { archive ->
+                expectedNotices.forEach { (name, expectedBytes) ->
+                    val path = "META-INF/$name"
+                    val entry = checkNotNull(archive.getEntry(path)) {
+                        "${artifact.name} is missing $path"
+                    }
+                    val actualBytes = archive.getInputStream(entry).use { it.readBytes() }
+                    check(actualBytes.contentEquals(expectedBytes)) {
+                        "${artifact.name} contains stale $path"
+                    }
+                }
+            }
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(publicationMetadataTest)
 }
 
 tasks.withType<org.gradle.api.publish.maven.tasks.PublishToMavenRepository>().configureEach {

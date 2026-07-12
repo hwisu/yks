@@ -12,7 +12,7 @@ the audited boundary.
 
 ## Install
 
-Release `0.1.0` is published as `dev.yks:yks:0.1.0` in the repository's GitHub
+Release `0.1.1` is published as `dev.yks:yks:0.1.1` in the repository's GitHub
 Packages Maven registry. GitHub requires authentication when downloading Maven
 packages, including packages attached to public repositories.
 
@@ -54,7 +54,7 @@ Then add the dependency:
 
 ```kotlin
 dependencies {
-    implementation("dev.yks:yks:0.1.0")
+    implementation("dev.yks:yks:0.1.1")
 }
 ```
 
@@ -223,5 +223,11 @@ git diff --exit-code -- interop/yjs-v1/fixtures
 See [the interoperability harness documentation](interop/yjs-v1/README.md) for
 scenario details and standalone update verifiers.
 
-Pushing a tag such as `v0.1.0` runs the same gates, publishes that immutable
+Pushing a tag such as `v0.1.1` runs the same gates, publishes that immutable
 version to GitHub Packages, and verifies it again from a clean remote consumer.
+
+## License
+
+YKS is distributed under the [MIT License](LICENSE). Published binary and source
+JARs include the license and the preserved [upstream Yjs and lib0 attributions](THIRD_PARTY_NOTICES)
+under `META-INF`.

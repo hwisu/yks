@@ -3,7 +3,7 @@ plugins {
     application
 }
 
-val yksVersion = providers.gradleProperty("yksVersion").getOrElse("0.1.0-SNAPSHOT")
+val yksVersion = providers.gradleProperty("yksVersion").getOrElse("0.1.1-SNAPSHOT")
 
 kotlin {
     jvmToolchain(21)

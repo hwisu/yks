@@ -10,13 +10,15 @@
 - 작업 시작 기준 원격 커밋: `origin/main` = `dd019cf`
 - 이 문서를 포함하는 릴리스 커밋에서 공개 API·observer/snapshot/GC 후속 감사를 완료하고 패키지 CI를 추가함
 - 2026-07-12 정밀 감사에서 확인한 core wire/convergence blocker와 후속 edge case를 모두 수정하고 전체 gate를 재검증함
+- MIT 라이선스, upstream Yjs/lib0 저작권 고지, Maven POM/JAR 검증을 추가하고 `v0.1.1` 교정 릴리스를 준비함
 - JavaScript API·mutable 내부 객체 모델·browser DOM까지 동일한 완전 복제는 아니며, 차이는 `YJS_COMPATIBILITY.md`에 명시함
 - 모든 개선 커밋은 구현·회귀 테스트와 이 문서를 함께 갱신함
 
 현재 커밋 이력:
 
 ```text
-HEAD ci: update GitHub Actions runtimes
+HEAD chore: license published YKS artifacts
+08cdfd0 ci: update GitHub Actions runtimes
 f9b6563 feat: publish audited Yjs Kotlin package
 dd019cf fix: complete audited Yjs Kotlin parity
 570194c fix: align Yjs cleanup map and XML semantics
@@ -470,6 +472,23 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
   - GitHub-hosted runner의 Node 20 폐기 경고를 제거하도록 Node 24 기반 공식 Actions를 commit SHA로 고정
 - 정확한 호환성 계약과 남은 Kotlin/JVM 차이는 `YJS_COMPATIBILITY.md`에 기록
 
+### 31. MIT 라이선스와 검증 가능한 패키지 고지
+
+- 루트 `LICENSE`에 `Copyright (c) 2026 hwisu`의 표준 MIT 전문 추가
+- 포트의 upstream인 Yjs `13.6.31`의 Kevin Jahns/RWTH MIT 고지를 `THIRD_PARTY_NOTICES`에 원문 보존
+- binary/any/RLE codec의 upstream인 lib0의 Kevin Jahns 2019 MIT 고지도 같은 파일에 원문 보존
+- binary JAR과 sources JAR 모두 다음 파일을 포함:
+  - `META-INF/LICENSE`
+  - `META-INF/THIRD_PARTY_NOTICES`
+- Maven POM에 `MIT License`, repository license URL, `distribution=repo` 기록
+- `publicationMetadataTest`를 `check`에 연결해 다음을 매 CI에서 검증:
+  - 생성 POM의 MIT metadata
+  - binary/source JAR 안의 두 legal file 존재
+  - packaged legal file과 repository 원본의 byte-for-byte 일치
+- standalone consumer가 실제 resolved JAR을 열어 MIT 본문과 Yjs/lib0 attribution을 재확인
+- 이미 immutable하게 게시된 `v0.1.0` artifact는 덮어쓰지 않음
+- license-complete artifact는 새 patch version `v0.1.1`로 게시하고 clean remote consumer로 재검증
+
 ## 완료된 작업: XML + subdocument V1
 
 다음 구현과 fixture를 XML/subdocument parity 커밋에 포함함:
@@ -545,7 +564,7 @@ subdoc-duplicate-guid-v1.bin
 마지막 전체 검증:
 
 ```text
-./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.0-test
+./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.1-test
 BUILD SUCCESSFUL
 ```
 
@@ -553,6 +572,8 @@ BUILD SUCCESSFUL
 - Kotlin Yjs V1/V2 interop tests: 78 passed
 - JavaScript/Yjs oracle tests: 106 passed
 - Maven Local standalone consumer: passed
+- Maven POM + binary/source JAR MIT metadata/content: passed
+- resolved consumer JAR의 MIT + upstream Yjs/lib0 attribution: passed
 - deterministic upstream differential: 500 seeds, 0 failures
 - 15,000 nested insertion regression: passed
 - fixture regeneration diff: clean
@@ -564,7 +585,7 @@ BUILD SUCCESSFUL
 cd /Volumes/D/yks
 npm run interop:generate
 npm run test:interop
-./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.0-test
+./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.1-test
 git diff --exit-code -- interop/yjs-v1/fixtures
 git diff --check
 ```
