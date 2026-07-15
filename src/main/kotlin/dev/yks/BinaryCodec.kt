@@ -24,6 +24,23 @@ internal fun checkedClockAdd(left: Long, right: Long, label: String = "clock"): 
     }
 }
 
+internal fun Long.toNonNegativeInt(label: String): Int {
+    check(this in 0..Int.MAX_VALUE.toLong()) { "$label exceeds Int range: $this" }
+    return toInt()
+}
+
+internal fun Long.toIntExact(label: String): Int {
+    check(this in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) { "$label exceeds Int range: $this" }
+    return toInt()
+}
+
+internal fun boundedIntRangeEnd(start: Int, length: Long, size: Int, label: String): Int {
+    check(start in 0..size) { "$label start is out of bounds: $start" }
+    check(length >= 0) { "$label length must be non-negative: $length" }
+    val boundedLength = minOf(length, (size - start).toLong()).toInt()
+    return start + boundedLength
+}
+
 class BinaryEncoder {
     private val out = ByteArrayOutputStream()
 

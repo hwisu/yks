@@ -581,5 +581,6 @@ private fun List<StoreItem>.toIdSet(): IdSet {
     return idSet
 }
 
-private fun IdSet.rangeLengthAsInt(): Int =
-    ranges().sumOf { (_, range) -> range.len }.toInt()
+private fun IdSet.rangeLengthAsInt(): Int = ranges()
+    .fold(0L) { length, (_, range) -> checkedClockAdd(length, range.len, "undo range length") }
+    .toNonNegativeInt("undo range length")

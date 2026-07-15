@@ -287,7 +287,7 @@ private fun YText.renderedTextAttributesForCleanup(
         val format = formatItem.content as? ItemContent.TextFormat ?: return@forEach
         val start = textItems.indexOfFirst { textItem -> textItem.id == format.target }
         if (start < 0) return@forEach
-        val end = (start + format.length.toInt()).coerceAtMost(textItems.size)
+        val end = boundedIntRangeEnd(start, format.length, textItems.size, "text format cleanup")
         for (index in start until end) {
             attributes[index].applyTextFormatAttributesForCleanup(format.attributes)
         }

@@ -16,6 +16,7 @@ class StructStore(private val owner: YDoc? = null) {
     private var allItemsCache: List<StoreItem>? = null
     private val sequenceCache: MutableMap<String, List<StoreItem>> = mutableMapOf()
     private val mapEntriesCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
+    private val mapOrderCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
 
     internal val ownerDoc: YDoc? get() = owner
 
@@ -442,10 +443,17 @@ class StructStore(private val owner: YDoc? = null) {
                 .sortedWith(compareBy<StoreItem> { it.id.clock }.thenBy { it.id.client })
         }
 
+    internal fun cachedMapOrder(parent: String, key: String, compute: () -> List<StoreItem>): List<StoreItem> =
+        mapOrderCache.getOrPut(parent to key, compute)
+
     private fun invalidateCaches(item: StoreItem) {
         allItemsCache = null
         sequenceCache.remove(item.parent)
-        item.parentSub?.let { key -> mapEntriesCache.remove(item.parent to key) }
+        item.parentSub?.let { key ->
+            val cacheKey = item.parent to key
+            mapEntriesCache.remove(cacheKey)
+            mapOrderCache.remove(cacheKey)
+        }
     }
 
     private fun StoreItem.contains(id: Id): Boolean =

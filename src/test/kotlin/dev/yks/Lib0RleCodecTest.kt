@@ -3,6 +3,7 @@ package dev.yks
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class Lib0RleCodecTest {
     @Test
@@ -47,6 +48,19 @@ class Lib0RleCodecTest {
 
         val decoder = Lib0StringDecoder(encoded)
         assertEquals(listOf("a", "😀", "bc", ""), List(4) { decoder.read() })
+    }
+
+    @Test
+    fun stringStreamRejectsLengthsThatWouldWrapToAValidInt() {
+        val lengths = Lib0UintOptRleEncoder().apply { write(4_294_967_297) }
+        val encoded = BinaryEncoder().apply {
+            writeString("a")
+            writeRawBytes(lengths.toByteArray())
+        }.toByteArray()
+
+        assertFailsWith<IllegalStateException> {
+            Lib0StringDecoder(encoded).read()
+        }
     }
 
     private fun hex(value: String): ByteArray = value.chunked(2).map { it.toInt(16).toByte() }.toByteArray()

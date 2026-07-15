@@ -27,7 +27,11 @@ class ItemTextListPosition(
         if (!item.deleted && item.content is ContentFormat) {
             updateCurrentFormats(currentFormats, item.content)
         } else {
-            index += rendererContentLength(renderer, item).toInt()
+            index = checkedClockAdd(
+                index.toLong(),
+                rendererContentLength(renderer, item),
+                "text list position index",
+            ).toNonNegativeInt("text list position index")
         }
         left = item
         right = getTypeStructs(type).nextAfter(item)
@@ -228,9 +232,11 @@ fun typeListInsertGenericsAfter(type: AbstractYType, referenceItem: Item?, conte
         val structs = getTypeStructs(type)
         val position = structs.indexOfFirst { it.id == referenceItem.id }
         require(position >= 0) { "reference item must belong to the parent type" }
-        structs.take(position + 1)
+        structs.asSequence()
+            .take(position + 1)
             .filter { item -> !item.deleted && item.countable }
-            .sumOf { item -> item.length.toInt() }
+            .fold(0L) { length, item -> checkedClockAdd(length, item.length, "list insertion index") }
+            .toNonNegativeInt("list insertion index")
     }
     typeListInsertGenerics(type, index, content)
 }
@@ -285,13 +291,19 @@ internal fun renderedSequenceIndexToVisibleIndex(
     type.doc.sequence(type.name)
         .filter { item -> item.content.kind == type.kind && item.countable }
         .forEach { item ->
-            val renderedLength = rendererContentLength(renderer, item.toItemStruct(type.doc)).toInt()
+            val renderedLength = rendererContentLength(renderer, item.toItemStruct(type.doc))
+                .toNonNegativeInt("rendered sequence length")
             if (renderedLength > 0 && rendered + renderedLength > target) {
                 return visible + (target - rendered)
             }
-            rendered += renderedLength
+            rendered = checkedClockAdd(
+                rendered.toLong(),
+                renderedLength.toLong(),
+                "rendered sequence index",
+            ).toNonNegativeInt("rendered sequence index")
             if (!item.deleted) {
-                visible += item.length.toInt()
+                visible = checkedClockAdd(visible.toLong(), item.length, "visible sequence index")
+                    .toNonNegativeInt("visible sequence index")
             }
         }
     if (clampToEnd && target >= rendered) return visible
@@ -306,7 +318,7 @@ private fun collectRendererAttributedDeletedIds(
     renderer: AbstractRenderer,
 ): IdSet {
     val targetStart = startRendered.coerceAtLeast(0).toLong()
-    val targetEnd = targetStart + length
+    val targetEnd = checkedClockAdd(targetStart, length.toLong(), "rendered delete range end")
     val deleteIds = createIdSet()
     var rendered = 0L
     type.doc.sequence(type.name)
@@ -316,7 +328,7 @@ private fun collectRendererAttributedDeletedIds(
             val renderedLength = rendererContentLength(renderer, struct)
             if (renderedLength <= 0) return@forEach
             val itemStart = rendered
-            val itemEnd = rendered + renderedLength
+            val itemEnd = checkedClockAdd(rendered, renderedLength, "rendered item end")
             if (item.deleted && itemEnd > targetStart && itemStart < targetEnd) {
                 val contents = mutableListOf<AttributedContent>()
                 renderer.readContent(
@@ -330,13 +342,17 @@ private fun collectRendererAttributedDeletedIds(
                 var contentStart = itemStart
                 contents.forEach { attributed ->
                     val contentLength = attributed.content.getLength()
-                    val contentEnd = contentStart + contentLength
+                    val contentEnd = checkedClockAdd(contentStart, contentLength, "rendered content end")
                     val overlapStart = maxOf(targetStart, contentStart)
                     val overlapEnd = minOf(targetEnd, contentEnd)
                     if (overlapEnd > overlapStart) {
                         deleteIds.add(
                             item.id.client,
-                            attributed.clock + (overlapStart - contentStart),
+                            checkedClockAdd(
+                                attributed.clock,
+                                overlapStart - contentStart,
+                                "attributed delete clock",
+                            ),
                             overlapEnd - overlapStart,
                         )
                     }

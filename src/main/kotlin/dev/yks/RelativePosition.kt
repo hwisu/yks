@@ -44,7 +44,8 @@ fun createRelativePositionFromTypeIndex(
     }
 
     items.forEachIndexed { itemIndex, item ->
-        val length = rendererContentLength(renderer, item.toItemStruct(type.doc)).toInt()
+        val length = rendererContentLength(renderer, item.toItemStruct(type.doc))
+            .toNonNegativeInt("relative position item length")
         if (length > remaining) {
             return createRelativePosition(
                 type,
@@ -94,15 +95,19 @@ fun createAbsolutePositionFromRelativePosition(
                 anchorId.clock < checkedClockAdd(candidate.id.clock, candidate.length, "relative position item end")
         }
         if (rawIndex < 0) return null
-        val visibleBefore = ordered
+        val visibleBefore = ordered.asSequence()
             .take(rawIndex)
-            .sumOf { before -> rendererContentLength(renderer, before.toItemStruct(doc)) }
+            .fold(0L) { length, before ->
+                checkedClockAdd(length, rendererContentLength(renderer, before.toItemStruct(doc)), "relative position index")
+            }
         val includeAnchor = !item.deleted && (
             relativePosition.assoc < 0 ||
                 (!followUndoneDeletions && originalItem.deleted && anchorId != itemId)
             )
         val anchorLength = if (includeAnchor) rendererContentLength(renderer, item.toItemStruct(doc)) else 0
-        return AbsolutePosition(type, (visibleBefore + anchorLength).toInt(), relativePosition.assoc)
+        val absoluteIndex = checkedClockAdd(visibleBefore, anchorLength, "relative position index")
+            .toNonNegativeInt("relative position index")
+        return AbsolutePosition(type, absoluteIndex, relativePosition.assoc)
     }
 
     val type = when {
@@ -118,8 +123,10 @@ fun createAbsolutePositionFromRelativePosition(
         0
     } else {
         doc.relativePositionSequence(type)
-            .sumOf { item -> rendererContentLength(renderer, item.toItemStruct(doc)) }
-            .toInt()
+            .fold(0L) { length, item ->
+                checkedClockAdd(length, rendererContentLength(renderer, item.toItemStruct(doc)), "relative position index")
+            }
+            .toNonNegativeInt("relative position index")
     }
     return AbsolutePosition(type, index, relativePosition.assoc)
 }
@@ -175,7 +182,7 @@ fun readRelativePosition(decoder: BinaryDecoder): RelativePosition {
         else -> error("unknown relative position tag: $tag")
     }
     return if (decoder.hasRemaining()) {
-        relativePosition.copy(assoc = decoder.readVarInt().toInt())
+        relativePosition.copy(assoc = decoder.readVarInt().toIntExact("relative position assoc"))
     } else {
         relativePosition
     }

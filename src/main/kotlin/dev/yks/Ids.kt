@@ -240,20 +240,11 @@ fun _deleteRangeFromIdSet(set: IdMap, client: Long, clock: Long, len: Long) {
 fun diffIdSet(set: IdSet, exclude: IdSet): IdSet {
     val result = createIdSet()
     set.ranges().forEach { (client, range) ->
-        set.slice(client, range.clock, range.len)
-            .filter { it.exists }
-            .forEach { slice ->
-                var cursor = slice.clock
-                exclude.slice(client, slice.clock, slice.len).forEach { excluded ->
-                    if (excluded.clock > cursor) {
-                        result.add(client, cursor, excluded.clock - cursor)
-                    }
-                    if (!excluded.exists) {
-                        result.add(client, excluded.clock, excluded.len)
-                    }
-                    cursor = checkedClockAdd(excluded.clock, excluded.len, "excluded id range end")
-                }
+        exclude.slice(client, range.clock, range.len).forEach { excluded ->
+            if (!excluded.exists) {
+                result.add(client, excluded.clock, excluded.len)
             }
+        }
     }
     return result
 }
@@ -485,8 +476,12 @@ class IdMap(
         if (len == 0L) return
         val range = AttrRange(clock, len, attrs)
         val checkedAttrs = attrs.map(::cacheAttribute).distinct()
-        clients.getOrPut(client) { mutableListOf() }.add(range.copy(attrs = checkedAttrs))
-        normalize(client)
+        val storedRange = range.copy(attrs = checkedAttrs)
+        val ranges = clients.getOrPut(client) { mutableListOf() }
+        if (!ranges.addIfDisjoint(storedRange)) {
+            ranges.add(storedRange)
+            normalize(client)
+        }
     }
 
     fun delete(client: Long, clock: Long, len: Long) {
@@ -550,8 +545,10 @@ class IdMap(
 
     fun ranges(client: Long): List<AttrRange> = clients[client].orEmpty()
 
-    fun ranges(): List<Pair<Long, AttrRange>> = clients.toSortedMap().flatMap { (client, ranges) ->
-        ranges.map { client to it }
+    fun ranges(): List<Pair<Long, AttrRange>> = buildList {
+        clients.keys.sorted().forEach { client ->
+            clients.getValue(client).forEach { range -> add(client to range) }
+        }
     }
 
     internal fun copy(): IdMap {
@@ -581,6 +578,56 @@ private data class IndexedAttrRange(
     val order: Int,
     val range: AttrRange,
 )
+
+private fun MutableList<AttrRange>.addIfDisjoint(incoming: AttrRange): Boolean {
+    val last = lastOrNull()
+    if (last == null) {
+        add(incoming)
+        return true
+    }
+    if (last.end <= incoming.clock) {
+        if (last.end == incoming.clock && last.attrs == incoming.attrs) {
+            this[lastIndex] = last.copyWith(
+                last.clock,
+                checkedClockAdd(last.len, incoming.len, "merged attribute range length"),
+            )
+        } else {
+            add(incoming)
+        }
+        return true
+    }
+
+    var low = 0
+    var high = size
+    while (low < high) {
+        val middle = (low + high) ushr 1
+        if (this[middle].clock < incoming.clock) low = middle + 1 else high = middle
+    }
+    var insertionIndex = low
+    val left = getOrNull(insertionIndex - 1)
+    val right = getOrNull(insertionIndex)
+    if (left?.let { range -> range.end > incoming.clock } == true) return false
+    if (right?.let { range -> incoming.end > range.clock } == true) return false
+
+    var merged = incoming
+    if (left != null && left.end == merged.clock && left.attrs == merged.attrs) {
+        merged = left.copyWith(
+            left.clock,
+            checkedClockAdd(left.len, merged.len, "merged attribute range length"),
+        )
+        removeAt(--insertionIndex)
+    }
+    val next = getOrNull(insertionIndex)
+    if (next != null && merged.end == next.clock && merged.attrs == next.attrs) {
+        merged = merged.copyWith(
+            merged.clock,
+            checkedClockAdd(merged.len, next.len, "merged attribute range length"),
+        )
+        removeAt(insertionIndex)
+    }
+    add(insertionIndex, merged)
+    return true
+}
 
 private fun normalizeAttrRanges(ranges: List<AttrRange>): List<AttrRange> {
     val indexedRanges = ranges.filter { range -> range.len > 0 }.mapIndexed(::IndexedAttrRange)
@@ -716,8 +763,7 @@ fun diffIdMap(idMap: IdMap, exclude: IdSet): IdMap {
     idMap.ranges().forEach { (client, range) ->
         exclude.slice(client, range.clock, range.len).forEach { slice ->
             if (!slice.exists) {
-                val attrs = idMap.slice(client, slice.clock, slice.len).firstOrNull()?.attrs.orEmpty()
-                result.add(client, slice.clock, slice.len, attrs)
+                result.add(client, slice.clock, slice.len, range.attrs)
             }
         }
     }
@@ -736,8 +782,7 @@ fun intersectMaps(left: IdMap, right: IdMap): IdMap {
         right.slice(client, range.clock, range.len).forEach { slice ->
             val rightAttrs = slice.attrs
             if (rightAttrs != null) {
-                val leftAttrs = left.slice(client, slice.clock, slice.len).firstOrNull()?.attrs.orEmpty()
-                result.add(client, slice.clock, slice.len, joinAttrs(leftAttrs, rightAttrs))
+                result.add(client, slice.clock, slice.len, joinAttrs(range.attrs, rightAttrs))
             }
         }
     }

@@ -135,7 +135,7 @@ internal fun renderTextDeepDelta(type: YText, options: DeepDeltaRenderOptions): 
     val delta = YTextDelta()
     val formatAttributions = textFormatAttributionsByTarget(type, options)
     renderSequenceItems(type, type.kind, options).forEach { rendered ->
-        val length = rendered.content.content.getLength().toInt()
+        val length = rendered.content.content.getLength().toNonNegativeInt("rendered text length")
         val attribution = createAttributionFromAttributionItems(rendered.content.attrs, rendered.content.deleted)
             .orEmpty()
             .mergeTextAttribution(formatAttributions[rendered.item.id].orEmpty())
@@ -204,7 +204,7 @@ private fun textFormatAttributionsByTarget(
             val start = textItems.indexOfFirst { textItem -> textItem.id == format.target }
             if (start < 0) return@forEach
             val renderedFormatContents = item.readRenderedContents(type.doc, options)
-            val end = (start + format.length.toInt()).coerceAtMost(textItems.size)
+            val end = boundedIntRangeEnd(start, format.length, textItems.size, "text format attribution")
             for (index in start until end) {
                 val changedKeys = format.changedKeysAt(index - start)
                 if (changedKeys.isEmpty()) continue
@@ -518,7 +518,7 @@ private fun renderSequenceDelta(
 ): List<YArrayDeltaOp> {
     val delta = mutableListOf<YArrayDeltaOp>()
     renderSequenceItems(type, kind, options).forEach { rendered ->
-        val length = rendered.content.content.getLength().toInt()
+        val length = rendered.content.content.getLength().toNonNegativeInt("rendered sequence length")
         when (rendered.action) {
             RenderedDeltaAction.Insert -> {
                 val insert = value(rendered)

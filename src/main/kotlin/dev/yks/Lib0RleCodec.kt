@@ -158,8 +158,9 @@ internal class Lib0StringDecoder(bytes: ByteArray) {
     }
 
     fun read(): String {
-        val end = offset + lengths.read().toInt()
-        check(end in offset..value.length) { "invalid string stream length" }
+        val length = lengths.read()
+        check(length <= (value.length - offset).toLong()) { "invalid string stream length" }
+        val end = offset + length.toNonNegativeInt("string stream length")
         return value.substring(offset, end).also { offset = end }
     }
 }

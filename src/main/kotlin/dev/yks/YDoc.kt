@@ -1087,35 +1087,87 @@ class YDoc(
         else -> null
     }
 
-    internal fun mapItemOrder(parent: String, key: String): List<StoreItem> {
+    internal fun mapItemOrder(parent: String, key: String): List<StoreItem> =
+        store.cachedMapOrder(parent, key) { buildMapItemOrder(parent, key) }
+
+    private fun buildMapItemOrder(parent: String, key: String): List<StoreItem> {
         val entries = store.mapEntries(parent, key)
         if (entries.isEmpty()) return emptyList()
-        val remaining = entries.sortedBy { item -> item.id }.toMutableList()
+        val entriesByClient = entries.groupBy { item -> item.id.client }
+            .mapValues { (_, clientEntries) -> clientEntries.sortedBy { item -> item.id.clock } }
+
+        fun findEntry(id: Id?): StoreItem? {
+            if (id == null) return null
+            val clientEntries = entriesByClient[id.client] ?: return null
+            var low = 0
+            var high = clientEntries.lastIndex
+            var candidate: StoreItem? = null
+            while (low <= high) {
+                val middle = (low + high) ushr 1
+                val entry = clientEntries[middle]
+                if (entry.id.clock <= id.clock) {
+                    candidate = entry
+                    low = middle + 1
+                } else {
+                    high = middle - 1
+                }
+            }
+            return candidate?.takeIf { entry -> entry.containsClockId(id) }
+        }
+
+        val remainingIds = entries.mapTo(hashSetOf()) { item -> item.id }
+        val dependents = mutableMapOf<Id, MutableList<StoreItem>>()
+        val indegrees = mutableMapOf<Id, Int>()
+        entries.forEach { item ->
+            val ownerId = findEntry(item.origin)?.id
+            indegrees[item.id] = if (ownerId == null) 0 else 1
+            if (ownerId != null) {
+                dependents.getOrPut(ownerId) { mutableListOf() }.add(item)
+            }
+        }
+
+        val ready = java.util.PriorityQueue(compareBy<StoreItem> { item -> item.id })
+        entries.filterTo(ready) { item -> indegrees.getValue(item.id) == 0 }
         val ordered = mutableListOf<StoreItem>()
 
-        while (remaining.isNotEmpty()) {
-            val nextIndex = remaining.indexOfFirst { item ->
-                val owner = item.origin?.let { origin -> entries.firstOrNull { existing -> existing.containsClockId(origin) } }
-                owner == null || ordered.any { existing -> existing.id == owner.id }
-            }.takeIf { index -> index >= 0 } ?: 0
-            insertMapItem(ordered, remaining.removeAt(nextIndex))
+        while (remainingIds.isNotEmpty()) {
+            var item = ready.poll()
+            while (item != null && item.id !in remainingIds) item = ready.poll()
+            if (item == null) {
+                item = entries.asSequence()
+                    .filter { candidate -> candidate.id in remainingIds }
+                    .minBy { candidate -> candidate.id }
+            }
+            insertMapItem(ordered, item, ::findEntry)
+            remainingIds.remove(item.id)
+            dependents[item.id].orEmpty().forEach { dependent ->
+                val next = indegrees.getValue(dependent.id) - 1
+                indegrees[dependent.id] = next
+                if (next == 0 && dependent.id in remainingIds) ready.add(dependent)
+            }
         }
 
         return ordered
     }
 
-    private fun insertMapItem(ordered: MutableList<StoreItem>, item: StoreItem) {
+    private fun insertMapItem(
+        ordered: MutableList<StoreItem>,
+        item: StoreItem,
+        findEntry: (Id?) -> StoreItem?,
+    ) {
         var leftIndex = item.origin?.let { origin ->
-            ordered.indexOfFirst { existing -> existing.containsClockId(origin) }.takeIf { index -> index >= 0 }
+            val ownerId = findEntry(origin)?.id ?: return@let null
+            ordered.indexOfFirst { existing -> existing.id == ownerId }.takeIf { index -> index >= 0 }
         } ?: -1
         var scanIndex = leftIndex + 1
-        val conflictingItems = linkedSetOf<StoreItem>()
-        val itemsBeforeOrigin = linkedSetOf<StoreItem>()
+        val conflictingItems = hashSetOf<Id>()
+        val itemsBeforeOrigin = hashSetOf<Id>()
 
         while (scanIndex < ordered.size) {
             val other = ordered[scanIndex]
-            itemsBeforeOrigin.add(other)
-            conflictingItems.add(other)
+            val otherOriginId = findEntry(other.origin)?.id
+            itemsBeforeOrigin.add(other.id)
+            conflictingItems.add(other.id)
             when {
                 compareIDs(item.origin, other.origin) -> {
                     if (other.id.client < item.id.client) {
@@ -1125,8 +1177,8 @@ class YDoc(
                         break
                     }
                 }
-                other.origin != null && itemsBeforeOrigin.any { before -> before.containsClockId(other.origin) } -> {
-                    if (conflictingItems.none { conflicting -> conflicting.containsClockId(other.origin) }) {
+                otherOriginId != null && otherOriginId in itemsBeforeOrigin -> {
+                    if (otherOriginId !in conflictingItems) {
                         leftIndex = scanIndex
                         conflictingItems.clear()
                     }
@@ -1732,7 +1784,7 @@ class YDoc(
         if (start < 0) return emptyList()
 
         val changed = mutableListOf<StoreItem>()
-        val end = (start + format.length.toInt()).coerceAtMost(textItems.size)
+        val end = boundedIntRangeEnd(start, format.length, textItems.size, "text format")
         for (index in start until end) {
             replaceTextAttributes(textItems[index], format.attributes)?.let(changed::add)
         }
@@ -1747,7 +1799,7 @@ class YDoc(
         val start = items.indexOfFirst { textItem -> textItem.content.kind == format.kind && textItem.id == format.target }
         if (start < 0) return
 
-        val end = (start + format.length.toInt()).coerceAtMost(items.size)
+        val end = boundedIntRangeEnd(start, format.length, items.size, "text format")
         for (index in start until end) {
             items.replaceTextAttributes(index, format.attributes)
         }
@@ -2745,7 +2797,8 @@ class YDoc(
         }
         var renderedIndex = 0
         sequence(parent).forEach { item ->
-            val itemLength = rendererContentLength(renderer, item.toItemStruct(this)).toInt()
+            val itemLength = rendererContentLength(renderer, item.toItemStruct(this))
+                .toNonNegativeInt("rendered nested item length")
             if (!item.deleted || itemLength > 0) {
                 when (val content = item.content) {
                     is ItemContent.Value -> content.value.nestedTypeRefPaths()
@@ -2756,7 +2809,11 @@ class YDoc(
                     children.add(listOf(renderedIndex) + segments to nestedName)
                 }
             }
-            renderedIndex += itemLength
+            renderedIndex = checkedClockAdd(
+                renderedIndex.toLong(),
+                itemLength.toLong(),
+                "rendered nested index",
+            ).toNonNegativeInt("rendered nested index")
         }
         return children
     }

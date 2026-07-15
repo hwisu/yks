@@ -19,7 +19,8 @@
 현재 커밋 이력:
 
 ```text
-HEAD perf: scale range and struct-store operations
+HEAD perf: avoid redundant range and map-order work
+1cc5574 perf: scale range and struct-store operations
 8f9fea0 ci: install rustfmt for Yrs oracle
 7a37019 test: add Yrs compatibility oracle
 53482f4 chore: license published YKS artifacts
@@ -552,6 +553,27 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
   - `./gradlew test interopTest --no-daemon`
   - `npm run test:interop` (`Yjs` 106, `Yrs` 4)
   - `git diff --check`
+
+### 34. range 조합, map winner order, 수치 축소 후속 감사
+
+- `IdMap`의 정렬된 disjoint range fast-path 추가:
+  - 겹치지 않는 append/insert는 전체 boundary sweep 없이 이진 위치 탐색과 인접 병합만 수행
+  - decode/create/merge처럼 이미 정렬된 range 입력은 range당 전체 재정규화를 피함
+  - `diffIdSet`, `diffIdMap`, `intersectMaps`가 이미 순회 중인 range를 다시 slice하던 중복 제거
+- 같은 map parent/key의 winner order 재계산 축소:
+  - client별 clock index에서 origin owner를 이진 탐색
+  - causal-ready item을 ID 우선순위 queue로 처리해 반복적인 `entries.firstOrNull`/`ordered.any` 제거
+  - conflict scan의 Yjs 비교 규칙은 유지하고 origin membership만 ID set 조회로 전환
+  - struct mutation 때 key 단위 logical-order cache를 무효화
+- Kotlin의 명시적 수치 축소 규칙 적용:
+  - formatting range의 `Long` length는 `toInt()` wrap 전에 남은 sequence 범위로 clamp
+  - renderer/relative-position/undo delta의 `Long`→`Int`는 범위 검증 후 변환
+  - lib0 string stream의 32-bit wrap 가능 length, update slice/expansion clock overflow를 mutation 전 거부
+- 회귀 검증:
+  - `IdMap` interval 결과를 이전 clock materialization 참조 모델과 deterministic 200 seed 비교
+  - map order/delta 및 upstream 500-seed differential 통과
+  - `./gradlew test interopTest --no-daemon`
+  - `npm run test:interop` (`Yjs` 106, `Yrs` 4)
 
 주요 경로:
 

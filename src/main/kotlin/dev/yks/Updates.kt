@@ -1342,9 +1342,10 @@ private fun DecodedUpdateStruct.slice(offset: Long, offsetEnd: Long): DecodedUpd
     if (offsetEnd > 0) {
         slicedContent.splice(keepLength)
     }
+    val slicedClock = checkedClockAdd(id.clock, offset, "sliced update clock")
     return copy(
-        id = Id(id.client, id.clock + offset),
-        origin = if (offset == 0L) origin else Id(id.client, id.clock + offset - 1),
+        id = Id(id.client, slicedClock),
+        origin = if (offset == 0L) origin else Id(id.client, slicedClock - 1),
         length = keepLength,
         content = slicedContent,
     )
@@ -1370,11 +1371,13 @@ private fun DecodedUpdateStruct.toStoreItems(original: StoreItem? = null): List<
     require(contents.size.toLong() == length) {
         "local update content length ${contents.size} does not match struct length $length"
     }
+    checkedClockAdd(id.clock, length, "expanded update end")
     return contents.mapIndexed { index, itemContent ->
         val clockOffset = index.toLong()
+        val itemClock = checkedClockAdd(id.clock, clockOffset, "expanded update clock")
         StoreItem(
-            id = Id(id.client, id.clock + clockOffset),
-            origin = if (index == 0) origin else Id(id.client, id.clock + clockOffset - 1),
+            id = Id(id.client, itemClock),
+            origin = if (index == 0) origin else Id(id.client, itemClock - 1),
             rightOrigin = rightOrigin,
             parent = parent,
             parentSub = parentSub,
