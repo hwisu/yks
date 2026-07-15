@@ -1,5 +1,7 @@
 package dev.yks
 
+import java.util.TreeMap
+
 data class YDocOptions(
     val clientId: Long = YDoc.generateNewClientId(),
     val guid: String = java.util.UUID.randomUUID().toString(),
@@ -1047,20 +1049,13 @@ private fun mergeDecodedUpdates(
     updates: List<DocumentUpdate>,
     encode: (DocumentUpdate) -> ByteArray,
 ): ByteArray {
-    val items = mutableListOf<StoreItem>()
+    val items = MergedClockRanges()
     val deleteSet = DeleteSet.empty()
     updates.forEach { decoded ->
-        decoded.items.forEach { item ->
-            items.mergeClockRange(item)
-        }
+        decoded.items.forEach(items::add)
         deleteSet.addAll(decoded.deleteSet)
     }
-    deleteSet.clients.forEach { (client, ranges) ->
-        ranges.forEach { range ->
-            items.filter { it.id.client == client && rangesOverlap(it.id.clock, it.length, range.clock, range.length) }
-                .forEach { it.deleted = true }
-        }
-    }
+    items.markDeleted(deleteSet)
     val parentItemIds = updates.fold(linkedMapOf<String, Id>()) { merged, update ->
         merged.apply { putAll(update.parentItemIds) }
     }
@@ -1069,9 +1064,7 @@ private fun mergeDecodedUpdates(
     }
     return encode(
         DocumentUpdate(
-            items = items
-                .sortedWith(compareBy<StoreItem> { item -> item.id.client }.thenBy { item -> item.id.clock })
-                .resolveSyntheticParentsFromUnion(),
+            items = items.toList().resolveSyntheticParentsFromUnion(),
             deleteSet = deleteSet,
             parentItemIds = parentItemIds,
             parentKinds = parentKinds,
@@ -1083,30 +1076,76 @@ private fun mergeDecodedUpdates(
  * Merged updates may contain the same packed GC/ContentDeleted clocks at different boundaries.
  * Yjs merges those structs as clock intervals. Deduplicating only by the starting [Id] either
  * loses an extending tail or leaves overlapping structs that cannot be represented on standard
- * wire. Store ordinary content one clock at a time and subtract all existing coverage from an
+ * wire. Index each client's ranges by their starting clock and subtract existing coverage from an
  * incoming range before retaining its uncovered pieces.
  */
-private fun MutableList<StoreItem>.mergeClockRange(incoming: StoreItem) {
-    val incomingEnd = checkedClockAdd(incoming.id.clock, incoming.length)
-    val duplicateIndex = indexOfFirst { existing ->
-        existing.id == incoming.id && existing.length == incoming.length
-    }
-    if (duplicateIndex >= 0) {
-        this[duplicateIndex] = this[duplicateIndex].mergeDuplicateMetadata(incoming)
-        return
-    }
-    val overlapping = filter { existing ->
-        existing.id.client == incoming.id.client &&
-            rangesOverlap(existing.id.clock, existing.length, incoming.id.clock, incoming.length)
-    }
-    if (incoming.deleted) overlapping.forEach { existing -> existing.deleted = true }
+private class MergedClockRanges {
+    private val itemsByClient = linkedMapOf<Long, TreeMap<Long, StoreItem>>()
 
-    var uncovered = listOf(incoming.id.clock untilClock incomingEnd)
-    overlapping.sortedBy { existing -> existing.id.clock }.forEach { existing ->
-        val existingEnd = checkedClockAdd(existing.id.clock, existing.length)
-        uncovered = uncovered.flatMap { range -> range.subtract(existing.id.clock, existingEnd) }
+    fun add(incoming: StoreItem) {
+        val clientItems = itemsByClient.getOrPut(incoming.id.client) { TreeMap() }
+        val incomingEnd = checkedClockAdd(incoming.id.clock, incoming.length, "merged update item end")
+        val sameStart = clientItems[incoming.id.clock]
+        if (sameStart != null && sameStart.length == incoming.length) {
+            clientItems[incoming.id.clock] = sameStart.mergeDuplicateMetadata(incoming)
+            return
+        }
+
+        var uncoveredStart = incoming.id.clock
+        val uncoveredRanges = mutableListOf<Pair<Long, Long>>()
+        var entry = clientItems.firstEndingAfter(incoming.id.clock)
+        while (entry != null && entry.key < incomingEnd) {
+            val existing = entry.value
+            if (incoming.deleted) existing.deleted = true
+            if (existing.id.clock > uncoveredStart) {
+                uncoveredRanges.add(uncoveredStart to minOf(existing.id.clock, incomingEnd))
+            }
+            uncoveredStart = maxOf(uncoveredStart, checkedClockAdd(existing.id.clock, existing.length, "existing item end"))
+            if (uncoveredStart >= incomingEnd) break
+            entry = clientItems.higherEntry(entry.key)
+        }
+        if (uncoveredStart < incomingEnd) {
+            uncoveredRanges.add(uncoveredStart to incomingEnd)
+        }
+        uncoveredRanges.forEach { (start, end) -> clientItems.insertRange(incoming.sliceClockRange(start, end)) }
     }
-    uncovered.forEach { range -> add(incoming.sliceClockRange(range.start, range.end)) }
+
+    fun markDeleted(deleteSet: DeleteSet) {
+        deleteSet.clients.forEach { (client, ranges) ->
+            val clientItems = itemsByClient[client] ?: return@forEach
+            ranges.forEach { range ->
+                var entry = clientItems.firstEndingAfter(range.clock)
+                while (entry != null && entry.key < range.end) {
+                    entry.value.deleted = true
+                    entry = clientItems.higherEntry(entry.key)
+                }
+            }
+        }
+    }
+
+    fun toList(): List<StoreItem> = buildList(itemsByClient.values.sumOf { items -> items.size }) {
+        itemsByClient.keys.sorted().forEach { client -> addAll(itemsByClient.getValue(client).values) }
+    }
+}
+
+private fun TreeMap<Long, StoreItem>.firstEndingAfter(clock: Long): Map.Entry<Long, StoreItem>? {
+    val floor = floorEntry(clock)
+    return if (floor != null && checkedClockAdd(floor.key, floor.value.length, "merged item end") > clock) {
+        floor
+    } else {
+        ceilingEntry(clock)
+    }
+}
+
+private fun TreeMap<Long, StoreItem>.insertRange(item: StoreItem) {
+    val itemEnd = checkedClockAdd(item.id.clock, item.length, "inserted merged item end")
+    check(lowerEntry(item.id.clock)?.let { left -> checkedClockAdd(left.key, left.value.length) > item.id.clock } != true) {
+        "merged update items overlap on the left"
+    }
+    check(ceilingEntry(item.id.clock)?.key?.let { rightClock -> rightClock < itemEnd } != true) {
+        "merged update items overlap on the right"
+    }
+    put(item.id.clock, item)
 }
 
 /** Duplicate standard/private representations must not make a lossless merge input-order dependent. */
@@ -1165,25 +1204,6 @@ private fun chooseLosslessAttributes(
     right.isEmpty() -> left
     else -> error("conflicting private text metadata for duplicate update item")
 }
-
-private data class ClockInterval(val start: Long, val end: Long) {
-    init {
-        require(start >= 0 && end > start) { "clock interval must be non-empty" }
-    }
-
-    fun subtract(otherStart: Long, otherEnd: Long): List<ClockInterval> {
-        if (otherEnd <= start || otherStart >= end) return listOf(this)
-        return buildList(2) {
-            if (otherStart > start) add(ClockInterval(start, minOf(otherStart, end)))
-            if (otherEnd < end) add(ClockInterval(maxOf(otherEnd, start), end))
-        }
-    }
-}
-
-private infix fun Long.untilClock(end: Long): ClockInterval = ClockInterval(this, end)
-
-private fun rangesOverlap(leftClock: Long, leftLength: Long, rightClock: Long, rightLength: Long): Boolean =
-    leftClock < checkedClockAdd(rightClock, rightLength) && rightClock < checkedClockAdd(leftClock, leftLength)
 
 private fun StoreItem.sliceClockRange(start: Long, end: Long): StoreItem {
     val originalEnd = checkedClockAdd(id.clock, length)

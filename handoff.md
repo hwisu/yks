@@ -13,13 +13,15 @@
 - MIT 라이선스, upstream Yjs/lib0 저작권 고지, Maven POM/JAR 검증을 포함한 `v0.1.1` 교정 릴리스를 게시·검증함
 - Yrs `0.27.2`를 독립 Rust oracle로 고정하고 공통 Yjs wire/CRDT 영역의 양방향 drift를 재검증함
 - 2026-07-16 감사에서 struct-store 조회/재계산과 ID range 연산의 길이 비례 비용을 제거하고 전체 oracle을 재검증함
+- `mergeUpdates`의 client별 clock-range 병합을 정렬 인덱스로 전환해 update 수·struct 수에 따른 반복 전체 탐색을 제거함
 - JavaScript API·mutable 내부 객체 모델·browser DOM까지 동일한 완전 복제는 아니며, 차이는 `YJS_COMPATIBILITY.md`에 명시함
 - 모든 개선 커밋은 구현·회귀 테스트와 이 문서를 함께 갱신함
 
 현재 커밋 이력:
 
 ```text
-HEAD perf: avoid redundant range and map-order work
+HEAD perf: index merged update clock ranges
+138b48e perf: avoid redundant range and map-order work
 1cc5574 perf: scale range and struct-store operations
 8f9fea0 ci: install rustfmt for Yrs oracle
 7a37019 test: add Yrs compatibility oracle
@@ -574,6 +576,25 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
   - map order/delta 및 upstream 500-seed differential 통과
   - `./gradlew test interopTest --no-daemon`
   - `npm run test:interop` (`Yjs` 106, `Yrs` 4)
+
+### 35. update range merge 인덱싱
+
+- `mergeUpdates`/`mergeUpdatesV2` 내부의 struct union을 client별 clock 정렬 range로 관리:
+  - 매 struct마다 전체 merged 목록을 `indexOfFirst`/`filter`하던 반복 탐색 제거
+  - client별 이진 탐색으로 첫 중첩 range를 찾고 실제 중첩 구간만 순회
+  - 비중첩 조각은 clock 순서를 유지해 삽입하고 최종 client 정렬 한 번만 수행
+- delete set 적용도 전체 struct filter 대신 client별 첫 중첩 위치를 이진 탐색:
+  - packed GC/`ContentDeleted` range와 부분 overlap의 기존 의미 유지
+  - exact duplicate의 origin/right-origin/parent metadata 합성 규칙 유지
+- 1,000개 clock struct를 가진 동일 update 중복 병합 회귀 테스트 추가:
+  - 병합 결과의 state vector와 실제 array materialization을 원본과 비교
+  - 입력 struct 수가 실제로 1,000개인지 함께 고정해 테스트가 단일 packed range로 퇴화하지 않도록 검증
+- 검증:
+  - `./gradlew test interopTest --no-daemon`
+  - `npm run test:interop` (`Yjs` 106, `Yrs` 4)
+  - `./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.1-audit3`
+  - `npm run interop:check-clean`
+  - `git diff --check`
 
 주요 경로:
 

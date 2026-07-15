@@ -80,6 +80,23 @@ class UpdateApiTest {
     }
 
     @Test
+    fun mergeUpdatesHandlesLargeDuplicateClockSets() {
+        val source = YDoc(clientId = 1, gc = false)
+        val array = source.getArray("items")
+        repeat(1_000) { value -> array.insert(0, listOf(value)) }
+        val update = source.encodeStateAsUpdate()
+
+        assertEquals(1_000, decodeUpdate(update).structs.size)
+
+        val merged = mergeUpdates(listOf(update, update))
+        val target = YDoc(clientId = 2, gc = false)
+        target.applyUpdate(merged)
+
+        assertEquals(source.stateVector(), target.stateVector())
+        assertEquals(array.toList(), target.getArray("items").toList())
+    }
+
+    @Test
     fun mergeUpdatesValidateAndNormalizeSingleInputByFormat() {
         val source = YDoc(clientId = 1)
         source.getText("body").insert(0, "x")
