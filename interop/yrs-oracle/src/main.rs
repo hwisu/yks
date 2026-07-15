@@ -218,11 +218,9 @@ fn generate_bundle() -> OracleResult<FixtureBundle> {
     let root = nested_map_doc.get_or_insert_map("root");
     let nested_map_v1 = {
         let mut txn = nested_map_doc.transact_mut();
-        let profile = MapPrelim::from([
-            ("name".to_owned(), "Ada".to_owned()),
-            ("city".to_owned(), "Seoul".to_owned()),
-        ]);
-        root.insert(&mut txn, "profile", profile);
+        let profile: MapRef = root.insert(&mut txn, "profile", MapPrelim::default());
+        profile.insert(&mut txn, "name", "Ada");
+        profile.insert(&mut txn, "city", "Seoul");
         txn.encode_update_v1()
     };
 

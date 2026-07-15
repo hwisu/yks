@@ -20,7 +20,8 @@
 현재 커밋 이력:
 
 ```text
-HEAD perf: fast-path disjoint update ranges
+HEAD test: make Yrs nested fixture deterministic
+da7f988 perf: fast-path disjoint update ranges
 3779364 perf: index merged update clock ranges
 138b48e perf: avoid redundant range and map-order work
 1cc5574 perf: scale range and struct-store operations
@@ -610,6 +611,18 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
   - `npm run test:interop` (`Yjs` 106, `Yrs` 4)
   - `./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.1-audit4`
   - `npm run interop:check-clean`
+  - `git diff --check`
+
+### 37. Yrs nested-map fixture 결정성 교정
+
+- CI의 `interop:generate` 후 `nested-map-v1.bin` drift 원인 제거:
+  - `MapPrelim::from`의 내부 `HashMap` 순회 순서에 fixture bytes가 의존하던 경로 제거
+  - 빈 nested `MapRef`를 먼저 통합하고 `name`, `city`를 명시적 순서로 삽입
+  - 기존 fixture bytes와 의미를 유지하면서 반복 생성 결과를 byte-exact하게 고정
+- 검증:
+  - `npm run interop:generate` 반복 실행 후 `npm run interop:check-clean`
+  - `cargo fmt --check`와 `cargo test --locked`
+  - `./gradlew test interopTest --no-daemon`
   - `git diff --check`
 
 주요 경로:
