@@ -383,7 +383,7 @@ sealed class AbstractYType protected constructor(
     }
 
     private fun emitTypeEvent(event: YTypeEvent) {
-        callAllYksCallbacks(eventListeners[event.name].orEmpty().toList().map { listener -> { listener(event) } })
+        callAllYksCallbacks(eventListeners[event.name].orEmpty().toList()) { listener -> listener(event) }
     }
 
     fun getPathTo(child: AbstractYType, renderer: AbstractRenderer = baseRenderer): List<Any> {
@@ -616,7 +616,8 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         if (isPreliminary) {
             if (length <= 0 || preliminaryList.isEmpty()) return
             val start = index.coerceIn(0, preliminaryList.size)
-            repeat(minOf(length, preliminaryList.size - start)) { preliminaryList.removeAt(start) }
+            val end = start + minOf(length, preliminaryList.size - start)
+            preliminaryList.subList(start, end).clear()
             return
         }
         doc.deleteVisible(name, index, length)

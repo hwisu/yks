@@ -292,6 +292,29 @@ class StructHelperTest {
     }
 
     @Test
+    fun structRangeHelpersRejectOverflowWithoutPartiallyMerging() {
+        val gc = GC(Id(1, 0), Long.MAX_VALUE)
+        val skip = Skip(Id(2, 0), Long.MAX_VALUE)
+
+        assertFailsWith<IllegalStateException> {
+            gc.mergeWith(GC(Id(1, Long.MAX_VALUE), 1))
+        }
+        assertFailsWith<IllegalStateException> {
+            skip.mergeWith(Skip(Id(2, Long.MAX_VALUE), 1))
+        }
+        assertEquals(Long.MAX_VALUE, gc.length)
+        assertEquals(Long.MAX_VALUE, skip.length)
+
+        val nearLimit = mutableListOf<AbstractStruct>(GC(Id(3, Long.MAX_VALUE), 1))
+        assertFailsWith<IllegalStateException> {
+            iterateStructs(nearLimit, Long.MAX_VALUE, 1) {}
+        }
+        assertFailsWith<IllegalStateException> {
+            iterateStructsWithoutSplits(nearLimit, Long.MAX_VALUE, 1) { _, _, _ -> }
+        }
+    }
+
+    @Test
     fun iterateStructsByIdSetWithoutSplitsUsesStoreRangesAndSkipsMissingClocks() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("body")

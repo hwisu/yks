@@ -46,11 +46,22 @@ fun createRelativePositionFromTypeIndex(
     items.forEachIndexed { itemIndex, item ->
         val length = rendererContentLength(renderer, item.toItemStruct(type.doc)).toInt()
         if (length > remaining) {
-            return createRelativePosition(type, item = Id(item.id.client, item.id.clock + remaining), assoc = assoc)
+            return createRelativePosition(
+                type,
+                item = Id(item.id.client, checkedClockAdd(item.id.clock, remaining.toLong(), "relative position clock")),
+                assoc = assoc,
+            )
         }
         remaining -= length
         if (assoc < 0 && itemIndex == items.lastIndex) {
-            return createRelativePosition(type, item = Id(item.id.client, item.id.clock + item.length - 1), assoc = assoc)
+            return createRelativePosition(
+                type,
+                item = Id(
+                    item.id.client,
+                    checkedClockAdd(item.id.clock, item.length - 1, "relative position clock"),
+                ),
+                assoc = assoc,
+            )
         }
     }
     return createRelativePositionForTypeEndpoint(type, assoc)

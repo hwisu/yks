@@ -6,7 +6,7 @@ data class IdRange(val clock: Long, val len: Long) {
         require(len >= 0) { "len must be non-negative" }
     }
 
-    val end: Long get() = checkedClockAdd(clock, len, "id range end")
+    val end: Long = checkedClockAdd(clock, len, "id range end")
 
     val attrs: List<ContentAttribute> get() = emptyList()
 
@@ -96,8 +96,7 @@ class IdSet(
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return
-        clients.getOrPut(client) { mutableListOf() }.add(IdRange(clock, len))
-        normalize(client)
+        clients.getOrPut(client) { mutableListOf() }.addAndMerge(IdRange(clock, len))
     }
 
     fun add(id: Id, len: Long = 1) {
@@ -105,10 +104,11 @@ class IdSet(
     }
 
     fun delete(client: Long, clock: Long, len: Long) {
+        require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return
         val ranges = clients[client] ?: return
-        val deleteEnd = clock + len
+        val deleteEnd = checkedClockAdd(clock, len, "id-set delete end")
         val next = mutableListOf<IdRange>()
         ranges.forEach { range ->
             when {
@@ -130,25 +130,33 @@ class IdSet(
         }
     }
 
-    fun has(client: Long, clock: Long): Boolean = clients[client]?.any { it.contains(clock) } == true
+    fun has(client: Long, clock: Long): Boolean =
+        clients[client]?.let { ranges -> findIndexInIdRanges(ranges, clock) != null } == true
 
     fun hasId(id: Id): Boolean = has(id.client, id.clock)
 
     fun intersects(client: Long, clock: Long, len: Long): Boolean {
+        require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return false
-        val end = clock + len
-        return clients[client]?.any { range -> range.clock < end && range.end > clock } == true
+        val end = checkedClockAdd(clock, len, "id-set intersection end")
+        val ranges = clients[client] ?: return false
+        val index = findRangeStartInIdRanges(ranges, clock) ?: return false
+        return ranges[index].clock < end
     }
 
     fun intersects(id: Id, len: Long = 1): Boolean = intersects(id.client, id.clock, len)
 
     fun slice(client: Long, clock: Long, len: Long): List<MaybeIdRange> {
+        require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
-        val end = clock + len
+        val end = checkedClockAdd(clock, len, "id-set slice end")
         val result = mutableListOf<MaybeIdRange>()
         var cursor = clock
-        for (range in ranges(client)) {
+        val ranges = ranges(client)
+        val firstRangeIndex = findRangeStartInIdRanges(ranges, clock) ?: ranges.size
+        for (index in firstRangeIndex until ranges.size) {
+            val range = ranges[index]
             if (range.end <= cursor) continue
             if (range.clock >= end) break
             if (cursor < range.clock) {
@@ -174,32 +182,35 @@ class IdSet(
 
     fun ranges(client: Long): List<IdRange> = clients[client].orEmpty()
 
-    fun ranges(): List<Pair<Long, IdRange>> = clients.toSortedMap().flatMap { (client, ranges) ->
-        ranges.map { client to it }
-    }
-
-    internal fun copy(): IdSet {
-        return IdSet(clients.mapValuesTo(linkedMapOf()) { (_, ranges) -> ranges.toMutableList() })
-    }
-
-    private fun normalize(client: Long) {
-        val ranges = clients[client] ?: return
-        val sorted = ranges.filter { it.len > 0 }.sortedBy { it.clock }
-        val merged = mutableListOf<IdRange>()
-        sorted.forEach { range ->
-            val last = merged.lastOrNull()
-            if (last == null || range.clock > last.end) {
-                merged.add(range)
-            } else if (range.end > last.end) {
-                merged[merged.lastIndex] = IdRange(last.clock, range.end - last.clock)
-            }
-        }
-        if (merged.isEmpty()) {
-            clients.remove(client)
-        } else {
-            clients[client] = merged
+    fun ranges(): List<Pair<Long, IdRange>> = buildList {
+        clients.keys.sorted().forEach { client ->
+            clients.getValue(client).forEach { range -> add(client to range) }
         }
     }
+
+    internal fun copy(): IdSet =
+        IdSet(clients.mapValuesTo(linkedMapOf()) { (_, ranges) -> ranges.toMutableList() })
+}
+
+private fun MutableList<IdRange>.addAndMerge(incoming: IdRange) {
+    var low = 0
+    var high = size
+    while (low < high) {
+        val middle = (low + high) ushr 1
+        if (this[middle].end < incoming.clock) low = middle + 1 else high = middle
+    }
+
+    val firstAffected = low
+    var mergedStart = incoming.clock
+    var mergedEnd = incoming.end
+    while (low < size && this[low].clock <= mergedEnd) {
+        mergedStart = minOf(mergedStart, this[low].clock)
+        mergedEnd = maxOf(mergedEnd, this[low].end)
+        low++
+    }
+
+    if (firstAffected < low) subList(firstAffected, low).clear()
+    add(firstAffected, IdRange(mergedStart, mergedEnd - mergedStart))
 }
 
 fun createIdSet(): IdSet = IdSet()
@@ -240,7 +251,7 @@ fun diffIdSet(set: IdSet, exclude: IdSet): IdSet {
                     if (!excluded.exists) {
                         result.add(client, excluded.clock, excluded.len)
                     }
-                    cursor = excluded.clock + excluded.len
+                    cursor = checkedClockAdd(excluded.clock, excluded.len, "excluded id range end")
                 }
             }
     }
@@ -407,7 +418,12 @@ data class AttrRange(
     val len: Long,
     val attrs: List<ContentAttribute>,
 ) {
-    val end: Long get() = clock + len
+    init {
+        require(clock >= 0) { "clock must be non-negative" }
+        require(len >= 0) { "len must be non-negative" }
+    }
+
+    val end: Long = checkedClockAdd(clock, len, "attribute range end")
 
     fun copyWith(clock: Long, len: Long): AttrRange = AttrRange(clock, len, attrs)
 }
@@ -467,46 +483,66 @@ class IdMap(
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return
+        val range = AttrRange(clock, len, attrs)
         val checkedAttrs = attrs.map(::cacheAttribute).distinct()
-        clients.getOrPut(client) { mutableListOf() }.add(AttrRange(clock, len, checkedAttrs))
+        clients.getOrPut(client) { mutableListOf() }.add(range.copy(attrs = checkedAttrs))
         normalize(client)
     }
 
     fun delete(client: Long, clock: Long, len: Long) {
+        require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return
         val oldRanges = clients[client] ?: return
-        val deleteEnd = clock + len
-        val materialized = materialize(oldRanges)
-            .filterKeys { it < clock || it >= deleteEnd }
-        val normalized = rangesFromMaterialized(materialized)
-        if (normalized.isEmpty()) {
+        val deleteEnd = checkedClockAdd(clock, len, "id-map delete end")
+        val remaining = buildList {
+            oldRanges.forEach { range ->
+                when {
+                    range.end <= clock || range.clock >= deleteEnd -> add(range)
+                    else -> {
+                        if (range.clock < clock) add(range.copyWith(range.clock, clock - range.clock))
+                        if (range.end > deleteEnd) add(range.copyWith(deleteEnd, range.end - deleteEnd))
+                    }
+                }
+            }
+        }
+        if (remaining.isEmpty()) {
             clients.remove(client)
         } else {
-            clients[client] = normalized.toMutableList()
+            clients[client] = remaining.toMutableList()
         }
     }
 
-    fun has(client: Long, clock: Long): Boolean = clients[client]?.any { clock >= it.clock && clock < it.end } == true
+    fun has(client: Long, clock: Long): Boolean = clients[client]?.findContainingIndex(clock) != null
 
     fun hasId(id: Id): Boolean = has(id.client, id.clock)
 
     fun slice(client: Long, clock: Long, len: Long): List<MaybeAttrRange> {
+        require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
-        val byClock = materialize(clients[client].orEmpty())
+        val end = checkedClockAdd(clock, len, "id-map slice end")
+        if (len == 0L) return listOf(MaybeAttrRange(clock, 0, null))
+
         val result = mutableListOf<MaybeAttrRange>()
         var cursor = clock
-        val end = clock + len
-        while (cursor < end) {
-            val attrs = byClock[cursor]
-            val start = cursor
-            cursor++
-            while (cursor < end && byClock[cursor] == attrs) cursor++
-            result.add(MaybeAttrRange(start, cursor - start, attrs))
+        val ranges = clients[client].orEmpty()
+        val firstRangeIndex = ranges.findRangeStartIndex(clock) ?: ranges.size
+        for (index in firstRangeIndex until ranges.size) {
+            val range = ranges[index]
+            if (range.clock >= end) break
+            if (range.end <= cursor) continue
+            if (cursor < range.clock) {
+                result.append(MaybeAttrRange(cursor, minOf(range.clock, end) - cursor, null))
+            }
+            val overlapStart = maxOf(cursor, range.clock)
+            val overlapEnd = minOf(end, range.end)
+            if (overlapEnd > overlapStart) {
+                result.append(MaybeAttrRange(overlapStart, overlapEnd - overlapStart, range.attrs))
+                cursor = overlapEnd
+            }
+            if (cursor >= end) break
         }
-        if (result.isEmpty()) {
-            result.add(MaybeAttrRange(clock, len, null))
-        }
+        if (cursor < end) result.append(MaybeAttrRange(cursor, end - cursor, null))
         return result
     }
 
@@ -532,45 +568,111 @@ class IdMap(
     }
 
     private fun normalize(client: Long) {
-        val materialized = materialize(clients[client].orEmpty())
-        val normalized = rangesFromMaterialized(materialized)
+        val normalized = normalizeAttrRanges(clients[client].orEmpty())
         if (normalized.isEmpty()) {
             clients.remove(client)
         } else {
             clients[client] = normalized.toMutableList()
         }
     }
+}
 
-    private fun materialize(ranges: List<AttrRange>): MutableMap<Long, List<ContentAttribute>> {
-        val byClock = sortedMapOf<Long, List<ContentAttribute>>()
-        ranges.sortedWith(compareBy<AttrRange> { it.clock }.thenBy { it.len }).forEach { range ->
-            for (clock in range.clock until range.end) {
-                byClock[clock] = joinAttrs(byClock[clock].orEmpty(), range.attrs)
-            }
-        }
-        return byClock
+private data class IndexedAttrRange(
+    val order: Int,
+    val range: AttrRange,
+)
+
+private fun normalizeAttrRanges(ranges: List<AttrRange>): List<AttrRange> {
+    val indexedRanges = ranges.filter { range -> range.len > 0 }.mapIndexed(::IndexedAttrRange)
+    if (indexedRanges.isEmpty()) return emptyList()
+
+    val starts = mutableMapOf<Long, MutableList<IndexedAttrRange>>()
+    val ends = mutableMapOf<Long, MutableList<IndexedAttrRange>>()
+    val boundaries = sortedSetOf<Long>()
+    indexedRanges.forEach { indexed ->
+        starts.getOrPut(indexed.range.clock) { mutableListOf() }.add(indexed)
+        ends.getOrPut(indexed.range.end) { mutableListOf() }.add(indexed)
+        boundaries.add(indexed.range.clock)
+        boundaries.add(indexed.range.end)
     }
 
-    private fun rangesFromMaterialized(byClock: Map<Long, List<ContentAttribute>>): List<AttrRange> {
-        if (byClock.isEmpty()) return emptyList()
-        val result = mutableListOf<AttrRange>()
-        val clocks = byClock.keys.sorted()
-        var start = clocks.first()
-        var previous = start
-        var attrs = byClock.getValue(start)
-        for (clock in clocks.drop(1)) {
-            val currentAttrs = byClock.getValue(clock)
-            if (clock == previous + 1 && currentAttrs == attrs) {
-                previous = clock
-            } else {
-                result.add(AttrRange(start, previous - start + 1, attrs))
-                start = clock
-                previous = clock
-                attrs = currentAttrs
-            }
+    val active = java.util.TreeSet(
+        compareBy<IndexedAttrRange> { indexed -> indexed.range.clock }
+            .thenBy { indexed -> indexed.range.len }
+            .thenBy { indexed -> indexed.order },
+    )
+    val orderedBoundaries = boundaries.toList()
+    val normalized = mutableListOf<AttrRange>()
+    for (index in 0 until orderedBoundaries.lastIndex) {
+        val boundary = orderedBoundaries[index]
+        ends[boundary]?.forEach(active::remove)
+        starts[boundary]?.forEach(active::add)
+        val nextBoundary = orderedBoundaries[index + 1]
+        if (active.isEmpty() || nextBoundary == boundary) continue
+
+        val attrs = active.fold(emptyList<ContentAttribute>()) { combined, indexed ->
+            joinAttrs(combined, indexed.range.attrs)
         }
-        result.add(AttrRange(start, previous - start + 1, attrs))
-        return result.filter { it.len > 0 }
+        normalized.append(AttrRange(boundary, nextBoundary - boundary, attrs))
+    }
+    return normalized
+}
+
+private fun MutableList<AttrRange>.append(range: AttrRange) {
+    val previous = lastOrNull()
+    if (previous != null && previous.end == range.clock && previous.attrs == range.attrs) {
+        this[lastIndex] = previous.copyWith(
+            previous.clock,
+            checkedClockAdd(previous.len, range.len, "merged attribute range length"),
+        )
+    } else {
+        add(range)
+    }
+}
+
+private fun List<AttrRange>.findContainingIndex(clock: Long): Int? {
+    var low = 0
+    var high = lastIndex
+    while (low <= high) {
+        val middle = (low + high) ushr 1
+        val range = this[middle]
+        when {
+            clock < range.clock -> high = middle - 1
+            clock >= range.end -> low = middle + 1
+            else -> return middle
+        }
+    }
+    return null
+}
+
+private fun List<AttrRange>.findRangeStartIndex(clock: Long): Int? {
+    var low = 0
+    var high = lastIndex
+    while (low <= high) {
+        val middle = (low + high) ushr 1
+        val range = this[middle]
+        when {
+            clock < range.clock -> high = middle - 1
+            clock >= range.end -> low = middle + 1
+            else -> return middle
+        }
+    }
+    return low.takeIf { index -> index < size }
+}
+
+private fun MutableList<MaybeAttrRange>.append(range: MaybeAttrRange) {
+    if (range.len == 0L) return
+    val previous = lastOrNull()
+    if (
+        previous != null &&
+        checkedClockAdd(previous.clock, previous.len, "maybe attribute range end") == range.clock &&
+        previous.attrs == range.attrs
+    ) {
+        this[lastIndex] = previous.copy(
+            len = checkedClockAdd(previous.len, range.len, "merged maybe attribute range length"),
+        )
+    } else {
+        add(range)
     }
 }
 

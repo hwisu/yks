@@ -3556,11 +3556,14 @@ private fun ItemContent.sameTextContentAs(other: ItemContent): Boolean = when {
     else -> false
 }
 
-internal fun callAllYksCallbacks(callbacks: Iterable<() -> Unit>) {
+internal fun callAllYksCallbacks(callbacks: Iterable<() -> Unit>) =
+    callAllYksCallbacks(callbacks) { callback -> callback() }
+
+internal fun <T> callAllYksCallbacks(values: Iterable<T>, callback: (T) -> Unit) {
     var firstError: Throwable? = null
-    callbacks.forEach { callback ->
+    values.forEach { value ->
         try {
-            callback()
+            callback(value)
         } catch (error: Throwable) {
             if (firstError == null) {
                 firstError = error

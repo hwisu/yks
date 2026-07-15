@@ -1,24 +1,26 @@
 # YKS Yjs interoperability handoff
 
-마지막 업데이트: 2026-07-12 KST
+마지막 업데이트: 2026-07-16 KST
 
 ## 저장소 상태
 
 - 저장소: `/Volumes/D/yks`
 - 원격: `https://github.com/hwisu/yks.git`
 - 브랜치: `main`
-- 작업 시작 기준 원격 커밋: `origin/main` = `dd019cf`
+- 이번 성능/관례 감사 시작 기준 원격 커밋: `origin/main` = `8f9fea0`
 - 이 문서를 포함하는 릴리스 커밋에서 공개 API·observer/snapshot/GC 후속 감사를 완료하고 패키지 CI를 추가함
 - 2026-07-12 정밀 감사에서 확인한 core wire/convergence blocker와 후속 edge case를 모두 수정하고 전체 gate를 재검증함
 - MIT 라이선스, upstream Yjs/lib0 저작권 고지, Maven POM/JAR 검증을 포함한 `v0.1.1` 교정 릴리스를 게시·검증함
 - Yrs `0.27.2`를 독립 Rust oracle로 고정하고 공통 Yjs wire/CRDT 영역의 양방향 drift를 재검증함
+- 2026-07-16 감사에서 struct-store 조회/재계산과 ID range 연산의 길이 비례 비용을 제거하고 전체 oracle을 재검증함
 - JavaScript API·mutable 내부 객체 모델·browser DOM까지 동일한 완전 복제는 아니며, 차이는 `YJS_COMPATIBILITY.md`에 명시함
 - 모든 개선 커밋은 구현·회귀 테스트와 이 문서를 함께 갱신함
 
 현재 커밋 이력:
 
 ```text
-HEAD ci: install rustfmt for Yrs oracle
+HEAD perf: scale range and struct-store operations
+8f9fea0 ci: install rustfmt for Yrs oracle
 7a37019 test: add Yrs compatibility oracle
 53482f4 chore: license published YKS artifacts
 08cdfd0 ci: update GitHub Actions runtimes
@@ -522,6 +524,34 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
   - `cargo fmt --check`와 `cargo test --locked`
   - Kotlin/Yrs interop test
   - tracked 변경뿐 아니라 새 untracked fixture도 실패시키는 clean check
+
+### 33. struct-store와 ID range 성능/Kotlin 관례 감사
+
+- Yjs의 client별 clock 정렬 불변식을 실제 조회 경로에서도 재사용:
+  - `StructStore`의 containing/exact lookup, clean-start/end, content replacement를 이진 탐색으로 전환
+  - `getIndex`가 모든 client view를 만들던 경로를 요청 client 하나만 변환하도록 축소
+  - 정렬된 client tail로 `getClock`/state vector를 O(1) 계산
+  - `allItems`는 전체 item 재정렬 대신 client key만 정렬해 병합
+- 동일 store 상태에서 반복되던 비싼 계산을 mutation-aware cache로 제한:
+  - 전체 item view, parent sequence conflict order, map parent/key entry cache 추가
+  - add/split/merge/content replacement 때 영향받은 cache만 무효화
+  - Yjs conflict ordering 알고리즘과 map winner 의미 자체는 변경하지 않음
+- `IdSet`/`DeleteSet`을 정렬 interval 자료구조답게 정리:
+  - add마다 전체 filter/sort/normalize하던 구현을 이진 위치 탐색 + 인접/중첩 interval 병합으로 교체
+  - membership/intersection/slice와 delete-range boundary 조회를 이진 탐색으로 전환
+  - `Long` clock/length overflow를 mutation 전에 거부
+- `IdMap`의 clock 단위 materialization 제거:
+  - 최대 수십억 길이 range를 clock마다 `TreeMap` entry로 펼치던 add/slice/delete를 boundary sweep interval 연산으로 교체
+  - attribute 결합 순서, 인접 동일 attribute 병합, binary attribute identity와 V2 encoding 계약 유지
+  - 10억 clock 중첩/add/slice/delete 회귀 테스트로 길이가 아닌 range 수에 비례함을 고정
+- Kotlin/JVM hot-path 관례 정리:
+  - preliminary array/XML bulk delete를 반복 `removeAt` 대신 `subList.clear()`로 전환
+  - event dispatch의 listener별 wrapper lambda/list 이중 할당 제거
+  - GC/Skip/split/iteration/relative-position 산술에 checked addition 적용
+- 검증:
+  - `./gradlew test interopTest --no-daemon`
+  - `npm run test:interop` (`Yjs` 106, `Yrs` 4)
+  - `git diff --check`
 
 주요 경로:
 

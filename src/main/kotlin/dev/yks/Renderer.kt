@@ -118,7 +118,7 @@ abstract class AbstractRenderer {
     }
 
     fun emit(event: RendererEvent) {
-        callAllYksCallbacks(eventListeners[event.name].orEmpty().toList().map { listener -> { listener(event) } })
+        callAllYksCallbacks(eventListeners[event.name].orEmpty().toList()) { listener -> listener(event) }
     }
 
     open fun destroy() {
@@ -484,20 +484,22 @@ class DiffRenderer(
         @Suppress("UNUSED_PARAMETER") doc: YDoc,
         transaction: YTransactionEvent?,
     ) {
+        val origins = suggestionOrigins
         if (
             !suggestionMode &&
             transaction?.local == true &&
-            (suggestionOrigins == null || suggestionOrigins!!.any { suggestionOrigin -> suggestionOrigin == origin })
+            (origins == null || origins.any { suggestionOrigin -> suggestionOrigin == origin })
         ) {
             applyUpdate(prevDoc, update, origin = this)
         }
     }
 
     private fun handleNextDocAfterTransaction(event: YTransactionEvent) {
+        val origins = suggestionOrigins
         if (
             suggestionMode ||
             !event.local ||
-            (suggestionOrigins != null && suggestionOrigins!!.none { suggestionOrigin -> suggestionOrigin == event.origin })
+            (origins != null && origins.none { suggestionOrigin -> suggestionOrigin == event.origin })
         ) {
             return
         }

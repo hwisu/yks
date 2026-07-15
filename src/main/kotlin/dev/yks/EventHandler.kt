@@ -36,6 +36,5 @@ fun <ARG0, ARG1> callEventHandlerListeners(
     arg0: ARG0,
     arg1: ARG1,
 ) {
-    val callbacks = eventHandler.listeners.toList().map { listener -> { listener(arg0, arg1) } }
-    callAllYksCallbacks(callbacks)
+    callAllYksCallbacks(eventHandler.listeners.toList()) { listener -> listener(arg0, arg1) }
 }

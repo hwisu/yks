@@ -137,7 +137,7 @@ fun writeBlockSet(encoder: UpdateEncoderV2, blocks: BlockSet) {
 fun sliceStruct(left: AbstractStruct, diff: Long): AbstractStruct {
     require(diff >= 0) { "diff must be non-negative" }
     require(diff < left.length) { "diff must be smaller than struct length" }
-    val id = Id(left.id.client, left.id.clock + diff)
+    val id = Id(left.id.client, checkedClockAdd(left.id.clock, diff, "sliced struct clock"))
     val length = left.length - diff
     return when (left) {
         is GC -> GC(id, length)
@@ -148,7 +148,7 @@ fun sliceStruct(left: AbstractStruct, diff: Long): AbstractStruct {
             left.copy(
                 id = id,
                 length = length,
-                origin = if (diff == 0L) left.origin else Id(left.id.client, left.id.clock + diff - 1),
+                origin = if (diff == 0L) left.origin else Id(left.id.client, id.clock - 1),
                 content = rightContent,
             )
         }

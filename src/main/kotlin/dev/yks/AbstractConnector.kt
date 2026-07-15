@@ -34,7 +34,7 @@ open class AbstractConnector(
     }
 
     fun emit(eventName: String, value: Any? = null) {
-        callAllYksCallbacks(listeners[eventName].orEmpty().toList().map { listener -> { listener(value) } })
+        callAllYksCallbacks(listeners[eventName].orEmpty().toList()) { listener -> listener(value) }
     }
 
     override fun close() {

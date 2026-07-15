@@ -39,13 +39,13 @@ class GC(
 
     override fun mergeWith(right: AbstractStruct): Boolean {
         if (right !is GC || right.id.client != id.client || right.id.clock != end) return false
-        length += right.length
+        length = checkedClockAdd(length, right.length, "merged GC length")
         return true
     }
 
     override fun splice(diff: Long): GC {
         require(diff in 1 until length) { "diff must split the struct" }
-        val right = GC(Id(id.client, id.clock + diff), length - diff)
+        val right = GC(Id(id.client, checkedClockAdd(id.clock, diff, "split GC clock")), length - diff)
         length = diff
         return right
     }
@@ -60,13 +60,13 @@ class Skip(
 
     override fun mergeWith(right: AbstractStruct): Boolean {
         if (right !is Skip || right.id.client != id.client || right.id.clock != end) return false
-        length += right.length
+        length = checkedClockAdd(length, right.length, "merged Skip length")
         return true
     }
 
     override fun splice(diff: Long): Skip {
         require(diff in 1 until length) { "diff must split the struct" }
-        val right = Skip(Id(id.client, id.clock + diff), length - diff)
+        val right = Skip(Id(id.client, checkedClockAdd(id.clock, diff, "split Skip clock")), length - diff)
         length = diff
         return right
     }
@@ -151,12 +151,13 @@ fun splitStruct(leftStruct: AbstractStruct, diff: Long): AbstractStruct {
         is Skip -> leftStruct.splice(diff)
         is ItemStruct -> {
             val originalLength = leftStruct.length
+            val rightClock = checkedClockAdd(leftStruct.id.clock, diff, "split item clock")
             val rightContent = leftStruct.content.splice(diff)
             leftStruct.length = diff
             leftStruct.copy(
-                id = Id(leftStruct.id.client, leftStruct.id.clock + diff),
+                id = Id(leftStruct.id.client, rightClock),
                 length = originalLength - diff,
-                origin = Id(leftStruct.id.client, leftStruct.id.clock + diff - 1),
+                origin = Id(leftStruct.id.client, rightClock - 1),
                 content = rightContent,
             )
         }
@@ -170,9 +171,10 @@ fun iterateStructs(
     len: Long,
     action: (AbstractStruct) -> Unit,
 ) {
+    require(clockStart >= 0) { "clockStart must be non-negative" }
     require(len >= 0) { "len must be non-negative" }
     if (len == 0L) return
-    val clockEnd = clockStart + len
+    val clockEnd = checkedClockAdd(clockStart, len, "struct iteration end")
     var index = findIndexCleanStart(structs, clockStart)
     do {
         val struct = structs[index++]
@@ -189,9 +191,10 @@ fun iterateStructsWithoutSplits(
     len: Long,
     action: (struct: AbstractStruct, offset: Long, length: Long) -> Unit,
 ) {
+    require(clockStart >= 0) { "clockStart must be non-negative" }
     require(len >= 0) { "len must be non-negative" }
     if (len == 0L) return
-    val clockEnd = clockStart + len
+    val clockEnd = checkedClockAdd(clockStart, len, "struct iteration end")
     var index = findIndexSS(structs, clockStart)
     while (index < structs.size) {
         val struct = structs[index]
@@ -284,10 +287,14 @@ fun createInsertSliceFromStructs(
             var len = struct.length
             while (index + 1 < structs.size) {
                 val next = structs[index + 1]
-                if (next.id.client != client || next.id.clock != clock + len || (filterDeleted && next.deleted)) {
+                if (
+                    next.id.client != client ||
+                    next.id.clock != checkedClockAdd(clock, len, "insert slice end") ||
+                    (filterDeleted && next.deleted)
+                ) {
                     break
                 }
-                len += next.length
+                len = checkedClockAdd(len, next.length, "insert slice length")
                 index++
             }
             idItems.add(IdRange(clock, len))

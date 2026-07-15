@@ -1,8 +1,10 @@
 package dev.yks
 
+import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -227,6 +229,78 @@ class IdMapTest {
         assertEquals(listOf(0L to AttrRange(0, 1, listOf(a1)), 0L to AttrRange(3, 1, listOf(a1)), 1L to AttrRange(0, 2, listOf(a2))), map.ranges())
     }
 
+    @Test
+    fun idMapKeepsLargeRangesCompressedAcrossAddSliceAndDelete() {
+        val map = createIdMap()
+        val halfBillion = 500_000_000L
+        val billion = 1_000_000_000L
+
+        map.add(7, 0, billion, listOf(a1))
+        map.add(7, halfBillion, billion, listOf(a2))
+
+        assertEquals(
+            listOf(
+                AttrRange(0, halfBillion, listOf(a1)),
+                AttrRange(halfBillion, halfBillion, listOf(a1, a2)),
+                AttrRange(billion, halfBillion, listOf(a2)),
+            ),
+            map.ranges(7),
+        )
+        assertEquals(
+            listOf(
+                MaybeAttrRange(halfBillion - 1, 1, listOf(a1)),
+                MaybeAttrRange(halfBillion, halfBillion, listOf(a1, a2)),
+                MaybeAttrRange(billion, 1, listOf(a2)),
+            ),
+            map.slice(7, halfBillion - 1, halfBillion + 2),
+        )
+
+        map.delete(7, halfBillion / 2, billion)
+
+        assertEquals(
+            listOf(
+                AttrRange(0, halfBillion / 2, listOf(a1)),
+                AttrRange(billion + halfBillion / 2, halfBillion / 2, listOf(a2)),
+            ),
+            map.ranges(7),
+        )
+    }
+
+    @Test
+    fun idMapRejectsOverflowBeforeMutatingState() {
+        val map = createIdMap()
+
+        assertFailsWith<IllegalStateException> {
+            map.add(1, Long.MAX_VALUE, 1, listOf(a1))
+        }
+
+        assertTrue(map.isEmpty())
+        assertTrue(map.attrs.isEmpty())
+    }
+
+    @Test
+    fun intervalNormalizationMatchesThePreviousClockReferenceModel() {
+        val attributeSets = listOf(emptyList(), listOf(a1), listOf(a2), listOf(a3), listOf(a1, a3))
+
+        repeat(200) { seed ->
+            val random = Random(seed)
+            val map = createIdMap()
+            var reference = emptyList<AttrRange>()
+
+            repeat(12) {
+                val range = AttrRange(
+                    clock = random.nextInt(20).toLong(),
+                    len = random.nextInt(1, 7).toLong(),
+                    attrs = attributeSets[random.nextInt(attributeSets.size)],
+                )
+                map.add(9, range.clock, range.len, range.attrs)
+                reference = normalizeByClock(reference + range)
+            }
+
+            assertEquals(reference, map.ranges(9), "interval normalization drifted for seed $seed")
+        }
+    }
+
     private fun idSet(vararg triples: Long): IdSet {
         require(triples.size % 3 == 0)
         val idSet = createIdSet()
@@ -236,5 +310,29 @@ class IdMapTest {
 
     private fun assertIdMapEquals(expected: IdMap, actual: IdMap) {
         assertTrue(equalIdMaps(expected, actual), "expected ${expected.ranges()} but was ${actual.ranges()}")
+    }
+
+    private fun normalizeByClock(ranges: List<AttrRange>): List<AttrRange> {
+        val attributesByClock = sortedMapOf<Long, List<ContentAttribute>>()
+        ranges.sortedWith(compareBy<AttrRange> { range -> range.clock }.thenBy { range -> range.len })
+            .forEach { range ->
+                for (clock in range.clock until range.end) {
+                    val combined = attributesByClock[clock].orEmpty().toMutableList()
+                    range.attrs.forEach { attr -> if (attr !in combined) combined.add(attr) }
+                    attributesByClock[clock] = combined
+                }
+            }
+        if (attributesByClock.isEmpty()) return emptyList()
+
+        val normalized = mutableListOf<AttrRange>()
+        attributesByClock.forEach { (clock, attrs) ->
+            val previous = normalized.lastOrNull()
+            if (previous != null && previous.end == clock && previous.attrs == attrs) {
+                normalized[normalized.lastIndex] = previous.copyWith(previous.clock, previous.len + 1)
+            } else {
+                normalized.add(AttrRange(clock, 1, attrs))
+            }
+        }
+        return normalized
     }
 }

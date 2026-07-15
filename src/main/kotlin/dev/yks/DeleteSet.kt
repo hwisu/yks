@@ -19,18 +19,16 @@ class DeleteSet internal constructor(
 
     fun add(id: Id, length: Long = 1) {
         require(length > 0) { "length must be positive" }
-        clients.getOrPut(id.client) { mutableListOf() }.add(DeleteRange(id.clock, length))
-        normalize(id.client)
+        clients.getOrPut(id.client) { mutableListOf() }.addAndMerge(DeleteRange(id.clock, length))
     }
 
     fun addAll(other: DeleteSet) {
         other.clients.forEach { (client, ranges) ->
-            clients.getOrPut(client) { mutableListOf() }.addAll(ranges)
-            normalize(client)
+            ranges.toList().forEach { range -> add(Id(client, range.clock), range.length) }
         }
     }
 
-    fun contains(id: Id): Boolean = clients[id.client]?.any { it.contains(id.clock) } == true
+    fun contains(id: Id): Boolean = clients[id.client]?.containsClock(id.clock) == true
 
     fun hasId(id: Id): Boolean = contains(id)
 
@@ -60,25 +58,45 @@ class DeleteSet internal constructor(
         return left == right
     }
 
-    private fun normalize(client: Long) {
-        val ranges = clients[client] ?: return
-        if (ranges.isEmpty()) return
-        ranges.sortWith(compareBy<DeleteRange> { it.clock }.thenBy { it.length })
-        val merged = mutableListOf<DeleteRange>()
-        for (range in ranges) {
-            val last = merged.lastOrNull()
-            if (last == null || range.clock > last.end) {
-                merged.add(range)
-            } else {
-                merged[merged.lastIndex] = DeleteRange(last.clock, maxOf(last.end, range.end) - last.clock)
-            }
-        }
-        clients[client] = merged
-    }
-
     companion object {
         fun empty(): DeleteSet = DeleteSet()
     }
+}
+
+private fun MutableList<DeleteRange>.addAndMerge(incoming: DeleteRange) {
+    var low = 0
+    var high = size
+    while (low < high) {
+        val middle = (low + high) ushr 1
+        if (this[middle].end < incoming.clock) low = middle + 1 else high = middle
+    }
+
+    val firstAffected = low
+    var mergedStart = incoming.clock
+    var mergedEnd = incoming.end
+    while (low < size && this[low].clock <= mergedEnd) {
+        mergedStart = minOf(mergedStart, this[low].clock)
+        mergedEnd = maxOf(mergedEnd, this[low].end)
+        low++
+    }
+
+    if (firstAffected < low) subList(firstAffected, low).clear()
+    add(firstAffected, DeleteRange(mergedStart, mergedEnd - mergedStart))
+}
+
+private fun List<DeleteRange>.containsClock(clock: Long): Boolean {
+    var low = 0
+    var high = lastIndex
+    while (low <= high) {
+        val middle = (low + high) ushr 1
+        val range = this[middle]
+        when {
+            clock < range.clock -> high = middle - 1
+            clock >= range.end -> low = middle + 1
+            else -> return true
+        }
+    }
+    return false
 }
 
 fun createDeleteSet(): DeleteSet = DeleteSet.empty()

@@ -3,6 +3,7 @@ package dev.yks
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -139,6 +140,32 @@ class IdSetTest {
 
         assertEquals(listOf(IdRange(1, 1), IdRange(4, 1), IdRange(8, 1)), ranges.getIds())
         assertEquals(listOf(IdRange(1, 4), IdRange(8, 1)), copy.getIds())
+    }
+
+    @Test
+    fun idSetHandlesLargeRangesWithoutExpandingClocks() {
+        val idSet = createIdSet()
+
+        idSet.add(3, 0, 1_000_000_000)
+        idSet.add(3, 500_000_000, 1_000_000_000)
+
+        assertEquals(listOf(IdRange(0, 1_500_000_000)), idSet.ranges(3))
+        assertTrue(idSet.has(3, 1_499_999_999))
+        assertEquals(
+            listOf(MaybeIdRange(1_499_999_999, 1, true), MaybeIdRange(1_500_000_000, 1, false)),
+            idSet.slice(3, 1_499_999_999, 2),
+        )
+    }
+
+    @Test
+    fun idSetRejectsOverflowBeforeMutatingState() {
+        val idSet = createIdSet()
+
+        assertFailsWith<IllegalStateException> {
+            idSet.add(1, Long.MAX_VALUE, 1)
+        }
+
+        assertTrue(idSet.isEmpty())
     }
 
     private fun idSet(vararg triples: Long): IdSet {

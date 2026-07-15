@@ -12,12 +12,19 @@ data class PendingStructs(
 
 class StructStore(private val owner: YDoc? = null) {
     private val clientItems: MutableMap<Long, MutableList<StoreItem>> = linkedMapOf()
+    private val structViewOwner: YDoc by lazy(LazyThreadSafetyMode.NONE) { owner ?: YDoc() }
+    private var allItemsCache: List<StoreItem>? = null
+    private val sequenceCache: MutableMap<String, List<StoreItem>> = mutableMapOf()
+    private val mapEntriesCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
 
     internal val ownerDoc: YDoc? get() = owner
 
     val clients: Map<Long, List<ItemStruct>>
-        get() = clientItems.mapValues { (_, structs) ->
-            structs.map { item -> item.toItemStruct(owner ?: YDoc()) }
+        get() {
+            val viewOwner = structViewOwner
+            return clientItems.mapValues { (_, structs) ->
+                structs.map { item -> item.toItemStruct(viewOwner) }
+            }
         }
 
     val ds: IdSet
@@ -41,6 +48,7 @@ class StructStore(private val owner: YDoc? = null) {
         val structs = clientItems.getOrPut(item.id.client) { mutableListOf() }
         if (structs.isEmpty() || structs.last().endClock() <= item.id.clock) {
             structs.add(item)
+            invalidateCaches(item)
             return true
         }
         val itemEnd = item.endClock()
@@ -58,31 +66,37 @@ class StructStore(private val owner: YDoc? = null) {
             (right != null && right.id.clock < itemEnd)
         ) return false
         structs.add(insertionIndex, item)
+        invalidateCaches(item)
         return true
     }
 
     fun get(id: Id): AbstractStruct {
         val item = getStoreItem(id) ?: error("struct not found: $id")
-        return item.toItemStruct(owner ?: YDoc())
+        return item.toItemStruct(structViewOwner)
     }
 
     fun getItem(id: Id): ItemStruct = get(id) as ItemStruct
 
     fun getIndex(id: Id): StructStoreIndex {
-        val structs = clients[id.client].orEmpty()
-        val index = findIndexSS(structs, id.clock)
-        return StructStoreIndex(structs, index)
+        val storeItems = clientItems[id.client].orEmpty()
+        require(storeItems.isNotEmpty()) { "structs must not be empty" }
+        val index = storeItems.findContainingIndex(id.clock)
+        if (index < 0) error("clock ${id.clock} is not covered by structs")
+        val viewOwner = structViewOwner
+        return StructStoreIndex(storeItems.map { item -> item.toItemStruct(viewOwner) }, index)
     }
 
     internal fun getStoreItem(id: Id): StoreItem? =
-        clientItems[id.client]?.firstOrNull { id.clock >= it.id.clock && id.clock < it.endClock() }
+        clientItems[id.client]?.let { structs ->
+            structs.getOrNull(structs.findContainingIndex(id.clock))
+        }
 
     internal fun getStoreItemCleanStart(
         id: Id,
         onSplit: (StoreItem) -> Unit = {},
     ): StoreItem {
         val structs = clientItems[id.client] ?: error("struct not found: $id")
-        val index = structs.indexOfFirst { item -> id.clock >= item.id.clock && id.clock < item.endClock() }
+        val index = structs.findContainingIndex(id.clock)
         if (index < 0) error("struct not found: $id")
         val item = structs[index]
         if (item.id.clock == id.clock || item.isGc) return item
@@ -94,7 +108,7 @@ class StructStore(private val owner: YDoc? = null) {
         onSplit: (StoreItem) -> Unit = {},
     ): StoreItem {
         val structs = clientItems[id.client] ?: error("struct not found: $id")
-        val index = structs.indexOfFirst { item -> id.clock >= item.id.clock && id.clock < item.endClock() }
+        val index = structs.findContainingIndex(id.clock)
         if (index < 0) error("struct not found: $id")
         val item = structs[index]
         val splitOffset = id.clock - item.id.clock + 1
@@ -120,6 +134,7 @@ class StructStore(private val owner: YDoc? = null) {
         )
         structs[index] = left
         structs.add(index + 1, right)
+        invalidateCaches(item)
         return right
     }
 
@@ -132,9 +147,7 @@ class StructStore(private val owner: YDoc? = null) {
             var index = structs.lastIndex
             while (index > 0) {
                 val boundary = structs[index].id.clock
-                val touchesDeleteRange = ranges.any { range ->
-                    boundary >= range.clock && boundary <= range.end
-                }
+                val touchesDeleteRange = ranges.touches(boundary)
                 if (touchesDeleteRange && mergeDeletedItemWithLeft(structs, index)) {
                     merged++
                 }
@@ -149,7 +162,7 @@ class StructStore(private val owner: YDoc? = null) {
         var merged = 0
         candidates.asReversed().forEach { candidate ->
             val structs = clientItems[candidate.client] ?: return@forEach
-            val index = structs.indexOfFirst { item -> item.id == candidate }
+            val index = structs.findStartIndex(candidate.clock)
             if (index > 0 && mergeDeletedItemWithLeft(structs, index)) {
                 merged++
             }
@@ -192,6 +205,7 @@ class StructStore(private val owner: YDoc? = null) {
         val mergedLength = checkedClockAdd(left.length, right.length, "merged deleted item length")
         structs[rightIndex - 1] = left.copy(content = leftContent.copy(length = mergedLength))
         structs.removeAt(rightIndex)
+        invalidateCaches(left)
         return true
     }
 
@@ -199,34 +213,36 @@ class StructStore(private val owner: YDoc? = null) {
 
     internal fun collectItemContent(id: Id): StoreItem? {
         val structs = clientItems[id.client] ?: return null
-        val index = structs.indexOfFirst { item -> id.clock >= item.id.clock && id.clock < item.endClock() }
+        val index = structs.findContainingIndex(id.clock)
         if (index < 0) return null
         val item = structs[index]
         if (!item.deleted) return null
         if (item.content is ItemContent.Deleted) return null
         val collected = item.copy(content = ItemContent.Deleted(item.content.kind, item.length))
         structs[index] = collected
+        invalidateCaches(item)
         return collected
     }
 
     internal fun replaceContent(id: Id, content: ItemContent): StoreItem? {
         val structs = clientItems[id.client] ?: return null
-        val index = structs.indexOfFirst { item -> item.id == id }
+        val index = structs.findStartIndex(id.clock)
         if (index < 0) return null
         val updated = structs[index].copy(content = content)
         structs[index] = updated
+        invalidateCaches(structs[index])
         return updated
     }
 
     fun getClock(client: Long): Long {
         val structs = clientItems[client] ?: return 0
-        return structs.maxOfOrNull(StoreItem::endClock) ?: 0
+        return structs.lastOrNull()?.endClock() ?: 0
     }
 
     fun stateVector(): StateVector {
         val state = linkedMapOf<Long, Long>()
         clientItems.forEach { (client, structs) ->
-            val clock = structs.maxOfOrNull(StoreItem::endClock) ?: 0
+            val clock = structs.lastOrNull()?.endClock() ?: 0
             if (clock > 0) state[client] = clock
         }
         skips.clients.forEach { (client, ranges) ->
@@ -247,8 +263,11 @@ class StructStore(private val owner: YDoc? = null) {
         }
     }
 
-    internal fun allItems(): List<StoreItem> =
-        clientItems.values.flatten().sortedWith(compareBy<StoreItem> { it.id.client }.thenBy { it.id.clock })
+    internal fun allItems(): List<StoreItem> = allItemsCache ?: buildList(
+        clientItems.values.sumOf { structs -> structs.size },
+    ) {
+        clientItems.keys.sorted().forEach { client -> addAll(clientItems.getValue(client)) }
+    }.also { items -> allItemsCache = items }
 
     internal fun parentItemIds(): Map<String, Id> = allItems().mapNotNull { item ->
         item.content.directTypeRef()?.name?.let { name -> name to item.id }
@@ -297,6 +316,10 @@ class StructStore(private val owner: YDoc? = null) {
     }
 
     internal fun sequence(parent: String): List<StoreItem> {
+        return sequenceCache[parent] ?: buildSequence(parent).also { sequence -> sequenceCache[parent] = sequence }
+    }
+
+    private fun buildSequence(parent: String): List<StoreItem> {
         val items = allItems().filter { it.parent == parent && it.parentSub == null }
         if (items.size < 2) return items
 
@@ -305,7 +328,6 @@ class StructStore(private val owner: YDoc? = null) {
         // it relative to items from a different origin subtree.
         val nodes = items.map(::SequenceNode)
         val nodesByClient = nodes.groupBy { node -> node.item.id.client }
-            .mapValues { (_, clientNodes) -> clientNodes.sortedBy { node -> node.item.id.clock } }
 
         fun findNode(id: Id?): SequenceNode? {
             if (id == null) return null
@@ -413,9 +435,18 @@ class StructStore(private val owner: YDoc? = null) {
         }
     }
 
-    internal fun mapEntries(parent: String, key: String): List<StoreItem> = allItems()
-        .filter { it.parent == parent && it.parentSub == key }
-        .sortedWith(compareBy<StoreItem> { it.id.clock }.thenBy { it.id.client })
+    internal fun mapEntries(parent: String, key: String): List<StoreItem> =
+        mapEntriesCache.getOrPut(parent to key) {
+            allItems()
+                .filter { it.parent == parent && it.parentSub == key }
+                .sortedWith(compareBy<StoreItem> { it.id.clock }.thenBy { it.id.client })
+        }
+
+    private fun invalidateCaches(item: StoreItem) {
+        allItemsCache = null
+        sequenceCache.remove(item.parent)
+        item.parentSub?.let { key -> mapEntriesCache.remove(item.parent to key) }
+    }
 
     private fun StoreItem.contains(id: Id): Boolean =
         id.client == this.id.client && id.clock >= this.id.clock && id.clock < endClock()
@@ -424,6 +455,50 @@ class StructStore(private val owner: YDoc? = null) {
 private class SequenceNode(val item: StoreItem) {
     var left: SequenceNode? = null
     var right: SequenceNode? = null
+}
+
+private fun List<StoreItem>.findContainingIndex(clock: Long): Int {
+    var low = 0
+    var high = lastIndex
+    while (low <= high) {
+        val middle = (low + high) ushr 1
+        val item = this[middle]
+        when {
+            clock < item.id.clock -> high = middle - 1
+            clock >= item.endClock() -> low = middle + 1
+            else -> return middle
+        }
+    }
+    return -1
+}
+
+private fun List<StoreItem>.findStartIndex(clock: Long): Int {
+    var low = 0
+    var high = lastIndex
+    while (low <= high) {
+        val middle = (low + high) ushr 1
+        when {
+            clock < this[middle].id.clock -> high = middle - 1
+            clock > this[middle].id.clock -> low = middle + 1
+            else -> return middle
+        }
+    }
+    return -1
+}
+
+private fun List<DeleteRange>.touches(clock: Long): Boolean {
+    var low = 0
+    var high = lastIndex
+    while (low <= high) {
+        val middle = (low + high) ushr 1
+        val range = this[middle]
+        when {
+            clock < range.clock -> high = middle - 1
+            clock > range.end -> low = middle + 1
+            else -> return true
+        }
+    }
+    return false
 }
 
 private fun StoreItem.endClock(): Long = checkedClockAdd(id.clock, length, "store item end")

@@ -329,7 +329,8 @@ class YXmlElementType internal constructor(
         if (isPreliminary) {
             if (length <= 0 || preliminaryList.isEmpty()) return
             val start = index.coerceIn(0, preliminaryList.size)
-            repeat(minOf(length, preliminaryList.size - start)) { preliminaryList.removeAt(start) }
+            val end = start + minOf(length, preliminaryList.size - start)
+            preliminaryList.subList(start, end).clear()
             return
         }
         doc.deleteVisible(name, index, length)
@@ -684,8 +685,8 @@ class YXmlElement(val nodeName: String) : YXmlNode(), Iterable<YXmlNode> {
     fun delete(index: Int, length: Int = 1) {
         require(index >= 0) { "index must be non-negative" }
         require(length >= 0) { "length must be non-negative" }
-        require(index + length <= children.size) { "delete range is out of bounds" }
-        repeat(length) { children.removeAt(index) }
+        require(index <= children.size - length) { "delete range is out of bounds" }
+        children.subList(index, index + length).clear()
     }
 
     fun clear() {
@@ -962,7 +963,8 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
         if (isPreliminary) {
             if (length <= 0 || preliminaryList.isEmpty()) return
             val start = index.coerceIn(0, preliminaryList.size)
-            repeat(minOf(length, preliminaryList.size - start)) { preliminaryList.removeAt(start) }
+            val end = start + minOf(length, preliminaryList.size - start)
+            preliminaryList.subList(start, end).clear()
             return
         }
         doc.deleteVisible(name, index, length)
