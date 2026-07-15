@@ -20,7 +20,8 @@
 현재 커밋 이력:
 
 ```text
-HEAD perf: index merged update clock ranges
+HEAD perf: fast-path disjoint update ranges
+3779364 perf: index merged update clock ranges
 138b48e perf: avoid redundant range and map-order work
 1cc5574 perf: scale range and struct-store operations
 8f9fea0 ci: install rustfmt for Yrs oracle
@@ -593,6 +594,21 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
   - `./gradlew test interopTest --no-daemon`
   - `npm run test:interop` (`Yjs` 106, `Yrs` 4)
   - `./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.1-audit3`
+  - `npm run interop:check-clean`
+  - `git diff --check`
+
+### 36. update range common-path 후속 개선
+
+- `MergedClockRanges.add`의 정렬·비중첩 common path를 별도 처리:
+  - 빈 client와 tail append는 overlap 탐색과 임시 uncovered range allocation 없이 바로 삽입
+  - 중간 비중첩 range도 첫 후보 조회 뒤 `Pair` 목록을 만들지 않고 직접 삽입
+  - 실제 overlap이 있을 때만 uncovered 조각 목록을 생성
+- incremental update 목록 전체를 역순으로 병합하는 회귀 케이스 추가:
+  - out-of-order tree insertion과 parent/origin 합성 결과를 기존 upstream-parity 결과와 함께 검증
+- 검증:
+  - `./gradlew test interopTest --no-daemon`
+  - `npm run test:interop` (`Yjs` 106, `Yrs` 4)
+  - `./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.1-audit4`
   - `npm run interop:check-clean`
   - `git diff --check`
 

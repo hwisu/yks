@@ -1085,15 +1085,26 @@ private class MergedClockRanges {
     fun add(incoming: StoreItem) {
         val clientItems = itemsByClient.getOrPut(incoming.id.client) { TreeMap() }
         val incomingEnd = checkedClockAdd(incoming.id.clock, incoming.length, "merged update item end")
+        val lastEntry = clientItems.lastEntry()
+        val lastEnd = lastEntry?.let { checkedClockAdd(it.key, it.value.length, "last merged item end") }
+        if (lastEnd == null || lastEnd <= incoming.id.clock) {
+            clientItems[incoming.id.clock] = incoming
+            return
+        }
         val sameStart = clientItems[incoming.id.clock]
         if (sameStart != null && sameStart.length == incoming.length) {
             clientItems[incoming.id.clock] = sameStart.mergeDuplicateMetadata(incoming)
             return
         }
 
+        var entry = clientItems.firstEndingAfter(incoming.id.clock)
+        if (entry == null || entry.key >= incomingEnd) {
+            clientItems.insertRange(incoming)
+            return
+        }
+
         var uncoveredStart = incoming.id.clock
         val uncoveredRanges = mutableListOf<Pair<Long, Long>>()
-        var entry = clientItems.firstEndingAfter(incoming.id.clock)
         while (entry != null && entry.key < incomingEnd) {
             val existing = entry.value
             if (incoming.deleted) existing.deleted = true

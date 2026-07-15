@@ -1207,6 +1207,7 @@ class UpdateApiTest {
         val expectedState = decodeStateVector(encodeStateVector(source))
         val cases = listOf(
             mergeUpdates(updates),
+            mergeUpdates(updates.asReversed()),
             mergeUpdates(listOf(
                 mergeUpdates(updates.drop(2)),
                 mergeUpdates(updates.take(2)),
