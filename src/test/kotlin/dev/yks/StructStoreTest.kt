@@ -215,6 +215,44 @@ class StructStoreTest {
         assertEquals("StructStore failed integrity check", thrown.message)
     }
 
+    @Test
+    fun deleteSetTraversalScalesWithSortedClientRanges() {
+        val store = StructStore()
+        repeat(2_000) { clock -> assertTrue(store.add(storeItem(1, clock.toLong(), "a"))) }
+        repeat(100) { clock -> assertTrue(store.add(storeItem(2, clock.toLong(), "b"))) }
+        assertTrue(
+            store.add(
+                StoreItem(
+                    id = Id(3, 0),
+                    origin = null,
+                    rightOrigin = null,
+                    parent = "body",
+                    parentSub = null,
+                    content = ItemContent.Deleted(RootKind.Text, length = 1_000),
+                    deleted = true,
+                ),
+            ),
+        )
+
+        val sparse = DeleteSet.empty()
+        repeat(1_000) { index -> sparse.add(Id(1, index * 2L)) }
+        sparse.add(Id(2, 50), 10)
+        val selected = store.itemsStartingIn(sparse)
+
+        assertEquals(1_010, selected.size)
+        assertEquals(Id(1, 0), selected.first().id)
+        assertEquals(Id(1, 1_998), selected[999].id)
+        assertEquals(Id(2, 50), selected[1_000].id)
+        assertEquals(Id(2, 59), selected.last().id)
+        assertTrue(store.markDeleted(sparse))
+        assertTrue(selected.all { item -> item.deleted })
+        assertFalse(store.markDeleted(sparse))
+
+        val packedMiddle = DeleteSet.empty().also { it.add(Id(3, 500)) }
+        assertTrue(store.itemsStartingIn(packedMiddle).isEmpty())
+        assertEquals(listOf(Id(3, 0)), store.itemsOverlapping(packedMiddle).map { item -> item.id })
+    }
+
     private fun storeItem(client: Long, clock: Long, text: String): StoreItem =
         StoreItem(
             id = Id(client, clock),

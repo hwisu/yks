@@ -1538,12 +1538,11 @@ class YDoc(
         if (deleteSet.isEmpty) return
         val expandedDeleteSet = expandDeleteSetWithNestedTypeContent(deleteSet)
         registerVirtualSplitMergeCandidates(expandedDeleteSet)
-        val newlyDeleted = store.allItems()
-            .filter { !it.deleted && expandedDeleteSet.contains(it.id) }
-            .map { it.copy(deleted = false) }
+        val newlyDeletedItems = store.itemsStartingIn(expandedDeleteSet).filterNot { it.deleted }
+        val newlyDeleted = newlyDeletedItems.map { it.copy(deleted = false) }
         newlyDeleted.forEach { captureParentBefore(it.parent, it.content.kind) }
         pendingDeletes.addAll(expandedDeleteSet)
-        val changed = store.markDeleted(expandedDeleteSet)
+        val changed = store.markDeleted(newlyDeletedItems)
         if (changed) {
             val newlyDeletedSet = DeleteSet.empty().also { transactionDeleteSet ->
                 newlyDeleted.forEach { item -> transactionDeleteSet.add(item.id, item.length) }
@@ -1591,15 +1590,7 @@ class YDoc(
     private fun expandDeleteSetWithNestedTypeContent(deleteSet: DeleteSet): DeleteSet {
         val expanded = deleteSet.copy()
         val queue = ArrayDeque<StoreItem>()
-        deleteSet.clients.forEach { (client, ranges) ->
-            store.allItems()
-                .filter { item ->
-                    item.id.client == client && ranges.any { range ->
-                        item.id.clock < range.end && range.clock < checkedClockAdd(item.id.clock, item.length)
-                    }
-                }
-                .forEach(queue::add)
-        }
+        store.itemsOverlapping(deleteSet).forEach(queue::add)
 
         val visited = linkedSetOf<Id>()
         while (queue.isNotEmpty()) {
@@ -2186,12 +2177,10 @@ class YDoc(
         afterState.forEach { (client, afterClock) ->
             val beforeClock = beforeState[client] ?: 0
             if (beforeClock == afterClock) return@forEach
-            val clientItems = allItems.filter { item -> item.id.client == client }.sortedBy { item -> item.id.clock }
+            val clientItems = store.itemsForClient(client)
             if (clientItems.size < 2) return@forEach
-            val changedIndex = clientItems.indexOfFirst { item ->
-                checkedClockAdd(item.id.clock, item.length, "virtual scan item end") > beforeClock
-            }
-            if (changedIndex < 0) return@forEach
+            val changedIndex = store.firstItemEndingAfter(client, beforeClock)
+            if (changedIndex >= clientItems.size) return@forEach
             val firstChangePosition = maxOf(changedIndex, 1)
             var index = clientItems.lastIndex
             while (index >= firstChangePosition) {

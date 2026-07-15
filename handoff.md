@@ -20,7 +20,8 @@
 현재 커밋 이력:
 
 ```text
-HEAD test: make Yrs nested fixture deterministic
+HEAD perf: index delete-set store traversal
+aa733aa test: make Yrs nested fixture deterministic
 da7f988 perf: fast-path disjoint update ranges
 3779364 perf: index merged update clock ranges
 138b48e perf: avoid redundant range and map-order work
@@ -623,6 +624,27 @@ Kotlin이 직접 생성하는 range formatting도 native marker pair로 마이�
   - `npm run interop:generate` 반복 실행 후 `npm run interop:check-clean`
   - `cargo fmt --check`와 `cargo test --locked`
   - `./gradlew test interopTest --no-daemon`
+  - `git diff --check`
+
+### 38. delete-set store traversal 인덱싱
+
+- delete-set 적용이 client별 clock 정렬 불변식을 직접 사용하도록 개선:
+  - `allItems × ranges` membership 반복 대신 첫 관련 struct를 이진 탐색
+  - 이후 정렬된 struct와 delete range를 two-pointer로 한 번만 순회
+  - 시작 clock이 range 안에 있는 item과 packed item이 range와 겹치는 경우를 구분해 기존 의미 유지
+- transaction delete 처리의 중복 store 순회 제거:
+  - newly-deleted item 목록을 한 번 수집해 before-state capture와 실제 delete mutation에 함께 사용
+  - nested shared-type delete 확장도 client마다 전체 store를 다시 filter하지 않고 overlap index 사용
+- transaction cleanup의 client 재구성 제거:
+  - 이미 정렬된 `StructStore` client view를 직접 사용해 `allItems` 재필터·재정렬 제거
+  - 첫 changed struct 위치도 선형 `indexOfFirst` 대신 이진 탐색
+- 회귀 검증:
+  - 2,100개 unit struct와 1,010개 sparse delete target의 선택·재적용 결과 검증
+  - packed 1,000-clock deleted struct의 interior overlap과 start-membership 차이 검증
+  - `./gradlew test interopTest --no-daemon`
+  - `npm run test:interop` (`Yjs` 106, `Yrs` 4)
+  - `./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.1-audit5`
+  - `npm run interop:check-clean`
   - `git diff --check`
 
 주요 경로:

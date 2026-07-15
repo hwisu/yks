@@ -270,6 +270,11 @@ class StructStore(private val owner: YDoc? = null) {
         clientItems.keys.sorted().forEach { client -> addAll(clientItems.getValue(client)) }
     }.also { items -> allItemsCache = items }
 
+    internal fun itemsForClient(client: Long): List<StoreItem> = clientItems[client].orEmpty()
+
+    internal fun firstItemEndingAfter(client: Long, clock: Long): Int =
+        clientItems[client]?.findFirstEndingAfter(clock) ?: 0
+
     internal fun parentItemIds(): Map<String, Id> = allItems().mapNotNull { item ->
         item.content.directTypeRef()?.name?.let { name -> name to item.id }
     }.toMap()
@@ -293,14 +298,60 @@ class StructStore(private val owner: YDoc? = null) {
         }
     }
 
-    internal fun markDeleted(deleteSet: DeleteSet): Boolean {
-        var changed = false
-        deleteSet.clients.forEach { (client, ranges) ->
-            clientItems[client]?.forEach { item ->
-                if (!item.deleted && ranges.any { it.contains(item.id.clock) }) {
-                    item.deleted = true
-                    changed = true
+    internal fun itemsStartingIn(deleteSet: DeleteSet): List<StoreItem> = buildList {
+        deleteSet.clients.keys.sorted().forEach { client ->
+            val structs = clientItems[client] ?: return@forEach
+            val ranges = deleteSet.rangesFor(client)
+            if (structs.isEmpty() || ranges.isEmpty()) return@forEach
+
+            var structIndex = structs.findFirstStartingAtOrAfter(ranges.first().clock)
+            var rangeIndex = 0
+            while (structIndex < structs.size && rangeIndex < ranges.size) {
+                val item = structs[structIndex]
+                val range = ranges[rangeIndex]
+                when {
+                    item.id.clock < range.clock -> structIndex++
+                    item.id.clock >= range.end -> rangeIndex++
+                    else -> {
+                        add(item)
+                        structIndex++
+                    }
                 }
+            }
+        }
+    }
+
+    internal fun itemsOverlapping(deleteSet: DeleteSet): List<StoreItem> = buildList {
+        deleteSet.clients.keys.sorted().forEach { client ->
+            val structs = clientItems[client] ?: return@forEach
+            val ranges = deleteSet.rangesFor(client)
+            if (structs.isEmpty() || ranges.isEmpty()) return@forEach
+
+            var structIndex = structs.findFirstEndingAfter(ranges.first().clock)
+            var rangeIndex = 0
+            while (structIndex < structs.size && rangeIndex < ranges.size) {
+                val item = structs[structIndex]
+                val range = ranges[rangeIndex]
+                when {
+                    item.endClock() <= range.clock -> structIndex++
+                    item.id.clock >= range.end -> rangeIndex++
+                    else -> {
+                        add(item)
+                        structIndex++
+                    }
+                }
+            }
+        }
+    }
+
+    internal fun markDeleted(deleteSet: DeleteSet): Boolean = markDeleted(itemsStartingIn(deleteSet))
+
+    internal fun markDeleted(items: Iterable<StoreItem>): Boolean {
+        var changed = false
+        items.forEach { item ->
+            if (!item.deleted) {
+                item.deleted = true
+                changed = true
             }
         }
         return changed
@@ -492,6 +543,26 @@ private fun List<StoreItem>.findStartIndex(clock: Long): Int {
         }
     }
     return -1
+}
+
+private fun List<StoreItem>.findFirstStartingAtOrAfter(clock: Long): Int {
+    var low = 0
+    var high = size
+    while (low < high) {
+        val middle = (low + high) ushr 1
+        if (this[middle].id.clock < clock) low = middle + 1 else high = middle
+    }
+    return low
+}
+
+private fun List<StoreItem>.findFirstEndingAfter(clock: Long): Int {
+    var low = 0
+    var high = size
+    while (low < high) {
+        val middle = (low + high) ushr 1
+        if (this[middle].endClock() <= clock) low = middle + 1 else high = middle
+    }
+    return low
 }
 
 private fun List<DeleteRange>.touches(clock: Long): Boolean {
