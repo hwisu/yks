@@ -9,8 +9,9 @@ import * as Y from 'yjs'
 const projectDirectory = path.resolve(import.meta.dirname, '../..')
 const outputDirectory = path.join(projectDirectory, 'build', 'performance')
 const fixturePath = path.join(outputDirectory, 'alternating-text-5000-v1.bin')
-const warmupIterations = Number.parseInt(process.env.BENCH_WARMUP ?? '8', 10)
-const sampleIterations = Number.parseInt(process.env.BENCH_SAMPLES ?? '15', 10)
+const warmupIterations = Number.parseInt(process.env.BENCH_WARMUP ?? '20', 10)
+const sampleIterations = Number.parseInt(process.env.BENCH_SAMPLES ?? '30', 10)
+const assertParity = process.argv.includes('--assert-parity')
 
 fs.mkdirSync(outputDirectory, { recursive: true })
 
@@ -146,6 +147,9 @@ const comparison = Object.fromEntries(
     yjs: yjsResults[name],
     yks: yksResults[name],
     medianRatio: yksResults[name].medianMs / yjsResults[name].medianMs,
+    parity: yjsResults[name].medianMs < 0.1
+      ? yksResults[name].medianMs - yjsResults[name].medianMs <= 0.1
+      : yksResults[name].medianMs / yjsResults[name].medianMs <= 2,
   }]),
 )
 fs.writeFileSync(
@@ -158,5 +162,14 @@ console.table(Object.fromEntries(Object.entries(comparison).map(([name, result])
   'Yjs median ms': result.yjs.medianMs.toFixed(3),
   'YKS median ms': result.yks.medianMs.toFixed(3),
   'YKS/Yjs': result.medianRatio.toFixed(2),
+  parity: result.parity ? 'pass' : 'FAIL',
 }])) )
+if (assertParity) {
+  const failures = Object.entries(comparison).filter(([, result]) => !result.parity)
+  assert.deepEqual(
+    failures.map(([name]) => name),
+    [],
+    'YKS parity requires at most 2x Yjs for stable workloads, or at most 0.1 ms absolute overhead for sub-0.1 ms workloads',
+  )
+}
 if (sink === Number.MIN_SAFE_INTEGER) console.log('unreachable', sink)

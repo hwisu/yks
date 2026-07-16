@@ -14,6 +14,8 @@ class StructStore(private val owner: YDoc? = null) {
     private val clientItems: MutableMap<Long, MutableList<StoreItem>> = linkedMapOf()
     private val structViewOwner: YDoc by lazy(LazyThreadSafetyMode.NONE) { owner ?: YDoc() }
     private var allItemsCache: List<StoreItem>? = null
+    private var deleteSetCache: DeleteSet? = null
+    private var parentItemIdsCache: Map<String, Id>? = null
     private val sequenceCache: MutableMap<String, IndexedSequence> = mutableMapOf()
     private val mapEntriesCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
     private val mapOrderCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
@@ -22,6 +24,8 @@ class StructStore(private val owner: YDoc? = null) {
     private val visibleTextCache: MutableMap<Pair<String, RootKind>, String> = mutableMapOf()
 
     internal val ownerDoc: YDoc? get() = owner
+    internal var version: Long = 0
+        private set
     internal var sequenceBuildCount: Int = 0
         private set
 
@@ -195,14 +199,13 @@ class StructStore(private val owner: YDoc? = null) {
         deleteSet.clients.forEach { (client, ranges) ->
             val structs = clientItems[client] ?: return@forEach
             if (structs.size < 2 || ranges.isEmpty()) return@forEach
-            var index = structs.lastIndex
-            while (index > 0) {
-                val boundary = structs[index].id.clock
-                val touchesDeleteRange = ranges.touches(boundary)
-                if (touchesDeleteRange && mergeDeletedItemWithLeft(structs, index)) {
-                    merged++
+            ranges.asReversed().forEach { range ->
+                var index = structs.findFirstStartingAtOrAfter(range.end)
+                if (index >= structs.size || structs[index].id.clock > range.end) index--
+                while (index > 0 && structs[index].id.clock >= range.clock) {
+                    if (mergeDeletedItemWithLeft(structs, index)) merged++
+                    index--
                 }
-                index--
             }
         }
         return merged
@@ -230,13 +233,13 @@ class StructStore(private val owner: YDoc? = null) {
         val right = structs[rightIndex]
         val leftContent = left.content as? ItemContent.Deleted ?: return false
         val rightContent = right.content as? ItemContent.Deleted ?: return false
-        val logicalOrder = if (left.parentSub == null) {
-            owner?.sequence(left.parent)
+        val logicallyAdjacent = if (left.parentSub == null) {
+            areSequenceAdjacent(left, right)
         } else {
-            owner?.mapItemOrder(left.parent, left.parentSub)
-        } ?: return false
-        val logicalLeftIndex = logicalOrder.indexOfFirst { item -> item.id == left.id }
-        val logicallyAdjacent = logicalLeftIndex >= 0 && logicalOrder.getOrNull(logicalLeftIndex + 1)?.id == right.id
+            val logicalOrder = owner?.mapItemOrder(left.parent, left.parentSub) ?: return false
+            val logicalLeftIndex = logicalOrder.indexOfFirst { item -> item.id == left.id }
+            logicalLeftIndex >= 0 && logicalOrder.getOrNull(logicalLeftIndex + 1)?.id == right.id
+        }
         if (
             left.id.client != right.id.client ||
             left.endClock() != right.id.clock ||
@@ -333,34 +336,37 @@ class StructStore(private val owner: YDoc? = null) {
     internal fun firstItemEndingAfter(client: Long, clock: Long): Int =
         clientItems[client]?.findFirstEndingAfter(clock) ?: 0
 
-    internal fun parentItemIds(): Map<String, Id> = allItems().mapNotNull { item ->
+    internal fun parentItemIds(): Map<String, Id> = parentItemIdsCache ?: allItems().mapNotNull { item ->
         item.content.directTypeRef()?.name?.let { name -> name to item.id }
-    }.toMap()
+    }.toMap().also { ids -> parentItemIdsCache = ids }
 
     internal fun parentKinds(): Map<String, RootKind> = owner?.knownParentKinds().orEmpty()
 
-    internal fun itemsSince(stateVector: StateVector): List<StoreItem> = allItems().mapNotNull { item ->
-        val targetClock = stateVector[item.id.client] ?: 0
-        when {
-            item.endClock() <= targetClock -> null
-            item.id.clock >= targetClock -> item
-            item.content is ItemContent.Deleted || item.content is ItemContent.Text -> {
-                val remaining = item.endClock() - targetClock
-                val content = when (val current = item.content) {
-                    is ItemContent.Deleted -> current.copy(length = remaining)
-                    is ItemContent.Text -> {
-                        val offset = (targetClock - item.id.clock).toNonNegativeInt("text state-vector offset")
-                        current.copy(value = ContentString(current.value).splice(offset.toLong()).str)
+    internal fun itemsSince(stateVector: StateVector): List<StoreItem> {
+        if (stateVector.isEmpty()) return allItems()
+        return allItems().mapNotNull { item ->
+            val targetClock = stateVector[item.id.client] ?: 0
+            when {
+                item.endClock() <= targetClock -> null
+                item.id.clock >= targetClock -> item
+                item.content is ItemContent.Deleted || item.content is ItemContent.Text -> {
+                    val remaining = item.endClock() - targetClock
+                    val content = when (val current = item.content) {
+                        is ItemContent.Deleted -> current.copy(length = remaining)
+                        is ItemContent.Text -> {
+                            val offset = (targetClock - item.id.clock).toNonNegativeInt("text state-vector offset")
+                            current.copy(value = ContentString(current.value).splice(offset.toLong()).str)
+                        }
+                        else -> error("unreachable packed content")
                     }
-                    else -> error("unreachable packed content")
+                    item.copy(
+                        id = Id(item.id.client, targetClock),
+                        origin = if (item.isGc) null else Id(item.id.client, targetClock - 1),
+                        content = content,
+                    )
                 }
-                item.copy(
-                    id = Id(item.id.client, targetClock),
-                    origin = if (item.isGc) null else Id(item.id.client, targetClock - 1),
-                    content = content,
-                )
+                else -> error("state vector splits unsupported store item at ${item.id}:$targetClock")
             }
-            else -> error("state vector splits unsupported store item at ${item.id}:$targetClock")
         }
     }
 
@@ -418,6 +424,9 @@ class StructStore(private val owner: YDoc? = null) {
             if (!item.deleted) {
                 removeDerivedState(item)
                 item.deleted = true
+                if (item.parentSub == null) sequenceCache[item.parent]?.refresh(item.id)
+                deleteSetCache = null
+                version++
                 changed = true
             }
         }
@@ -426,13 +435,12 @@ class StructStore(private val owner: YDoc? = null) {
 
     fun deleteSet(): DeleteSet {
         owner?.ensureThreadAccess()
-        val deleteSet = DeleteSet.empty()
-        allItems().forEach { item ->
-            if (item.deleted) {
-                deleteSet.add(item.id, item.length)
+        val cached = deleteSetCache ?: DeleteSet.empty().also { deleteSet ->
+            allItems().forEach { item ->
+                if (item.deleted) deleteSet.add(item.id, item.length)
             }
-        }
-        return deleteSet
+        }.also { deleteSet -> deleteSetCache = deleteSet }
+        return cached.copy()
     }
 
     internal fun sequence(parent: String): List<StoreItem> {
@@ -444,6 +452,28 @@ class StructStore(private val owner: YDoc? = null) {
         owner?.ensureThreadAccess()
         return visibleLengths[parent]?.get(kind.ordinal) ?: 0L
     }
+
+    internal fun totalVisibleLength(parent: String): Long {
+        owner?.ensureThreadAccess()
+        return visibleLengths[parent]?.fold(0L) { total, length ->
+            checkedClockAdd(total, length, "total visible length")
+        } ?: 0L
+    }
+
+    internal fun visibleSequenceItemAt(
+        parent: String,
+        kind: RootKind,
+        index: Long,
+    ): Pair<StoreItem, Long>? = sequenceIndex(parent).visibleItemAt(kind, index)
+
+    internal fun visibleSequenceItemAt(parent: String, index: Long): Pair<StoreItem, Long>? =
+        sequenceIndex(parent).visibleItemAt(index)
+
+    internal fun sequenceAnchors(parent: String, kind: RootKind, index: Long): Pair<StoreItem?, StoreItem?> =
+        sequenceIndex(parent).anchorsAt(kind, index)
+
+    internal fun visibleItemsInRange(parent: String, index: Long, length: Long): List<StoreItem> =
+        sequenceIndex(parent).visibleItemsInRange(index, length)
 
     internal fun hasVisibleNativeTextFormat(parent: String): Boolean {
         owner?.ensureThreadAccess()
@@ -467,6 +497,14 @@ class StructStore(private val owner: YDoc? = null) {
         owner?.ensureThreadAccess()
         return sequenceIndex(parent).last { item -> item.content.kind == kind }
     }
+
+    internal fun areSequenceAdjacent(left: StoreItem, right: StoreItem): Boolean =
+        left.parentSub == null &&
+            left.parent == right.parent &&
+            sequenceIndex(left.parent).areAdjacent(left.id, right.id)
+
+    internal fun sequenceNeighbors(item: StoreItem): Pair<StoreItem?, StoreItem?> =
+        if (item.parentSub == null) sequenceIndex(item.parent).neighbors(item.id) else null to null
 
     private fun sequenceIndex(parent: String): IndexedSequence =
         sequenceCache.getOrPut(parent) {
@@ -602,6 +640,8 @@ class StructStore(private val owner: YDoc? = null) {
 
     private fun invalidateNonSequenceCaches(item: StoreItem) {
         allItemsCache = null
+        deleteSetCache = null
+        parentItemIdsCache = null
         item.parentSub?.let { key ->
             val cacheKey = item.parent to key
             mapEntriesCache.remove(cacheKey)
@@ -611,6 +651,7 @@ class StructStore(private val owner: YDoc? = null) {
 
     private fun recordAdded(item: StoreItem) {
         invalidateNonSequenceCaches(item)
+        version++
         addDerivedState(item)
         if (item.parentSub == null) {
             sequenceCache[item.parent]?.integrate(item)
@@ -623,6 +664,7 @@ class StructStore(private val owner: YDoc? = null) {
         additionallyRemoved: List<StoreItem> = emptyList(),
     ) {
         invalidateNonSequenceCaches(previous)
+        version++
         removeDerivedState(previous)
         additionallyRemoved.forEach(::removeDerivedState)
         replacements.forEach(::addDerivedState)
@@ -717,15 +759,22 @@ private class IndexedSequence(
     items: List<StoreItem>,
     private val resolveStoreItem: (Id) -> StoreItem?,
 ) {
-    private class Node(var item: StoreItem) {
+    private class Node(var item: StoreItem, val priority: Long) {
         var left: Node? = null
         var right: Node? = null
+        var treeLeft: Node? = null
+        var treeRight: Node? = null
+        var treeParent: Node? = null
+        var treeSize: Int = 1
+        val treeVisibleLengths: LongArray = LongArray(RootKind.entries.size)
     }
 
     private val nodesByStart = hashMapOf<Id, Node>()
     private var first: Node? = null
     private var last: Node? = null
+    private var treeRoot: Node? = null
     private var materialized: List<StoreItem>? = null
+    private var priorityState: Long = 0x6A09E667F3BCC909L
 
     init {
         items.forEach(::append)
@@ -755,6 +804,52 @@ private class IndexedSequence(
         while (current != null) {
             action(current.item)
             current = current.right
+        }
+    }
+
+    fun areAdjacent(leftId: Id, rightId: Id): Boolean =
+        nodesByStart[leftId]?.right?.item?.id == rightId
+
+    fun neighbors(id: Id): Pair<StoreItem?, StoreItem?> {
+        val node = nodesByStart[id] ?: return null to null
+        return node.left?.item to node.right?.item
+    }
+
+    fun refresh(id: Id) {
+        var current = nodesByStart[id]
+        while (current != null) {
+            recalculate(current)
+            current = current.treeParent
+        }
+    }
+
+    fun visibleItemAt(kind: RootKind, index: Long): Pair<StoreItem, Long>? = visibleItemAt(index, kind)
+
+    fun visibleItemAt(index: Long): Pair<StoreItem, Long>? = visibleItemAt(index, kind = null)
+
+    fun anchorsAt(kind: RootKind, index: Long): Pair<StoreItem?, StoreItem?> {
+        val totalLength = visibleLengthForKind(treeRoot, kind)
+        require(index in 0..totalLength) { "sequence index is out of bounds" }
+        val right = if (index == totalLength) null else visibleItemAt(kind, index)?.first
+        var leftNode = if (right == null) last else nodesByStart[right.id]?.left
+        while (leftNode != null && leftNode.item.content.kind != kind) leftNode = leftNode.left
+        return leftNode?.item to right
+    }
+
+    fun visibleItemsInRange(index: Long, length: Long): List<StoreItem> {
+        if (length <= 0) return emptyList()
+        val firstVisible = visibleItemAt(index)?.first ?: return emptyList()
+        var current = nodesByStart[firstVisible.id]
+        var remaining = length
+        return buildList {
+            while (current != null && remaining > 0) {
+                val item = current.item
+                if (!item.deleted && item.countable) {
+                    add(item)
+                    remaining -= item.length
+                }
+                current = current.right
+            }
         }
     }
 
@@ -790,7 +885,7 @@ private class IndexedSequence(
             other = other.right
         }
 
-        insertAfter(left, Node(item))
+        insertAfter(left, newNode(item))
         materialized = null
     }
 
@@ -805,8 +900,9 @@ private class IndexedSequence(
         additionallyRemoved.forEach { removed -> nodesByStart[removed.id]?.let(::detach) }
 
         var left = insertionLeft
+        var treeIndex = if (insertionLeft == null) 0 else treeRank(insertionLeft) + 1
         replacements.forEach { replacement ->
-            val node = Node(replacement)
+            val node = newNode(replacement)
             nodesByStart[replacement.id] = node
             node.left = left
             node.right = insertionRight
@@ -814,6 +910,7 @@ private class IndexedSequence(
             insertionRight?.left = node
             if (insertionRight == null) last = node
             left = node
+            insertTreeAt(treeIndex++, node)
         }
         if (replacements.isEmpty()) {
             if (insertionLeft == null) first = insertionRight else insertionLeft.right = insertionRight
@@ -824,11 +921,12 @@ private class IndexedSequence(
     }
 
     private fun append(item: StoreItem) {
-        val node = Node(item)
+        val node = newNode(item)
         nodesByStart[item.id] = node
         node.left = last
         if (last == null) first = node else last?.right = node
         last = node
+        insertTreeAt(treeRoot?.treeSize ?: 0, node)
     }
 
     private fun find(id: Id?): Node? {
@@ -845,9 +943,11 @@ private class IndexedSequence(
         right?.left = node
         if (right == null) last = node
         nodesByStart[node.item.id] = node
+        insertTreeAt(if (left == null) 0 else treeRank(left) + 1, node)
     }
 
     private fun detach(node: Node) {
+        removeTreeNode(node)
         val left = node.left
         val right = node.right
         if (left == null) first = right else left.right = right
@@ -855,6 +955,145 @@ private class IndexedSequence(
         nodesByStart.remove(node.item.id)
         node.left = null
         node.right = null
+    }
+
+    private fun newNode(item: StoreItem): Node = Node(item, nextPriority()).also(::recalculate)
+
+    private fun nextPriority(): Long {
+        priorityState += -0x61C8864680B583EBL
+        var mixed = priorityState
+        mixed = (mixed xor (mixed ushr 30)) * -0x40A7B892E31B1A47L
+        mixed = (mixed xor (mixed ushr 27)) * -0x6B2FB644ECCEEE15L
+        return mixed xor (mixed ushr 31)
+    }
+
+    private fun visibleItemAt(
+        index: Long,
+        kind: RootKind?,
+    ): Pair<StoreItem, Long>? {
+        require(index >= 0) { "sequence index is out of bounds" }
+        var current = treeRoot
+        var precedingLength = 0L
+        while (current != null) {
+            val leftLength = visibleLength(current.treeLeft, kind)
+            val itemStart = checkedClockAdd(precedingLength, leftLength, "sequence position")
+            val itemLength = current.item.visibleLength(kind)
+            if (index < itemStart) {
+                current = current.treeLeft
+            } else if (itemLength > 0 && index < checkedClockAdd(itemStart, itemLength, "sequence item end")) {
+                return current.item to itemStart
+            } else {
+                precedingLength = checkedClockAdd(itemStart, itemLength, "sequence position")
+                current = current.treeRight
+            }
+        }
+        return null
+    }
+
+    private fun visibleLengthForKind(node: Node?, kind: RootKind): Long =
+        node?.treeVisibleLengths?.get(kind.ordinal) ?: 0L
+
+    private fun visibleLength(node: Node?, kind: RootKind?): Long = if (kind == null) {
+        node?.treeVisibleLengths?.fold(0L) { total, length ->
+            checkedClockAdd(total, length, "sequence subtree length")
+        } ?: 0L
+    } else {
+        visibleLengthForKind(node, kind)
+    }
+
+    private fun StoreItem.visibleLength(kind: RootKind?): Long =
+        if (!deleted && countable && (kind == null || content.kind == kind)) length else 0L
+
+    private fun recalculate(node: Node) {
+        node.treeSize = 1 + (node.treeLeft?.treeSize ?: 0) + (node.treeRight?.treeSize ?: 0)
+        RootKind.entries.forEach { kind ->
+            var length = visibleLengthForKind(node.treeLeft, kind)
+            if (!node.item.deleted && node.item.countable && node.item.content.kind == kind) {
+                length = checkedClockAdd(length, node.item.length, "sequence node length")
+            }
+            node.treeVisibleLengths[kind.ordinal] = checkedClockAdd(
+                length,
+                visibleLengthForKind(node.treeRight, kind),
+                "sequence subtree length",
+            )
+        }
+    }
+
+    private fun setTreeLeft(parent: Node, child: Node?) {
+        parent.treeLeft = child
+        child?.treeParent = parent
+    }
+
+    private fun setTreeRight(parent: Node, child: Node?) {
+        parent.treeRight = child
+        child?.treeParent = parent
+    }
+
+    private fun mergeTrees(left: Node?, right: Node?): Node? = when {
+        left == null -> right?.also { it.treeParent = null }
+        right == null -> left.also { it.treeParent = null }
+        left.priority >= right.priority -> {
+            setTreeRight(left, mergeTrees(left.treeRight, right))
+            recalculate(left)
+            left.treeParent = null
+            left
+        }
+        else -> {
+            setTreeLeft(right, mergeTrees(left, right.treeLeft))
+            recalculate(right)
+            right.treeParent = null
+            right
+        }
+    }
+
+    /** Splits into the first [count] nodes and the remaining nodes. */
+    private fun splitTree(root: Node?, count: Int): Pair<Node?, Node?> {
+        if (root == null) return null to null
+        val leftSize = root.treeLeft?.treeSize ?: 0
+        return if (count <= leftSize) {
+            val (left, middle) = splitTree(root.treeLeft, count)
+            setTreeLeft(root, middle)
+            recalculate(root)
+            root.treeParent = null
+            left?.treeParent = null
+            left to root
+        } else {
+            val (middle, right) = splitTree(root.treeRight, count - leftSize - 1)
+            setTreeRight(root, middle)
+            recalculate(root)
+            root.treeParent = null
+            right?.treeParent = null
+            root to right
+        }
+    }
+
+    private fun insertTreeAt(index: Int, node: Node) {
+        val (left, right) = splitTree(treeRoot, index)
+        treeRoot = mergeTrees(mergeTrees(left, node), right)
+        treeRoot?.treeParent = null
+    }
+
+    private fun treeRank(node: Node): Int {
+        var rank = node.treeLeft?.treeSize ?: 0
+        var current = node
+        while (current.treeParent != null) {
+            val parent = checkNotNull(current.treeParent)
+            if (current === parent.treeRight) rank += 1 + (parent.treeLeft?.treeSize ?: 0)
+            current = parent
+        }
+        return rank
+    }
+
+    private fun removeTreeNode(node: Node) {
+        val rank = treeRank(node)
+        val (left, remainder) = splitTree(treeRoot, rank)
+        val (_, right) = splitTree(remainder, 1)
+        treeRoot = mergeTrees(left, right)
+        treeRoot?.treeParent = null
+        node.treeLeft = null
+        node.treeRight = null
+        node.treeParent = null
+        node.treeSize = 1
     }
 }
 
@@ -910,21 +1149,6 @@ private fun List<StoreItem>.findFirstEndingAfter(clock: Long): Int {
         if (this[middle].endClock() <= clock) low = middle + 1 else high = middle
     }
     return low
-}
-
-private fun List<DeleteRange>.touches(clock: Long): Boolean {
-    var low = 0
-    var high = lastIndex
-    while (low <= high) {
-        val middle = (low + high) ushr 1
-        val range = this[middle]
-        when {
-            clock < range.clock -> high = middle - 1
-            clock > range.end -> low = middle + 1
-            else -> return true
-        }
-    }
-    return false
 }
 
 private fun StoreItem.endClock(): Long = checkedClockAdd(id.clock, length, "store item end")

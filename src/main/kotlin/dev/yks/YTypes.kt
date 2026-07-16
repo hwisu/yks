@@ -916,10 +916,21 @@ open class YText internal constructor(
         require(kind == RootKind.Text || kind == RootKind.XmlText) { "YText kind must be a text sequence" }
     }
 
+    private var cachedLengthVersion: Long = Long.MIN_VALUE
+    private var cachedLength: Int = 0
+    private var cachedStringVersion: Long = Long.MIN_VALUE
+    private var cachedString: String = ""
+
     val length: Int
         get() {
             if (warnIfPreliminary()) return 0
-            return doc.visibleLength(name, kind).toNonNegativeInt("text length")
+            doc.ensureThreadAccess()
+            val version = doc.store.version
+            if (cachedLengthVersion != version) {
+                cachedLength = doc.visibleLength(name, kind).toNonNegativeInt("text length")
+                cachedLengthVersion = version
+            }
+            return cachedLength
         }
 
     val attrSize: Int get() = getAttrs().size
@@ -1570,7 +1581,13 @@ open class YText internal constructor(
 
     override fun toString(): String {
         if (warnIfPreliminary()) return ""
-        return doc.visibleText(name, kind)
+        doc.ensureThreadAccess()
+        val version = doc.store.version
+        if (cachedStringVersion != version) {
+            cachedString = doc.visibleText(name, kind)
+            cachedStringVersion = version
+        }
+        return cachedString
     }
 
     override fun toJson(): String = toString()

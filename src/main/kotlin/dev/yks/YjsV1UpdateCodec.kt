@@ -1117,9 +1117,22 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
     val resolvedUnresolvedParents = mutableMapOf<Id, UnresolvedYjsParent?>()
     val itemsByClient = groupBy { item -> item.id.client }
         .mapValues { (_, items) -> items.sortedBy { item -> item.id.clock } }
+    val denseUnitClockStarts = itemsByClient.mapValues { (_, items) ->
+        val firstClock = items.firstOrNull()?.id?.clock ?: return@mapValues null
+        firstClock.takeIf {
+            items.withIndex().all { (index, item) ->
+                item.content.length == 1L && item.id.clock == checkedClockAdd(firstClock, index.toLong())
+            }
+        }
+    }
 
     fun containing(id: Id): DecodedWireItem? {
         val items = itemsByClient[id.client] ?: return null
+        denseUnitClockStarts[id.client]?.let { firstClock ->
+            val index = id.clock - firstClock
+            if (index >= 0 && index < items.size.toLong()) return items[index.toInt()]
+            return null
+        }
         var low = 0
         var high = items.lastIndex
         var candidate: DecodedWireItem? = null

@@ -449,6 +449,23 @@ class YDocTest {
     }
 
     @Test
+    fun cachedFullUpdatesAreDefensiveAndInvalidateAfterMutation() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        text.insert(0, "a")
+
+        val first = doc.encodeStateAsUpdate()
+        val expectedFirst = first.copyOf()
+        first.fill(0)
+        assertContentEquals(expectedFirst, doc.encodeStateAsUpdate())
+
+        text.insert(1, "b")
+        val updated = doc.encodeStateAsUpdate()
+        assertFalse(expectedFirst.contentEquals(updated))
+        assertEquals("ab", createDocFromUpdate(updated).getText("body").toString())
+    }
+
+    @Test
     fun clientIdChangesWhenApplyingUnknownStructsFromSameClient() {
         val source = YDoc(clientId = 0)
         val target = YDoc(clientId = 0)

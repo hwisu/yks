@@ -847,6 +847,50 @@ git diff --check
 
 이 머신의 Codex shell에서는 위 명령 앞에 `rtk`를 붙여 실행해야 함.
 
+## 2026-07-17 Yjs performance-parity completion
+
+- Materialized sequences now combine the CRDT linked order with a deterministic implicit treap.
+  Subtree-visible lengths provide `O(log n)` text position lookup and boundary splitting while
+  preserving Yjs left/right integration order.
+- Unobserved cleanup scans only changed client suffixes and registered split boundaries. Delete
+  cleanup now examines touched ranges and direct logical neighbors instead of rebuilding every
+  parent sequence or walking all retained tombstones. This removes the valid-update CPU-DoS path
+  found in the initial audit.
+- Dense unit-clock wire updates use direct clock indexing during parent/kind resolution. Full V1
+  state updates are cached by store version and root-kind metadata, returned as defensive copies,
+  and invalidated on every structural, content, or deletion mutation.
+- `YText.length` and `toString()` retain versioned per-type read caches; delete-set and nested
+  parent-ID derivations are also invalidation based.
+- `npm run benchmark:performance:check` enforces the local parity contract: stable workloads must
+  stay within 2x of Yjs; workloads whose Yjs median is below 0.1 ms may add at most 0.1 ms because
+  timer/runtime overhead dominates their ratio.
+
+Latest warmed medians on this machine against Yjs 13.6.31:
+
+| Scenario | Yjs | YKS | YKS/Yjs |
+|---|---:|---:|---:|
+| apply 5,000 structs | 2.455 ms | 3.181 ms | 1.30x |
+| append 5,000 chars | 8.361 ms | 4.382 ms | 0.52x |
+| 1,000 middle edits, GC | 4.326 ms | 4.886 ms | 1.13x |
+| 1,000 middle edits, no GC | 3.892 ms | 3.505 ms | 0.90x |
+| 1,000 batched middle edits | 9.654 ms | 7.657 ms | 0.79x |
+| encode unchanged 5,000-struct state | 0.760 ms | 0.011 ms | 0.02x |
+
+The cached read scenarios add 0.053 ms for 20,000 `length` reads and 0.008 ms for
+100 `toString()` reads; their raw ratios are not treated as meaningful because both medians are
+well below 0.1 ms.
+
+Validation:
+
+- `./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.1-test`: passed
+  - 677 normal Kotlin tests, including defensive full-update cache invalidation
+  - 85 Kotlin interop tests, including 500-seed differential coverage
+  - standalone Maven Local consumer smoke test
+- `npm run test:interop`: Yjs 106 passed, Yrs 4 passed
+- `npm run benchmark:performance:check`: all 8 scenarios passed
+- `npm run interop:check-clean`: generated fixtures clean
+- `git diff --check`: passed
+
 ## 정밀 감사 후 개선 상태
 
 2026-07-12 감사에서 확인한 sequence ordering, cleanup/map/XML 의미, 두 차례 후속 독립 감사의
