@@ -1,6 +1,8 @@
 package dev.yks
 
+import java.time.Duration
 import java.util.Base64
+import org.junit.jupiter.api.assertTimeoutPreemptively
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -56,6 +58,50 @@ class StructStoreTest {
 
         assertEquals("seed" + "x".repeat(200), text.toString())
         assertEquals(buildsAfterMaterialization, doc.store.sequenceBuildCount)
+    }
+
+    @Test
+    fun validManyStructUpdateStaysInsideApplyBudget() {
+        val items = List(5_000) { offset ->
+            val clock = offset.toLong()
+            StoreItem(
+                id = Id(1, clock),
+                origin = if (clock < 2) null else Id(1, clock - 2),
+                rightOrigin = null,
+                parent = if (clock % 2 == 0L) "left" else "right",
+                parentSub = null,
+                content = ItemContent.Text("x"),
+            )
+        }
+        val update = UpdateCodec.encode(DocumentUpdate(items, DeleteSet.empty()))
+
+        assertEquals(5_000, decodeUpdate(update).structs.size)
+        assertTrue(update.size < 64_000)
+
+        val target = assertTimeoutPreemptively(Duration.ofSeconds(2)) {
+            YDoc(clientId = 2).also { doc -> doc.applyUpdate(update) }
+        }
+        assertEquals(2_500, target.getText("left").length)
+        assertEquals(2_500, target.getText("right").length)
+        assertEquals("x".repeat(2_500), target.getText("left").toString())
+        assertEquals("x".repeat(2_500), target.getText("right").toString())
+    }
+
+    @Test
+    fun sequentialTextAppendsStayPackedAndLengthReadsStayCheap() {
+        val doc = assertTimeoutPreemptively(Duration.ofSeconds(2)) {
+            YDoc(clientId = 1).also { created ->
+                val text = created.getText("body")
+                repeat(5_000) { text.insert(text.length, "x") }
+            }
+        }
+        val text = doc.getText("body")
+
+        assertEquals(1, doc.store.clients.getValue(1).size)
+        assertEquals(5_000L, doc.store.clients.getValue(1).single().length)
+        assertTimeoutPreemptively(Duration.ofSeconds(1)) {
+            repeat(20_000) { assertEquals(5_000, text.length) }
+        }
     }
 
     @Test

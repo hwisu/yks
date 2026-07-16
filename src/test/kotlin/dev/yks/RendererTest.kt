@@ -551,7 +551,13 @@ class RendererTest {
         text.insert(0, "a")
         val beforeFuture = snapshot(doc)
         text.insert(1, "b")
-        val future = getTypeStructs(text).single { it.id == Id(1, 1) }
+        val packed = getTypeStructs(text).single()
+        val future = packed.copy(
+            id = Id(1, 1),
+            length = 1,
+            origin = Id(1, 0),
+            content = ContentString("b"),
+        )
         val renderer = createSnapshotRenderer(beforeFuture)
         val rendered = mutableListOf<AttributedContent>()
 

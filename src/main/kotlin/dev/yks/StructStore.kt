@@ -14,9 +14,11 @@ class StructStore(private val owner: YDoc? = null) {
     private val clientItems: MutableMap<Long, MutableList<StoreItem>> = linkedMapOf()
     private val structViewOwner: YDoc by lazy(LazyThreadSafetyMode.NONE) { owner ?: YDoc() }
     private var allItemsCache: List<StoreItem>? = null
-    private val sequenceCache: MutableMap<String, MutableList<StoreItem>> = mutableMapOf()
+    private val sequenceCache: MutableMap<String, IndexedSequence> = mutableMapOf()
     private val mapEntriesCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
     private val mapOrderCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
+    private val visibleLengths: MutableMap<String, LongArray> = mutableMapOf()
+    private val visibleNativeTextFormats: MutableMap<String, MutableSet<Id>> = mutableMapOf()
 
     internal val ownerDoc: YDoc? get() = owner
     internal var sequenceBuildCount: Int = 0
@@ -392,6 +394,7 @@ class StructStore(private val owner: YDoc? = null) {
         var changed = false
         items.forEach { item ->
             if (!item.deleted) {
+                removeDerivedState(item)
                 item.deleted = true
                 changed = true
             }
@@ -410,10 +413,22 @@ class StructStore(private val owner: YDoc? = null) {
     }
 
     internal fun sequence(parent: String): List<StoreItem> {
-        return sequenceCache[parent] ?: buildSequence(parent).toMutableList().also { sequence ->
-            sequenceCache[parent] = sequence
-        }
+        return sequenceIndex(parent).snapshot()
     }
+
+    internal fun visibleLength(parent: String, kind: RootKind): Long =
+        visibleLengths[parent]?.get(kind.ordinal) ?: 0L
+
+    internal fun hasVisibleNativeTextFormat(parent: String): Boolean =
+        visibleNativeTextFormats[parent]?.isNotEmpty() == true
+
+    internal fun lastSequenceItem(parent: String, kind: RootKind): StoreItem? =
+        sequenceIndex(parent).last { item -> item.content.kind == kind }
+
+    private fun sequenceIndex(parent: String): IndexedSequence =
+        sequenceCache.getOrPut(parent) {
+            IndexedSequence(buildSequence(parent), ::getStoreItem)
+        }
 
     private fun buildSequence(parent: String): List<StoreItem> {
         sequenceBuildCount++
@@ -553,8 +568,9 @@ class StructStore(private val owner: YDoc? = null) {
 
     private fun recordAdded(item: StoreItem) {
         invalidateNonSequenceCaches(item)
+        addDerivedState(item)
         if (item.parentSub == null) {
-            sequenceCache[item.parent]?.let { sequence -> integrateIntoCachedSequence(sequence, item) }
+            sequenceCache[item.parent]?.integrate(item)
         }
     }
 
@@ -564,42 +580,152 @@ class StructStore(private val owner: YDoc? = null) {
         additionallyRemoved: List<StoreItem> = emptyList(),
     ) {
         invalidateNonSequenceCaches(previous)
-        val sequence = sequenceCache[previous.parent] ?: return
-        val index = sequence.indexOfFirst { item -> item.id == previous.id }
-        if (index >= 0) {
-            sequence.removeAt(index)
-            sequence.addAll(index, replacements)
-        }
-        additionallyRemoved.forEach { removed -> sequence.removeAll { item -> item.id == removed.id } }
+        removeDerivedState(previous)
+        additionallyRemoved.forEach(::removeDerivedState)
+        replacements.forEach(::addDerivedState)
+        sequenceCache[previous.parent]?.replace(previous, replacements, additionallyRemoved)
     }
 
-    private fun integrateIntoCachedSequence(sequence: MutableList<StoreItem>, item: StoreItem) {
-        fun find(id: Id?): StoreItem? = id?.let { target ->
-            sequence.firstOrNull { candidate -> candidate.contains(target) }
+    private fun addDerivedState(item: StoreItem) {
+        if (item.parentSub != null || item.deleted) return
+        if (item.countable) {
+            val lengths = visibleLengths.getOrPut(item.parent) { LongArray(RootKind.entries.size) }
+            val kindIndex = item.content.kind.ordinal
+            lengths[kindIndex] = checkedClockAdd(lengths[kindIndex], item.length, "visible sequence length")
+        }
+        if (item.content is ItemContent.NativeTextFormat) {
+            visibleNativeTextFormats.getOrPut(item.parent) { linkedSetOf() }.add(item.id)
+        }
+    }
+
+    private fun removeDerivedState(item: StoreItem) {
+        if (item.parentSub != null || item.deleted) return
+        if (item.countable) {
+            val lengths = checkNotNull(visibleLengths[item.parent]) { "missing visible length for ${item.parent}" }
+            val kindIndex = item.content.kind.ordinal
+            val next = lengths[kindIndex] - item.length
+            check(next >= 0) { "visible sequence length underflow for ${item.parent}:${item.content.kind}" }
+            lengths[kindIndex] = next
+            if (lengths.all { length -> length == 0L }) visibleLengths.remove(item.parent)
+        }
+        if (item.content is ItemContent.NativeTextFormat) {
+            visibleNativeTextFormats[item.parent]?.let { ids ->
+                ids.remove(item.id)
+                if (ids.isEmpty()) visibleNativeTextFormats.remove(item.parent)
+            }
+        }
+    }
+
+    internal fun mergeTextItems(ids: List<Id>): StoreItem? {
+        if (ids.size < 2 || ids.any { id -> id.client != ids.first().client }) return null
+        val structs = clientItems[ids.first().client] ?: return null
+        val firstIndex = structs.findStartIndex(ids.first().clock)
+        if (firstIndex < 0 || firstIndex + ids.size > structs.size) return null
+        val items = structs.subList(firstIndex, firstIndex + ids.size).toList()
+        if (items.map(StoreItem::id) != ids) return null
+        val firstItem = items.first()
+        val firstContent = firstItem.content as? ItemContent.Text ?: return null
+        for (index in 1 until items.size) {
+            val left = items[index - 1]
+            val right = items[index]
+            val content = right.content as? ItemContent.Text ?: return null
+            if (
+                left.endClock() != right.id.clock ||
+                right.origin != left.lastId ||
+                firstItem.rightOrigin != right.rightOrigin ||
+                firstItem.parent != right.parent ||
+                firstItem.parentSub != right.parentSub ||
+                firstItem.deleted != right.deleted ||
+                firstItem.requiresClockContinuity != right.requiresClockContinuity ||
+                firstItem.isGc != right.isGc ||
+                firstItem.unresolvedParent != right.unresolvedParent ||
+                firstItem.countable != right.countable ||
+                firstContent.kind != content.kind ||
+                firstContent.attributes != content.attributes ||
+                firstContent.baseAttributes != content.baseAttributes
+            ) return null
         }
 
+        val mergedValueLength = items.sumOf(StoreItem::length).toNonNegativeInt("merged text length")
+        val mergedValue = buildString(mergedValueLength) {
+            items.forEach { item -> append((item.content as ItemContent.Text).value) }
+        }
+        val merged = firstItem.copy(content = firstContent.copy(value = mergedValue))
+        structs[firstIndex] = merged
+        structs.subList(firstIndex + 1, firstIndex + items.size).clear()
+        recordReplacement(firstItem, listOf(merged), additionallyRemoved = items.drop(1))
+        return merged
+    }
+
+    private fun StoreItem.contains(id: Id): Boolean =
+        id.client == this.id.client && id.clock >= this.id.clock && id.clock < endClock()
+}
+
+/**
+ * Mutable linked sequence used only for a materialized parent.
+ *
+ * Yjs keeps left/right item links and resolves anchors through the struct store. Mirroring that
+ * shape avoids shifting a Kotlin [MutableList] and rescanning it for every integrated struct.
+ * A read-only list is materialized lazily for algorithms that genuinely need indexed traversal.
+ */
+private class IndexedSequence(
+    items: List<StoreItem>,
+    private val resolveStoreItem: (Id) -> StoreItem?,
+) {
+    private class Node(var item: StoreItem) {
+        var left: Node? = null
+        var right: Node? = null
+    }
+
+    private val nodesByStart = hashMapOf<Id, Node>()
+    private var first: Node? = null
+    private var last: Node? = null
+    private var materialized: List<StoreItem>? = null
+
+    init {
+        items.forEach(::append)
+        materialized = items.toList()
+    }
+
+    fun snapshot(): List<StoreItem> = materialized ?: buildList(nodesByStart.size) {
+        val seen = hashSetOf<Node>()
+        var current = first
+        while (current != null && seen.add(current)) {
+            add(current.item)
+            current = current.right
+        }
+    }.also { materialized = it }
+
+    fun last(predicate: (StoreItem) -> Boolean): StoreItem? {
+        var current = last
+        while (current != null) {
+            if (predicate(current.item)) return current.item
+            current = current.left
+        }
+        return null
+    }
+
+    fun integrate(item: StoreItem) {
         var left = find(item.origin)
         val right = find(item.rightOrigin)
-        var otherIndex = left?.let(sequence::indexOf)?.plus(1) ?: 0
-        val conflictingItems = hashSetOf<Id>()
-        val itemsBeforeOrigin = hashSetOf<Id>()
+        var other = if (left == null) first else left.right
+        val conflictingItems = hashSetOf<Node>()
+        val itemsBeforeOrigin = hashSetOf<Node>()
 
-        while (otherIndex < sequence.size) {
-            val other = sequence[otherIndex]
-            if (other.id == right?.id) break
-            itemsBeforeOrigin.add(other.id)
-            conflictingItems.add(other.id)
+        while (other != null && other !== right) {
+            itemsBeforeOrigin.add(other)
+            conflictingItems.add(other)
             when {
-                compareIDs(item.origin, other.origin) -> {
-                    if (other.id.client < item.id.client) {
+                compareIDs(item.origin, other.item.origin) -> {
+                    if (other.item.id.client < item.id.client) {
                         left = other
                         conflictingItems.clear()
-                    } else if (compareIDs(item.rightOrigin, other.rightOrigin)) {
+                    } else if (compareIDs(item.rightOrigin, other.item.rightOrigin)) {
                         break
                     }
                 }
-                other.origin != null -> {
-                    val otherOrigin = find(other.origin)?.id
+                other.item.origin != null -> {
+                    val otherOrigin = find(other.item.origin)
                     if (otherOrigin !in itemsBeforeOrigin) break
                     if (otherOrigin !in conflictingItems) {
                         left = other
@@ -608,15 +734,75 @@ class StructStore(private val owner: YDoc? = null) {
                 }
                 else -> break
             }
-            otherIndex++
+            other = other.right
         }
 
-        val insertionIndex = left?.let(sequence::indexOf)?.plus(1) ?: 0
-        sequence.add(insertionIndex, item)
+        insertAfter(left, Node(item))
+        materialized = null
     }
 
-    private fun StoreItem.contains(id: Id): Boolean =
-        id.client == this.id.client && id.clock >= this.id.clock && id.clock < endClock()
+    fun replace(previous: StoreItem, replacements: List<StoreItem>, additionallyRemoved: List<StoreItem>) {
+        val previousNode = nodesByStart[previous.id] ?: return
+        val removedIds = additionallyRemoved.mapTo(hashSetOf()) { item -> item.id }
+        val insertionLeft = previousNode.left
+        var insertionRight = previousNode.right
+        while (insertionRight?.item?.id in removedIds) insertionRight = insertionRight?.right
+
+        detach(previousNode)
+        additionallyRemoved.forEach { removed -> nodesByStart[removed.id]?.let(::detach) }
+
+        var left = insertionLeft
+        replacements.forEach { replacement ->
+            val node = Node(replacement)
+            nodesByStart[replacement.id] = node
+            node.left = left
+            node.right = insertionRight
+            if (left == null) first = node else left.right = node
+            insertionRight?.left = node
+            if (insertionRight == null) last = node
+            left = node
+        }
+        if (replacements.isEmpty()) {
+            if (insertionLeft == null) first = insertionRight else insertionLeft.right = insertionRight
+            insertionRight?.left = insertionLeft
+            if (insertionRight == null) last = insertionLeft
+        }
+        materialized = null
+    }
+
+    private fun append(item: StoreItem) {
+        val node = Node(item)
+        nodesByStart[item.id] = node
+        node.left = last
+        if (last == null) first = node else last?.right = node
+        last = node
+    }
+
+    private fun find(id: Id?): Node? {
+        if (id == null) return null
+        val containing = resolveStoreItem(id) ?: return null
+        return nodesByStart[containing.id]
+    }
+
+    private fun insertAfter(left: Node?, node: Node) {
+        val right = if (left == null) first else left.right
+        node.left = left
+        node.right = right
+        if (left == null) first = node else left.right = node
+        right?.left = node
+        if (right == null) last = node
+        nodesByStart[node.item.id] = node
+    }
+
+    private fun detach(node: Node) {
+        val left = node.left
+        val right = node.right
+        if (left == null) first = right else left.right = right
+        if (right == null) last = left else right.left = left
+        nodesByStart.remove(node.item.id)
+        node.left = null
+        node.right = null
+    }
 }
 
 private class SequenceNode(val item: StoreItem) {

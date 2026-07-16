@@ -343,6 +343,13 @@ sealed class AbstractYType protected constructor(
             deepTransactionObservers.isNotEmpty() ||
             deepEventListObservers.isNotEmpty()
 
+    internal val needsTransactionSnapshot: Boolean
+        get() = observers.isNotEmpty() ||
+            transactionObservers.isNotEmpty() ||
+            hasDeepObservers ||
+            hasDeltaListeners ||
+            hasDeltaCache
+
     internal val hasDeltaListeners: Boolean get() = eventListeners["delta"]?.isNotEmpty() == true
 
     internal val hasDeltaCache: Boolean get() = deltaCache != null
@@ -912,10 +919,7 @@ open class YText internal constructor(
     val length: Int
         get() {
             if (warnIfPreliminary()) return 0
-            return doc.visibleSequence(name)
-                .filter { it.content.kind == kind }
-                .sumOf { item -> item.length }
-                .toNonNegativeInt("text length")
+            return doc.visibleLength(name, kind).toNonNegativeInt("text length")
         }
 
     val attrSize: Int get() = getAttrs().size
@@ -1435,7 +1439,7 @@ open class YText internal constructor(
             yChangeEndClock = null
         }
 
-        doc.sequence(name).forEach { item ->
+        doc.sequence(name).flatMap(StoreItem::logicalUnits).forEach { item ->
             if (item.content.kind != kind || !item.isVisibleAt(snapshot) && !item.isVisibleAt(prevSnapshot)) {
                 return@forEach
             }
@@ -1611,8 +1615,10 @@ open class YText internal constructor(
         originOverride: Id? = null,
         rightOriginOverride: Id? = null,
     ) {
-        val visible = textItems()
-        require(index <= visible.size) { "insert index is out of bounds" }
+        val visibleLength = doc.visibleLength(name, kind)
+        require(index.toLong() <= visibleLength) {
+            "insert index $index exceeds visible text length $visibleLength"
+        }
         if (entries.isEmpty()) return
         val anchors = doc.insertionAnchors(name, kind, index)
         var origin = originOverride ?: anchors.first

@@ -437,7 +437,7 @@ class YTypeAccessorParityTest {
         assertEquals(1, arrayMarker?.index)
         assertEquals(getTypeStructs(array)[1].id, arrayMarker?.p?.id)
         assertEquals(2, textMarker?.index)
-        assertEquals(getTypeStructs(text)[2].id, textMarker?.p?.id)
+        assertEquals(getTypeStructs(text).last().id, textMarker?.p?.id)
         assertEquals(2, xmlMarker?.index)
         assertEquals(getTypeStructs(xml)[2].id, xmlMarker?.p?.id)
 

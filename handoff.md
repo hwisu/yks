@@ -747,6 +747,32 @@ BUILD SUCCESSFUL
 - fixture regeneration diff: clean
 - `git diff --check`: passed
 
+## 2026-07-17 indexed sequence and inherited-parent performance
+
+- Materialized parent sequences now use an ID-addressable linked index instead of repeatedly
+  scanning and shifting a `MutableList` for `origin`/`rightOrigin` integration.
+- Visible sequence lengths and visible native-format presence are maintained incrementally, so
+  `YText.length` and the append fast path no longer expand packed strings into logical-unit
+  `StoreItem` copies.
+- Adjacent compatible text created across transactions is cleanup-merged with one `buildString`
+  pass and one `subList.clear()`, preserving Yjs-style packed storage without quadratic string or
+  list work.
+- Transactions without type/deep/delta observers skip the expensive before-image snapshot;
+  observer-bearing transactions retain the existing event contract.
+- V1/V2 decoded inherited-parent, parent-sub, kind, and unresolved-parent chains now use iterative
+  memoized resolution. The previous recursive `seen + id` path copied a growing set for every
+  struct and allowed a small valid update to consume tens of seconds of CPU.
+- Snapshot text comparison and public struct/search-marker helpers retain logical UTF-16 boundary
+  behavior even when cleanup has physically packed adjacent `ContentString` items.
+- New regressions enforce:
+  - a valid 5,000-struct V1 update applies inside a 2-second budget and converges correctly
+  - 5,000 one-character appends finish inside a 2-second budget, remain one packed store struct,
+    and 20,000 repeated `length` reads finish inside a 1-second budget
+- Validation:
+  - `./gradlew test --no-daemon`: 669 passed
+  - `./gradlew interopTest --no-daemon`: 85 passed, including the 500-seed differential
+  - `npm run test:interop`: Yjs 106 passed, Yrs 4 passed
+
 검증 명령:
 
 ```sh

@@ -1028,6 +1028,7 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
     val resolvedParents = mutableMapOf<Id, String>()
     val resolvedParentSubs = mutableMapOf<Id, String?>()
     val resolvedKinds = mutableMapOf<Id, RootKind>()
+    val resolvedUnresolvedParents = mutableMapOf<Id, UnresolvedYjsParent?>()
     val itemsByClient = groupBy { item -> item.id.client }
         .mapValues { (_, items) -> items.sortedBy { item -> item.id.clock } }
 
@@ -1051,76 +1052,147 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
         }
     }
 
-    fun resolveParent(item: DecodedWireItem, seen: Set<Id> = emptySet()): String {
+    fun resolveParent(item: DecodedWireItem): String {
         resolvedParents[item.id]?.let { return it }
-        check(item.id !in seen) { "cyclic Yjs parent reference at ${item.id}" }
-        val parent = when (val reference = item.parent) {
-            is ParentReference.Root -> reference.name
-            is ParentReference.Nested -> containing(reference.id)?.content
-                ?.let { content -> (content as? WireContent.Type)?.name }
-                ?: nestedParentAlias(reference.id)
-            is ParentReference.Inherit -> containing(reference.id)
-                ?.let { anchor -> resolveParent(anchor, seen + item.id) }
-                ?: inheritedParentName(reference.id)
+        val path = mutableListOf<DecodedWireItem>()
+        val seen = hashSetOf<Id>()
+        var current = item
+        var result: String
+        while (true) {
+            resolvedParents[current.id]?.let { cached ->
+                result = cached
+                break
+            }
+            check(seen.add(current.id)) { "cyclic Yjs parent reference at ${current.id}" }
+            path.add(current)
+            when (val reference = current.parent) {
+                is ParentReference.Root -> {
+                    result = reference.name
+                    break
+                }
+                is ParentReference.Nested -> {
+                    result = containing(reference.id)?.content
+                        ?.let { content -> (content as? WireContent.Type)?.name }
+                        ?: nestedParentAlias(reference.id)
+                    break
+                }
+                is ParentReference.Inherit -> {
+                    val anchor = containing(reference.id)
+                    if (anchor == null) {
+                        result = inheritedParentName(reference.id)
+                        break
+                    }
+                    current = anchor
+                }
+            }
         }
-        resolvedParents[item.id] = parent
-        return parent
+        path.forEach { candidate -> resolvedParents[candidate.id] = result }
+        return result
     }
 
-    fun resolveParentSub(item: DecodedWireItem, seen: Set<Id> = emptySet()): String? {
+    fun resolveParentSub(item: DecodedWireItem): String? {
         if (resolvedParentSubs.containsKey(item.id)) return resolvedParentSubs[item.id]
-        check(item.id !in seen) { "cyclic Yjs parent-sub reference at ${item.id}" }
-        val parentSub = when (val reference = item.parent) {
-            is ParentReference.Root,
-            is ParentReference.Nested -> item.parentSub
-            is ParentReference.Inherit -> containing(reference.id)
-                ?.let { anchor -> resolveParentSub(anchor, seen + item.id) }
+        val path = mutableListOf<DecodedWireItem>()
+        val seen = hashSetOf<Id>()
+        var current = item
+        var result: String?
+        while (true) {
+            if (resolvedParentSubs.containsKey(current.id)) {
+                result = resolvedParentSubs[current.id]
+                break
+            }
+            check(seen.add(current.id)) { "cyclic Yjs parent-sub reference at ${current.id}" }
+            path.add(current)
+            when (val reference = current.parent) {
+                is ParentReference.Root,
+                is ParentReference.Nested -> {
+                    result = current.parentSub
+                    break
+                }
+                is ParentReference.Inherit -> {
+                    val anchor = containing(reference.id)
+                    if (anchor == null) {
+                        result = null
+                        break
+                    }
+                    current = anchor
+                }
+            }
         }
-        resolvedParentSubs[item.id] = parentSub
-        return parentSub
+        path.forEach { candidate -> resolvedParentSubs[candidate.id] = result }
+        return result
     }
 
-    fun resolveKind(item: DecodedWireItem, seen: Set<Id> = emptySet()): RootKind {
+    fun resolveKind(item: DecodedWireItem): RootKind {
         resolvedKinds[item.id]?.let { return it }
-        check(item.id !in seen) { "cyclic Yjs kind reference at ${item.id}" }
-        val parentSub = resolveParentSub(item)
-        val ownerKind = when (val reference = item.parent) {
-            is ParentReference.Nested -> (containing(reference.id)?.content as? WireContent.Type)?.kind
-            is ParentReference.Inherit -> containing(reference.id)
-                ?.takeUnless { anchor -> anchor.content is WireContent.Deleted }
-                ?.let { anchor -> resolveKind(anchor, seen + item.id) }
-            is ParentReference.Root -> null
+        val path = mutableListOf<DecodedWireItem>()
+        val seen = hashSetOf<Id>()
+        var current = item
+        while (resolvedKinds[current.id] == null) {
+            check(seen.add(current.id)) { "cyclic Yjs kind reference at ${current.id}" }
+            path.add(current)
+            val reference = current.parent as? ParentReference.Inherit ?: break
+            val anchor = containing(reference.id)?.takeUnless { candidate ->
+                candidate.content is WireContent.Deleted
+            } ?: break
+            current = anchor
         }
-        val kind = if (parentSub != null) {
-            ownerKind?.takeIf { it == RootKind.XmlHook } ?: RootKind.Map
-        } else {
-            item.content.definitiveSequenceKindOrNull()
-                ?: ownerKind
-                ?: item.content.inferRootKind(parentSub)
+        path.asReversed().forEach { candidate ->
+            if (resolvedKinds[candidate.id] != null) return@forEach
+            val parentSub = resolveParentSub(candidate)
+            val ownerKind = when (val reference = candidate.parent) {
+                is ParentReference.Nested -> (containing(reference.id)?.content as? WireContent.Type)?.kind
+                is ParentReference.Inherit -> containing(reference.id)
+                    ?.takeUnless { anchor -> anchor.content is WireContent.Deleted }
+                    ?.let { anchor -> resolvedKinds[anchor.id] }
+                is ParentReference.Root -> null
+            }
+            resolvedKinds[candidate.id] = if (parentSub != null) {
+                ownerKind?.takeIf { it == RootKind.XmlHook } ?: RootKind.Map
+            } else {
+                candidate.content.definitiveSequenceKindOrNull()
+                    ?: ownerKind
+                    ?: candidate.content.inferRootKind(parentSub)
+            }
         }
-        resolvedKinds[item.id] = kind
-        return kind
+        return checkNotNull(resolvedKinds[item.id]) { "failed to resolve Yjs kind for ${item.id}" }
     }
 
     fun resolvesToGc(item: DecodedWireItem): Boolean = item.isGc ||
         listOfNotNull(item.origin, item.rightOrigin).any { anchorId -> containing(anchorId)?.isGc == true } ||
         ((item.parent as? ParentReference.Nested)?.let { reference -> containing(reference.id)?.isGc } == true)
 
-    fun unresolvedParent(item: DecodedWireItem, seen: Set<Id> = emptySet()): UnresolvedYjsParent? {
-        check(item.id !in seen) { "cyclic Yjs unresolved parent reference at ${item.id}" }
-        return when (val reference = item.parent) {
-            is ParentReference.Root -> null
-            is ParentReference.Nested -> if (containing(reference.id) == null) {
-                UnresolvedYjsParent.Nested(reference.id)
-            } else {
-                null
-            }
-            is ParentReference.Inherit -> {
-                val anchor = containing(reference.id) ?: return UnresolvedYjsParent.Inherit(reference.id)
-                if (unresolvedParent(anchor, seen + item.id) == null) null
-                else UnresolvedYjsParent.Inherit(reference.id)
+    fun unresolvedParent(item: DecodedWireItem): UnresolvedYjsParent? {
+        if (resolvedUnresolvedParents.containsKey(item.id)) return resolvedUnresolvedParents[item.id]
+        val path = mutableListOf<DecodedWireItem>()
+        val seen = hashSetOf<Id>()
+        var current = item
+        while (!resolvedUnresolvedParents.containsKey(current.id)) {
+            check(seen.add(current.id)) { "cyclic Yjs unresolved parent reference at ${current.id}" }
+            path.add(current)
+            val reference = current.parent as? ParentReference.Inherit ?: break
+            current = containing(reference.id) ?: break
+        }
+        path.asReversed().forEach { candidate ->
+            if (resolvedUnresolvedParents.containsKey(candidate.id)) return@forEach
+            resolvedUnresolvedParents[candidate.id] = when (val reference = candidate.parent) {
+                is ParentReference.Root -> null
+                is ParentReference.Nested -> if (containing(reference.id) == null) {
+                    UnresolvedYjsParent.Nested(reference.id)
+                } else {
+                    null
+                }
+                is ParentReference.Inherit -> {
+                    val anchor = containing(reference.id)
+                    if (anchor == null || resolvedUnresolvedParents[anchor.id] != null) {
+                        UnresolvedYjsParent.Inherit(reference.id)
+                    } else {
+                        null
+                    }
+                }
             }
         }
+        return resolvedUnresolvedParents[item.id]
     }
 
     return flatMap { item ->

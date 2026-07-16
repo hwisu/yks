@@ -722,6 +722,8 @@ class YDoc(
             .filter { !it.deleted && it.countable }
             .flatMap(StoreItem::logicalUnits)
 
+    internal fun visibleLength(parent: String, kind: RootKind): Long = store.visibleLength(parent, kind)
+
     internal fun sequence(parent: String): List<StoreItem> = store.sequence(parent)
 
     internal fun typeChildren(type: AbstractYType): List<StoreItem> {
@@ -1009,10 +1011,15 @@ class YDoc(
 
     internal fun insertionAnchors(parent: String, kind: RootKind, index: Int): Pair<Id?, Id?> {
         if (kind == RootKind.Text || kind == RootKind.XmlText) {
+            val visibleLength = store.visibleLength(parent, kind)
+            require(index.toLong() <= visibleLength) { "insert index is out of bounds" }
+            if (index.toLong() == visibleLength) {
+                val left = store.lastSequenceItem(parent, kind)
+                registerVirtualInsertionSplitCandidate(left, null)
+                return left?.lastId to null
+            }
             var full = sequence(parent).filter { it.content.kind == kind }
             val visible = full.filter { !it.deleted && it.countable }
-            val visibleLength = visible.sumOf { item -> item.length }
-            require(index.toLong() <= visibleLength) { "insert index is out of bounds" }
             var offset = 0L
             val containing = visible.firstOrNull { item ->
                 val next = checkedClockAdd(offset, item.length, "visible text length")
@@ -1836,10 +1843,7 @@ class YDoc(
     private fun shouldReapplyTextFormatsAfter(item: StoreItem): Boolean =
         item.content.isTextFormatControl() ||
             item.content.isTextCountable() &&
-            store.allItems().any { candidate ->
-                candidate.parent == item.parent &&
-                !candidate.deleted && candidate.content is ItemContent.NativeTextFormat
-            }
+            store.hasVisibleNativeTextFormat(item.parent)
 
     private fun reapplyTextFormats(parent: String): List<StoreItem> {
         val changed = mutableListOf<StoreItem>()
@@ -2272,6 +2276,7 @@ class YDoc(
     ) {
         val allItems = store.allItems()
         val linkedPairs = currentLogicalPairs(allItems)
+        val physicallyMergeableTextGroups = mutableListOf<List<Id>>()
         afterState.forEach { (client, afterClock) ->
             val beforeClock = beforeState[client] ?: 0
             if (beforeClock == afterClock) return@forEach
@@ -2298,11 +2303,17 @@ class YDoc(
                     for (memberIndex in groupStart..index) {
                         representatives[clientItems[memberIndex].id] = representative
                     }
+                    physicallyMergeableTextGroups.add(
+                        (groupStart..index).map { memberIndex -> clientItems[memberIndex].id },
+                    )
                 } else {
                     representatives[clientItems[index].id] = clientItems[index].id
                 }
                 index = groupStart - 1
             }
+        }
+        physicallyMergeableTextGroups.forEach { ids ->
+            store.mergeTextItems(ids)
         }
     }
 
@@ -2533,6 +2544,7 @@ class YDoc(
 
     private fun captureParentBefore(parent: String, kindHint: RootKind) {
         val transaction = currentTransaction ?: return
+        if (!needsTransactionSnapshots()) return
         val existing = transaction.beforeParents[parent]
         val snapshotKind = if (kindHint == RootKind.XmlHook || knownParentKinds()[parent] == RootKind.XmlHook) {
             RootKind.Map
@@ -2558,6 +2570,15 @@ class YDoc(
             RootKind.XmlHook -> error("XML hook snapshots use map semantics")
         }
         transaction.beforeParents[parent] = existing?.merge(captured) ?: captured
+    }
+
+    private fun needsTransactionSnapshots(): Boolean {
+        if (
+            beforeObserverCallsListeners.isNotEmpty() ||
+            transactionEventListeners["beforeObserverCalls"].orEmpty().isNotEmpty() ||
+            eventListeners["beforeObserverCalls"].orEmpty().isNotEmpty()
+        ) return true
+        return materializedTypes().any { type -> type.needsTransactionSnapshot }
     }
 
     private fun createEvent(
