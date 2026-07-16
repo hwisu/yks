@@ -11,7 +11,8 @@
     "test:interop:yjs": "node --test interop/yjs-v1/*.test.mjs",
     "interop:yrs:generate": "cargo run --locked --quiet --manifest-path interop/yrs-oracle/Cargo.toml -- generate",
     "test:interop:yrs": "cargo fmt --manifest-path interop/yrs-oracle/Cargo.toml -- --check && cargo test --locked --quiet --manifest-path interop/yrs-oracle/Cargo.toml",
-    "interop:check-clean": "node interop/check-generated-clean.mjs"
+    "interop:check-clean": "node interop/check-generated-clean.mjs",
+    "benchmark:performance": "node --expose-gc benchmarks/performance/yjs-parity.mjs"
   },
   "devDependencies": {
     "yjs": "13.6.31"

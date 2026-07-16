@@ -802,6 +802,38 @@ BUILD SUCCESSFUL
   - `cargo audit --file interop/yrs-oracle/Cargo.lock`: 0 vulnerabilities across 49 crates
   - `git diff --check`: passed
 
+## 2026-07-17 cross-runtime benchmark and unobserved transaction fast path
+
+- Added `npm run benchmark:performance`, which runs warmed Yjs `13.6.31` and YKS workloads with
+  the same generated 5,000-struct V1 update and writes raw results to
+  `build/performance/comparison.json`.
+- Benchmark scenarios cover remote apply, 5,000 sequential appends, repeated middle edits with
+  GC on/off and one outer transaction, maintained length reads, rendered text reads, and full
+  update encoding. The benchmark is intentionally outside `check`; stable CI gating requires a
+  dedicated runner.
+- Unobserved transactions now skip transaction-event DTO construction and update re-encoding,
+  while retaining GC, merge cleanup, subdocument option propagation, and subdocument destruction.
+- Standard-update eligibility now builds client/parent/anchor indices once instead of scanning
+  the complete update for every item. Nested incremental and deferred-parent regression behavior
+  remains unchanged.
+- `YText.toString()` uses an invalidation-based physical-text cache, and visible text deletion no
+  longer expands packed strings into one copied `StoreItem` per UTF-16 unit.
+- Median comparison on this machine moved as follows (ratios vary with sub-millisecond runtime
+  noise):
+  - 5,000 append: 3.95x slower -> 0.59x, now faster than Yjs
+  - 1,000 middle edits with GC: 86.50x slower -> 1.31x
+  - 5,000-struct encode: 277.09x slower -> 4.39x
+  - 5,000-struct apply: 118.03x slower -> 6.02x
+  - 100 repeated 5,000-character renders: 10,670x slower -> about 23x, with both medians below
+    0.03 ms after caching
+- Remaining measured gaps are the growing deleted-item position scan with `gc=false`, remote
+  decode/apply object construction, and full-state encode allocation.
+- Validation:
+  - `./gradlew test interopTest --no-daemon`: 676 normal and 85 interop tests passed
+  - `npm run test:interop`: Yjs 106 passed, Yrs 4 passed
+  - `npm run interop:check-clean`: generated fixtures clean
+  - `git diff --check`: passed
+
 검증 명령:
 
 ```sh

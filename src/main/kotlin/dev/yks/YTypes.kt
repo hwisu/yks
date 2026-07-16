@@ -1570,15 +1570,7 @@ open class YText internal constructor(
 
     override fun toString(): String {
         if (warnIfPreliminary()) return ""
-        return doc.visibleSequence(name)
-            .filter { it.content.kind == kind }
-            .joinToString(separator = "") { item ->
-                when (val content = item.content) {
-                    is ItemContent.Text -> content.value
-                    is ItemContent.TextEmbed -> ""
-                    else -> ""
-                }
-            }
+        return doc.visibleText(name, kind)
     }
 
     override fun toJson(): String = toString()

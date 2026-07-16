@@ -549,7 +549,7 @@ class YDoc(
         var blockError: Throwable? = null
         var result: T? = null
         try {
-            if (emitBeforeAll) {
+            if (emitBeforeAll && hasBeforeAllTransactionListeners()) {
                 emitBeforeAllTransactions()
             }
             emitBeforeTransaction(transaction)
@@ -831,6 +831,11 @@ class YDoc(
     internal fun visibleLength(parent: String, kind: RootKind): Long {
         ensureThreadAccess()
         return store.visibleLength(parent, kind)
+    }
+
+    internal fun visibleText(parent: String, kind: RootKind): String {
+        ensureThreadAccess()
+        return store.visibleText(parent, kind)
     }
 
     internal fun sequence(parent: String): List<StoreItem> {
@@ -1576,7 +1581,7 @@ class YDoc(
         val start = index.coerceAtLeast(0)
         transact(origin = origin) {
             if (length <= 0) return@transact
-            val totalLength = visibleSequence(parent).sumOf { item -> item.length }
+            val totalLength = visiblePhysicalSequence(parent).sumOf { item -> item.length }
             val available = (totalLength - start.toLong()).coerceAtLeast(0).toNonNegativeInt("visible delete length")
             val deleteCount = minOf(length, available)
             if (deleteCount > 0) {
@@ -1586,7 +1591,7 @@ class YDoc(
                 var offset = 0L
                 val deleteStart = start.toLong()
                 val deleteEnd = checkedClockAdd(deleteStart, deleteCount.toLong(), "delete end")
-                visibleSequence(parent).forEach { item ->
+                visiblePhysicalSequence(parent).forEach { item ->
                     val itemStart = offset
                     val itemEnd = checkedClockAdd(itemStart, item.length, "visible item end")
                     if (itemStart >= deleteStart && itemEnd <= deleteEnd) deleteSet.add(item.id, item.length)
@@ -1602,7 +1607,7 @@ class YDoc(
 
     private fun splitVisibleSequenceBoundary(parent: String, index: Long) {
         var offset = 0L
-        val containing = visibleSequence(parent).firstOrNull { item ->
+        val containing = visiblePhysicalSequence(parent).firstOrNull { item ->
             val next = checkedClockAdd(offset, item.length, "visible sequence length")
             val contains = index > offset && index < next
             offset = next
@@ -1617,6 +1622,9 @@ class YDoc(
             currentTransaction?.mergeStructs?.add(right.id)
         }
     }
+
+    private fun visiblePhysicalSequence(parent: String): List<StoreItem> =
+        store.sequence(parent).filter { item -> !item.deleted && item.countable }
 
     internal fun deleteMapKey(parent: String, key: String) {
         transact {
@@ -2079,6 +2087,10 @@ class YDoc(
     }
 
     private fun enqueueEmit(transaction: Transaction) {
+        if (!hasTransactionConsumers()) {
+            cleanupUnobservedTransaction(transaction)
+            return
+        }
         pendingTransactionEmits.addLast(transaction)
         if (isEmittingTransactions) return
         isEmittingTransactions = true
@@ -2124,6 +2136,48 @@ class YDoc(
         }
         firstError?.let { throw it }
     }
+
+    private fun cleanupUnobservedTransaction(transaction: Transaction) {
+        val afterState = store.stateVector()
+        transaction.afterState = afterState
+        if (gc && !transaction.deleteSet.isEmpty) {
+            collectGarbageNow(this, transaction.deleteSet.toIdSet(), gcFilter)
+        }
+        store.mergeDeletedItems(transaction.deleteSet)
+        store.mergeSplitCandidates(transaction.mergeStructs)
+        val mergedStructRepresentatives = linkedMapOf<Id, Id>()
+        mergeNewStructRepresentatives(transaction.beforeState, afterState, mergedStructRepresentatives)
+        mergeSplitCandidateRepresentatives(transaction.mergeStructs, mergedStructRepresentatives)
+        collectSubdocEvent(transaction)?.removed?.forEach { subdoc ->
+            if (!subdoc.isDestroyed) subdoc.destroy()
+        }
+    }
+
+    private fun hasBeforeAllTransactionListeners(): Boolean =
+        beforeAllTransactionListeners.isNotEmpty() ||
+            docOnlyEventListeners["beforeAllTransactions"].orEmpty().isNotEmpty() ||
+            eventListeners["beforeAllTransactions"].orEmpty().isNotEmpty()
+
+    private fun hasTransactionConsumers(): Boolean =
+        beforeAllTransactionListeners.isNotEmpty() ||
+            beforeTransactionListeners.isNotEmpty() ||
+            beforeObserverCallsListeners.isNotEmpty() ||
+            afterTransactionListeners.isNotEmpty() ||
+            afterTransactionCleanupListeners.isNotEmpty() ||
+            afterAllTransactionsListeners.isNotEmpty() ||
+            transactionListeners.isNotEmpty() ||
+            transactionEventListeners.isNotEmpty() ||
+            afterAllTransactionsEventListeners.isNotEmpty() ||
+            subdocObservers.isNotEmpty() ||
+            subdocEventListeners.isNotEmpty() ||
+            updateListeners.isNotEmpty() ||
+            updateEventListeners.isNotEmpty() ||
+            updateV2EventListeners.isNotEmpty() ||
+            updateLosslessEventListeners.isNotEmpty() ||
+            updateV2LosslessEventListeners.isNotEmpty() ||
+            eventListeners.isNotEmpty() ||
+            docOnlyEventListeners["beforeAllTransactions"].orEmpty().isNotEmpty() ||
+            materializedTypes().any { type -> type.needsTransactionSnapshot }
 
     private fun createTransactionEvent(transaction: Transaction): YTransactionEvent {
         val update = UpdateCodec.encodeLossless(
@@ -2572,6 +2626,11 @@ class YDoc(
     }
 
     private fun emitBeforeTransaction(transaction: Transaction) {
+        if (
+            beforeTransactionListeners.isEmpty() &&
+            transactionEventListeners["beforeTransaction"].orEmpty().isEmpty() &&
+            eventListeners["beforeTransaction"].orEmpty().isEmpty()
+        ) return
         val event = YTransactionEvent(
             doc = this,
             origin = transaction.origin,

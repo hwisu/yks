@@ -156,6 +156,34 @@ tasks.withType<org.gradle.api.publish.maven.tasks.PublishToMavenRepository>().co
     }
 }
 
+val performanceSourceSet = sourceSets.create("performance")
+performanceSourceSet.compileClasspath += sourceSets["main"].output
+performanceSourceSet.runtimeClasspath += sourceSets["main"].output
+configurations[performanceSourceSet.implementationConfigurationName]
+    .extendsFrom(configurations["implementation"])
+configurations[performanceSourceSet.runtimeOnlyConfigurationName]
+    .extendsFrom(configurations["runtimeOnly"])
+
+tasks.register<JavaExec>("performanceBenchmark") {
+    description = "Runs warmed YKS scenarios used by the Yjs parity benchmark."
+    group = "benchmark"
+    dependsOn(performanceSourceSet.classesTaskName)
+    classpath = performanceSourceSet.runtimeClasspath
+    mainClass.set("dev.yks.benchmark.PerformanceBenchmarkKt")
+    jvmArgs("-Xms512m", "-Xmx512m", "-XX:+UseG1GC")
+    doFirst {
+        args(
+            providers.gradleProperty("performanceFixture").get(),
+            providers.gradleProperty("performanceWarmup").getOrElse("8"),
+            providers.gradleProperty("performanceSamples").getOrElse("15"),
+            providers.gradleProperty("performanceScenarios").getOrElse("all"),
+        )
+        providers.gradleProperty("performanceJfr").orNull?.let { recording ->
+            jvmArgs("-XX:StartFlightRecording=filename=$recording,settings=profile,dumponexit=true")
+        }
+    }
+}
+
 dependencies {
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.13.4")

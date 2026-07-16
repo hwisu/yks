@@ -19,6 +19,7 @@ class StructStore(private val owner: YDoc? = null) {
     private val mapOrderCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
     private val visibleLengths: MutableMap<String, LongArray> = mutableMapOf()
     private val visibleNativeTextFormats: MutableMap<String, MutableSet<Id>> = mutableMapOf()
+    private val visibleTextCache: MutableMap<Pair<String, RootKind>, String> = mutableMapOf()
 
     internal val ownerDoc: YDoc? get() = owner
     internal var sequenceBuildCount: Int = 0
@@ -449,6 +450,19 @@ class StructStore(private val owner: YDoc? = null) {
         return visibleNativeTextFormats[parent]?.isNotEmpty() == true
     }
 
+    internal fun visibleText(parent: String, kind: RootKind): String {
+        owner?.ensureThreadAccess()
+        return visibleTextCache.getOrPut(parent to kind) {
+            buildString(visibleLength(parent, kind).toNonNegativeInt("visible text length")) {
+                sequenceIndex(parent).forEach { item ->
+                    if (!item.deleted && item.content.kind == kind) {
+                        (item.content as? ItemContent.Text)?.let { content -> append(content.value) }
+                    }
+                }
+            }
+        }
+    }
+
     internal fun lastSequenceItem(parent: String, kind: RootKind): StoreItem? {
         owner?.ensureThreadAccess()
         return sequenceIndex(parent).last { item -> item.content.kind == kind }
@@ -616,6 +630,7 @@ class StructStore(private val owner: YDoc? = null) {
     }
 
     private fun addDerivedState(item: StoreItem) {
+        if (item.parentSub == null) visibleTextCache.remove(item.parent to item.content.kind)
         if (item.parentSub != null || item.deleted) return
         if (item.countable) {
             val lengths = visibleLengths.getOrPut(item.parent) { LongArray(RootKind.entries.size) }
@@ -628,6 +643,7 @@ class StructStore(private val owner: YDoc? = null) {
     }
 
     private fun removeDerivedState(item: StoreItem) {
+        if (item.parentSub == null) visibleTextCache.remove(item.parent to item.content.kind)
         if (item.parentSub != null || item.deleted) return
         if (item.countable) {
             val lengths = checkNotNull(visibleLengths[item.parent]) { "missing visible length for ${item.parent}" }
@@ -732,6 +748,14 @@ private class IndexedSequence(
             current = current.left
         }
         return null
+    }
+
+    fun forEach(action: (StoreItem) -> Unit) {
+        var current = first
+        while (current != null) {
+            action(current.item)
+            current = current.right
+        }
     }
 
     fun integrate(item: StoreItem) {

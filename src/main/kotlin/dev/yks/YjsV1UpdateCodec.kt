@@ -764,15 +764,14 @@ private fun DocumentUpdate.isSupportedStandardUpdate(isV2: Boolean): Boolean {
     if (parentItemIds.values.any { id -> !id.isYjsSafeId() }) return false
     if (items.any { item -> !item.hasYjsSafeClocks() }) return false
     if (items.isEmpty()) return true
-    val clients = items.groupBy { item -> item.id.client }
+    val index = StandardUpdateIndex(items)
     val parentItems = parentItemIds + items.mapNotNull { item ->
         item.content.directTypeRef()?.name?.let { name -> name to item.id }
     }.toMap()
     val parentKinds = this.parentKinds + items.mapNotNull { item ->
         item.content.directTypeRef()?.let { ref -> ref.name to ref.kind }
     }.toMap()
-    return clients.values.all { clientItems ->
-        val sorted = clientItems.sortedBy { item -> item.id.clock }
+    return index.itemsByClient.values.all { sorted ->
         if (!sorted.hasValidTextSurrogatePairs()) return@all false
         val startClock = sorted.first().id.clock
         var previousEnd = startClock
@@ -784,10 +783,67 @@ private fun DocumentUpdate.isSupportedStandardUpdate(isV2: Boolean): Boolean {
         ) return@all false
         sorted.all { item ->
             item.content.isSupportedStandardContent(isV2) &&
-                item.hasCompatibleV1ParentKind(items, parentKinds) &&
+                item.hasCompatibleV1ParentKind(index, parentKinds) &&
                 item.hasResolvableV1Parent(parentItems) &&
-                item.hasConsistentInheritedMetadata(items)
+                item.hasConsistentInheritedMetadata(index)
         }
+    }
+}
+
+private class StandardUpdateIndex(items: List<StoreItem>) {
+    data class ParentProfile(
+        val allMapEntries: Boolean,
+        val allArraySequence: Boolean,
+        val sequenceEmpty: Boolean,
+        val textLikeKind: RootKind?,
+        val singleSequenceKind: RootKind?,
+    )
+
+    val itemsByClient: Map<Long, List<StoreItem>> = items
+        .groupBy { item -> item.id.client }
+        .mapValues { (_, clientItems) -> clientItems.sortedBy { item -> item.id.clock } }
+
+    val parentProfiles: Map<String, ParentProfile> = items.groupBy { item -> item.parent }
+        .mapValues { (_, parentItems) ->
+            val sequence = parentItems.filter { item -> item.parentSub == null }
+            val firstKind = sequence.firstOrNull()?.content?.kind
+            val singleSequenceKind = firstKind?.takeIf { kind ->
+                sequence.all { item -> item.content.kind == kind }
+            }
+            val textLikeKind = singleSequenceKind?.takeIf { kind ->
+                sequence.all { item ->
+                    item.content.kind == kind &&
+                        (item.content is ItemContent.Text ||
+                            item.content is ItemContent.TextEmbed ||
+                            item.content is ItemContent.XmlType ||
+                            item.content is ItemContent.NativeTextFormat)
+                }
+            }
+            ParentProfile(
+                allMapEntries = parentItems.all { item -> item.content is ItemContent.MapEntry },
+                allArraySequence = sequence.all { item -> item.content.kind == RootKind.Array },
+                sequenceEmpty = sequence.isEmpty(),
+                textLikeKind = textLikeKind,
+                singleSequenceKind = singleSequenceKind,
+            )
+        }
+
+    fun containing(id: Id): StoreItem? {
+        val clientItems = itemsByClient[id.client] ?: return null
+        var low = 0
+        var high = clientItems.lastIndex
+        var candidate: StoreItem? = null
+        while (low <= high) {
+            val middle = (low + high) ushr 1
+            val item = clientItems[middle]
+            if (item.id.clock <= id.clock) {
+                candidate = item
+                low = middle + 1
+            } else {
+                high = middle - 1
+            }
+        }
+        return candidate?.takeIf { item -> item.containsId(id) }
     }
 }
 
@@ -820,9 +876,9 @@ private fun StoreItem.hasResolvableV1Parent(parentItems: Map<String, Id>): Boole
     return parentItemId.client != id.client || parentItemId.clock < id.clock
 }
 
-private fun StoreItem.hasConsistentInheritedMetadata(items: List<StoreItem>): Boolean {
+private fun StoreItem.hasConsistentInheritedMetadata(index: StandardUpdateIndex): Boolean {
     val anchor = origin ?: rightOrigin ?: return true
-    val anchorItem = items.firstOrNull { candidate -> candidate.containsId(anchor) } ?: return true
+    val anchorItem = index.containing(anchor) ?: return true
     if (unresolvedParent is UnresolvedYjsParent.Inherit) return true
     return anchorItem.parent == parent && anchorItem.parentSub == parentSub
 }
@@ -835,10 +891,11 @@ private fun StoreItem.containsId(id: Id): Boolean =
         id.clock < checkedClockAdd(this.id.clock, length)
 
 private fun StoreItem.hasCompatibleV1ParentKind(
-    items: List<StoreItem>,
+    index: StandardUpdateIndex,
     parentKinds: Map<String, RootKind>,
 ): Boolean {
     val nestedKind = parentKinds[parent]
+    val profile = index.parentProfiles[parent]
     return when (content) {
         is ItemContent.MapEntry -> when {
             content.value is YValue.SubdocRef && nestedKind != null &&
@@ -846,21 +903,14 @@ private fun StoreItem.hasCompatibleV1ParentKind(
             parentSub != null && nestedKind == RootKind.XmlFragment -> false
             parentSub != null -> true
             else -> nestedKind?.let { kind -> kind == RootKind.Map || kind == RootKind.XmlHook }
-                ?: items.filter { item -> item.parent == parent }.all { item -> item.content is ItemContent.MapEntry }
+                ?: (profile?.allMapEntries == true)
         }
         is ItemContent.Value -> nestedKind?.let { kind -> kind == RootKind.Array }
-            ?: items.filter { item -> item.parent == parent && item.parentSub == null }
-                .all { item -> item.content.kind == RootKind.Array }
+            ?: (profile?.allArraySequence == true)
         is ItemContent.Text,
         is ItemContent.TextEmbed,
         is ItemContent.NativeTextFormat -> nestedKind?.let { kind -> kind == content.kind }
-            ?: items.filter { item -> item.parent == parent && item.parentSub == null }.all { item ->
-                item.content.kind == content.kind &&
-                    (item.content is ItemContent.Text ||
-                        item.content is ItemContent.TextEmbed ||
-                        item.content is ItemContent.XmlType ||
-                        item.content is ItemContent.NativeTextFormat)
-        }
+            ?: (profile?.sequenceEmpty == true || profile?.textLikeKind == content.kind)
         is ItemContent.XmlType -> {
             val xmlSequenceKinds = setOf(
                 RootKind.Array,
@@ -873,9 +923,7 @@ private fun StoreItem.hasCompatibleV1ParentKind(
             )
             content.kind in xmlSequenceKinds &&
                 (nestedKind?.let { kind -> kind == content.kind }
-                    ?: items.filter { item -> item.parent == parent && item.parentSub == null }.all { item ->
-                        item.content.kind == content.kind
-                    })
+                    ?: (profile?.sequenceEmpty == true || profile?.singleSequenceKind == content.kind))
         }
         is ItemContent.Deleted -> true
         else -> false
