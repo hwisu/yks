@@ -49,6 +49,16 @@ internal sealed interface YTypeBinding {
     data class Nested(val doc: YDoc, val name: String, val ownerId: Id?) : YTypeBinding
 }
 
+internal data class YTypeMutableState(
+    val doc: YDoc,
+    val name: String,
+    val binding: YTypeBinding,
+    val preliminaryList: List<Any?>,
+    val preliminaryMap: Map<String, Any?>,
+    val preliminaryOperations: List<() -> Unit>,
+    val preliminaryOperationValues: List<Any?>,
+)
+
 fun createAttributionFromAttributionItems(attrs: List<ContentAttribute>?, deleted: Boolean): Attribution? {
     if (attrs == null) return null
     val attribution = linkedMapOf<String, Any?>()
@@ -84,6 +94,30 @@ sealed class AbstractYType protected constructor(
 
     internal val isPreliminary: Boolean
         get() = binding is YTypeBinding.Detached || binding is YTypeBinding.Reserved
+
+    internal fun captureMutableState(): YTypeMutableState = YTypeMutableState(
+        doc = doc,
+        name = name,
+        binding = binding,
+        preliminaryList = preliminaryList.toList(),
+        preliminaryMap = preliminaryMap.toMap(),
+        preliminaryOperations = preliminaryOperations.toList(),
+        preliminaryOperationValues = preliminaryOperationValues.toList(),
+    )
+
+    internal fun restoreMutableState(state: YTypeMutableState) {
+        doc = state.doc
+        name = state.name
+        binding = state.binding
+        preliminaryList.clear()
+        preliminaryList.addAll(state.preliminaryList)
+        preliminaryMap.clear()
+        preliminaryMap.putAll(state.preliminaryMap)
+        preliminaryOperations.clear()
+        preliminaryOperations.addAll(state.preliminaryOperations)
+        preliminaryOperationValues.clear()
+        preliminaryOperationValues.addAll(state.preliminaryOperationValues)
+    }
 
     internal fun markDetached() {
         check(binding is YTypeBinding.Root) { "only a fresh shared type can become detached" }

@@ -56,6 +56,10 @@ stringText.insert(0, 'x'.repeat(5_000))
 const encodeDoc = new Y.Doc()
 Y.applyUpdate(encodeDoc, fixture)
 
+const standardTransactionDoc = new Y.Doc()
+Y.applyUpdate(standardTransactionDoc, fixture)
+standardTransactionDoc.on('update', () => {})
+
 const yjsScenarios = {
   apply_5000_structs: () => {
     const doc = new Y.Doc()
@@ -114,6 +118,10 @@ const yjsScenarios = {
     return sum
   },
   encode_5000_structs: () => Y.encodeStateAsUpdate(encodeDoc).length,
+  standard_empty_tx_5000: () => {
+    standardTransactionDoc.transact(() => {})
+    return standardTransactionDoc.store.clients.size
+  },
 }
 
 const yjsResults = Object.fromEntries(

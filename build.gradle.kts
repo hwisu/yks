@@ -1,4 +1,5 @@
 import java.util.zip.ZipFile
+import org.gradle.api.tasks.bundling.AbstractArchiveTask
 
 plugins {
     kotlin("jvm") version "2.2.20"
@@ -20,9 +21,20 @@ java {
     withSourcesJar()
 }
 
+val buildRevision = providers.gradleProperty("buildRevision").getOrElse("uncommitted")
+
+tasks.withType<AbstractArchiveTask>().configureEach {
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+}
+
 val legalNoticeFiles = listOf("LICENSE", "THIRD_PARTY_NOTICES")
 
 tasks.withType<Jar>().configureEach {
+    manifest.attributes(
+        "Implementation-Version" to project.version.toString(),
+        "YKS-Revision" to buildRevision,
+    )
     from(legalNoticeFiles.map { rootProject.file(it) }) {
         into("META-INF")
     }
@@ -87,6 +99,7 @@ publishing {
                     connection.set("scm:git:https://github.com/hwisu/yks.git")
                     developerConnection.set("scm:git:ssh://git@github.com/hwisu/yks.git")
                     url.set("https://github.com/hwisu/yks")
+                    tag.set(buildRevision)
                 }
             }
         }
@@ -153,6 +166,9 @@ tasks.withType<org.gradle.api.publish.maven.tasks.PublishToMavenRepository>().co
         check(releaseVersion != null && semanticVersionPattern.matches(releaseVersion)) {
             "Remote publication requires -PreleaseVersion=<SemVer>; got ${releaseVersion ?: "<missing>"}."
         }
+        check(buildRevision.matches(Regex("^[0-9a-f]{40}$"))) {
+            "Remote publication requires -PbuildRevision=<40-character Git SHA>; got '$buildRevision'."
+        }
     }
 }
 
@@ -184,7 +200,41 @@ tasks.register<JavaExec>("performanceBenchmark") {
     }
 }
 
+val jmhSourceSet = sourceSets.create("jmh")
+jmhSourceSet.compileClasspath += sourceSets["main"].output
+jmhSourceSet.runtimeClasspath += sourceSets["main"].output
+configurations[jmhSourceSet.implementationConfigurationName]
+    .extendsFrom(configurations["implementation"])
+configurations[jmhSourceSet.runtimeOnlyConfigurationName]
+    .extendsFrom(configurations["runtimeOnly"])
+
+tasks.register<JavaExec>("jmh") {
+    description = "Runs reproducible JMH latency and allocation benchmarks for YKS core and adversarial paths."
+    group = "benchmark"
+    dependsOn(jmhSourceSet.classesTaskName)
+    classpath = jmhSourceSet.runtimeClasspath
+    mainClass.set("org.openjdk.jmh.Main")
+    jvmArgs("-Xms1g", "-Xmx1g", "-XX:+UseG1GC")
+    doFirst {
+        val report = layout.buildDirectory.file("reports/jmh/results.json").get().asFile
+        report.parentFile.mkdirs()
+        args(
+            providers.gradleProperty("jmhInclude").getOrElse("dev.yks.benchmark.*"),
+            "-wi", providers.gradleProperty("jmhWarmupIterations").getOrElse("3"),
+            "-w", providers.gradleProperty("jmhWarmupTime").getOrElse("500ms"),
+            "-i", providers.gradleProperty("jmhMeasurementIterations").getOrElse("5"),
+            "-r", providers.gradleProperty("jmhMeasurementTime").getOrElse("500ms"),
+            "-f", providers.gradleProperty("jmhForks").getOrElse("1"),
+            "-prof", providers.gradleProperty("jmhProfiler").getOrElse("gc"),
+            "-rf", "json",
+            "-rff", report.absolutePath,
+        )
+    }
+}
+
 dependencies {
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.13.4")
+    add(jmhSourceSet.implementationConfigurationName, "org.openjdk.jmh:jmh-core:1.37")
+    add(jmhSourceSet.annotationProcessorConfigurationName, "org.openjdk.jmh:jmh-generator-annprocess:1.37")
 }

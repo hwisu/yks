@@ -96,6 +96,28 @@ internal object UpdateCodec {
         else LegacyUpdateCodec.write(encoder, update)
 
     private fun writeV1(encoder: BinaryEncoder, update: DocumentUpdate): BinaryEncoder {
+        if (update.items.size == 1) {
+            val item = update.items.single()
+            val directTypeRef = item.content.directTypeRef()
+            val parentItems = if (directTypeRef == null) {
+                update.parentItemIds
+            } else {
+                update.parentItemIds + (directTypeRef.name to item.id)
+            }
+            encoder.writeVarUInt(1)
+            encoder.writeVarUInt(1)
+            encoder.writeVarUInt(item.id.client)
+            encoder.writeVarUInt(item.id.clock)
+            if (item.isGc) {
+                encoder.writeByte(structGCRefNumber)
+                encoder.writeVarUInt(item.length)
+            } else {
+                writeItem(encoder, item, parentItems)
+            }
+            writeDeleteSet(encoder, update.deleteSet)
+            return encoder
+        }
+
         val itemsByClient = update.items
             .groupBy { item -> item.id.client }
             .mapValues { (_, items) -> items.sortedBy { item -> item.id.clock } }
@@ -764,6 +786,19 @@ private fun DocumentUpdate.isSupportedStandardUpdate(isV2: Boolean): Boolean {
     if (parentItemIds.values.any { id -> !id.isYjsSafeId() }) return false
     if (items.any { item -> !item.hasYjsSafeClocks() }) return false
     if (items.isEmpty()) return true
+    if (items.size == 1) {
+        val item = items.single()
+        val parentKind = parentKinds[item.parent]
+        if (
+            parentKind != null &&
+            item.hasValidStandaloneTextSurrogates() &&
+            item.content.isSupportedStandardContent(isV2) &&
+            item.hasCompatibleKnownParentKind(parentKind) &&
+            item.hasResolvableV1Parent(parentItemIds)
+        ) {
+            return true
+        }
+    }
     val index = StandardUpdateIndex(items)
     val parentItems = parentItemIds + items.mapNotNull { item ->
         item.content.directTypeRef()?.name?.let { name -> name to item.id }
@@ -788,6 +823,39 @@ private fun DocumentUpdate.isSupportedStandardUpdate(isV2: Boolean): Boolean {
                 item.hasConsistentInheritedMetadata(index)
         }
     }
+}
+
+private fun StoreItem.hasCompatibleKnownParentKind(parentKind: RootKind): Boolean = when (content) {
+    is ItemContent.MapEntry -> when {
+        content.value is YValue.SubdocRef && parentKind !in setOf(RootKind.Map, RootKind.XmlHook) -> false
+        parentSub != null && parentKind == RootKind.XmlFragment -> false
+        parentSub != null -> true
+        else -> parentKind == RootKind.Map || parentKind == RootKind.XmlHook
+    }
+    is ItemContent.Value -> parentKind == RootKind.Array
+    is ItemContent.Text,
+    is ItemContent.TextEmbed,
+    is ItemContent.NativeTextFormat -> parentKind == content.kind
+    is ItemContent.XmlType -> parentKind == content.kind
+    is ItemContent.Deleted -> true
+    else -> false
+}
+
+private fun StoreItem.hasValidStandaloneTextSurrogates(): Boolean {
+    val value = (content as? ItemContent.Text)?.value ?: return true
+    var index = 0
+    while (index < value.length) {
+        val char = value[index]
+        when {
+            char.isHighSurrogate() -> {
+                if (index + 1 >= value.length || !value[index + 1].isLowSurrogate()) return false
+                index += 2
+            }
+            char.isLowSurrogate() -> return false
+            else -> index++
+        }
+    }
+    return true
 }
 
 private class StandardUpdateIndex(items: List<StoreItem>) {

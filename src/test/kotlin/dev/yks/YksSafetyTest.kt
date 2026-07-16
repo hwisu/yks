@@ -1,6 +1,8 @@
 package dev.yks
 
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -160,5 +162,85 @@ class YksSafetyTest {
 
         assertNull(failure.get())
         assertEquals("ab", text.toString())
+    }
+
+    @Test
+    fun externallySerializedPolicyAllowsCoroutineStyleThreadHandoff() {
+        val doc = YDoc(
+            YDocOptions(clientId = 1),
+            YDocRuntimeOptions(threadAccessPolicy = YThreadAccessPolicy.EXTERNALLY_SERIALIZED),
+        )
+        val failures = mutableListOf<Throwable>()
+        val updates = mutableListOf<String>()
+        doc.observeUpdates { _, origin -> updates.add(origin.toString()) }
+
+        listOf<(YDoc) -> Unit>(
+            { current -> current.getText("body").insert(0, "a") },
+            { current -> current.getText("body").insert(1, "b") },
+            { current -> current.encodeStateVector() },
+            { current -> current.encodeStateAsUpdate() },
+            { current -> snapshot(current) },
+        ).forEachIndexed { index, operation ->
+            val worker = Thread(
+                { runCatching { operation(doc) }.exceptionOrNull()?.let(failures::add) },
+                "yks-dispatcher-$index",
+            )
+            worker.start()
+            worker.join()
+        }
+
+        assertTrue(failures.isEmpty(), failures.joinToString())
+        assertEquals("ab", doc.getText("body").toString())
+        assertEquals(2, updates.size)
+
+        val destroyWorker = Thread(doc::destroy, "yks-destroy-dispatcher")
+        destroyWorker.start()
+        destroyWorker.join()
+        assertTrue(doc.isDestroyed)
+    }
+
+    @Test
+    fun externallySerializedPolicyRejectsOverlappingOperations() {
+        val doc = YDoc(
+            YDocOptions(clientId = 1),
+            YDocRuntimeOptions(threadAccessPolicy = YThreadAccessPolicy.EXTERNALLY_SERIALIZED),
+        )
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val firstFailure = AtomicReference<Throwable?>()
+        val secondFailure = AtomicReference<Throwable?>()
+        val active = Thread(
+            {
+                firstFailure.set(
+                    runCatching {
+                        doc.transact {
+                            entered.countDown()
+                            check(release.await(5, TimeUnit.SECONDS))
+                            doc.getText("body").insert(0, "safe")
+                        }
+                    }.exceptionOrNull(),
+                )
+            },
+            "yks-active-dispatcher",
+        )
+        val overlapping = Thread(
+            {
+                check(entered.await(5, TimeUnit.SECONDS))
+                secondFailure.set(runCatching { doc.encodeStateAsUpdate() }.exceptionOrNull())
+                release.countDown()
+            },
+            "yks-overlapping-dispatcher",
+        )
+
+        active.start()
+        overlapping.start()
+        active.join()
+        overlapping.join()
+
+        assertNull(firstFailure.get())
+        val error = assertIs<YksConcurrentAccessException>(secondFailure.get())
+        assertEquals(active.name, error.activeThreadName)
+        assertEquals(overlapping.name, error.currentThreadName)
+        assertEquals("safe", doc.getText("body").toString())
     }
 }

@@ -30,6 +30,14 @@ class YksThreadConfinementException(
     "YDoc is confined to thread '$ownerThreadName' and cannot be accessed from '$currentThreadName'",
 )
 
+/** Concurrent access was rejected for a document whose caller promised external serialization. */
+class YksConcurrentAccessException(
+    val activeThreadName: String,
+    val currentThreadName: String,
+) : YksException(
+    "YDoc is already in use by '$activeThreadName' and cannot be accessed concurrently from '$currentThreadName'",
+)
+
 /** Immutable, per-document limits applied before integrating an update. */
 data class YUpdateLimits(
     val maxEncodedBytes: Int = 16 * 1024 * 1024,
@@ -76,6 +84,7 @@ data class YUpdateLimits(
 data class YDocRuntimeOptions(
     val updateLimits: YUpdateLimits = YUpdateLimits.DEFAULT,
     val threadAccessPolicy: YThreadAccessPolicy = YThreadAccessPolicy.ENFORCED,
+    val standardUpdatePolicy: YStandardUpdatePolicy = YStandardUpdatePolicy.ALLOW_LOSSLESS_EXTENSIONS,
 ) {
     companion object {
         @JvmField
@@ -88,8 +97,25 @@ enum class YThreadAccessPolicy {
     /** Bind lazily on first CRDT access and reject access from every other thread. */
     ENFORCED,
 
+    /**
+     * Allow serialized calls to resume on different threads while rejecting overlapping access.
+     *
+     * This is the coroutine/server integration mode. The caller still owns serialization; YKS
+     * detects violations instead of silently racing mutable CRDT state.
+     */
+    EXTERNALLY_SERIALIZED,
+
     /** Skip runtime checks; the caller remains responsible for serializing every access. */
     UNCHECKED,
+}
+
+/** Controls whether local transactions may contain Kotlin-only lossless extensions. */
+enum class YStandardUpdatePolicy {
+    /** Allow extensions unless a standard update listener makes a standard wire update mandatory. */
+    ALLOW_LOSSLESS_EXTENSIONS,
+
+    /** Atomically reject every local transaction that cannot be represented as a standard Yjs update. */
+    REQUIRE_STANDARD,
 }
 
 internal class DecodedCountBudget(

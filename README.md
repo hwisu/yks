@@ -133,10 +133,12 @@ transaction artifact so internal relay and Kotlin-only tooling can preserve all
 state; use `encodeUpdateMessageFromTransaction` when genuine V1 bytes are
 required.
 
-If a lossless-only transaction occurs while a standard update listener is
-registered, the mutation remains committed and listener emission reports
-`UnsupportedYjsStandardUpdateException`; the standard listener receives no
-payload. Lossless listeners are still invoked.
+If a transaction cannot be represented on standard Yjs wire while a standard
+update listener is registered, YKS rejects it before observer delivery and
+atomically restores the document. Neither standard nor lossless listeners see
+the rejected transaction. Server integrations can enforce this even before a
+listener is installed with
+`YStandardUpdatePolicy.REQUIRE_STANDARD`.
 
 ## Standard and private update formats
 
@@ -190,9 +192,21 @@ are in Yjs. By default, the first CRDT operation lazily binds a document to the
 current thread; later access from another thread throws
 `YksThreadConfinementException`. Encoded update/state-vector byte arrays and
 copied value snapshots are the supported hand-off boundaries between threads.
-`YThreadAccessPolicy.UNCHECKED` disables the runtime check only for callers that
-already serialize every access externally; it does not make a document safe for
-concurrent use.
+Coroutine/server integrations that already serialize a document should use
+`YThreadAccessPolicy.EXTERNALLY_SERIALIZED`. It permits sequential dispatcher
+handoff and rejects overlapping operations with
+`YksConcurrentAccessException`; it does not block a request thread or add an
+internal scheduler. `UNCHECKED` remains a check-free escape hatch.
+
+```kotlin
+val serverDoc = YDoc(
+    YDocOptions(),
+    YDocRuntimeOptions(
+        threadAccessPolicy = YThreadAccessPolicy.EXTERNALLY_SERIALIZED,
+        standardUpdatePolicy = YStandardUpdatePolicy.REQUIRE_STANDARD,
+    ),
+)
+```
 
 External update application has immutable, per-document resource limits:
 
@@ -250,6 +264,8 @@ Requirements:
 npm ci
 npm run test:interop
 ./gradlew check consumerSmokeTest
+./gradlew jmh
+./scripts/verify-reproducible-artifacts.sh
 ```
 
 `check` runs both the normal Kotlin tests and the Kotlin/Yjs interoperability
@@ -267,6 +283,13 @@ See the [Yjs harness](interop/yjs-v1/README.md) and
 and standalone update verifiers. The Yrs oracle always uses UTF-16 offsets,
 deterministic client IDs, and retained deleted content so that it measures the
 shared Yjs wire contract instead of Yrs-only defaults.
+
+`jmh` records forked latency plus the GC profiler's allocation metrics for
+insert, middle edit, standard update apply/encode, standard-listener
+transactions, and an adversarial pre-decode limit rejection. Results are
+written to `build/reports/jmh/results.json`. Release JARs disable file
+timestamps, use reproducible entry order, embed the exact `YKS-Revision`, and
+are built twice and byte-compared before publication.
 
 Pushing a tag such as `v0.1.1` runs the same gates, publishes that immutable
 version to GitHub Packages, and verifies it again from a clean remote consumer.

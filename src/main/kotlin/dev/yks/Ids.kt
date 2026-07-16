@@ -201,6 +201,13 @@ class IdSet(
 
     internal fun copy(): IdSet =
         IdSet(clientRanges.mapValuesTo(linkedMapOf()) { (_, ranges) -> ranges.toList() })
+
+    internal fun replaceWith(other: IdSet) {
+        clientRanges.clear()
+        other.clientRanges.forEach { (client, ranges) ->
+            clientRanges[client] = ranges.toMutableList()
+        }
+    }
 }
 
 private fun MutableList<IdRange>.addAndMerge(incoming: IdRange) {

@@ -26,11 +26,13 @@ val emptySnapshot: Snapshot = createSnapshot(createIdSet(), emptyMap())
 
 private object SplitSnapshotAffectedStructsMetaKey
 
-fun snapshot(doc: YDoc): Snapshot = Snapshot(
-    ds = doc.deleteSet(),
-    sv = doc.stateVector().toMap(),
-    roots = doc.concreteRootMetadata(),
-)
+fun snapshot(doc: YDoc): Snapshot = doc.withDocumentAccess {
+    Snapshot(
+        ds = doc.deleteSet(),
+        sv = doc.stateVector().toMap(),
+        roots = doc.concreteRootMetadata(),
+    )
+}
 
 @Suppress("UNCHECKED_CAST")
 fun splitSnapshotAffectedStructs(transaction: YTransaction, snapshot: Snapshot) {

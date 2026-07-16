@@ -55,6 +55,10 @@ fun main(args: Array<String>) {
     val encodeDoc = YDoc(clientId = 12)
     encodeDoc.applyUpdate(fixture)
 
+    val standardTransactionDoc = YDoc(clientId = 13)
+    standardTransactionDoc.applyUpdate(fixture)
+    standardTransactionDoc.observeUpdates { _, _ -> Unit }
+
     val scenarios = linkedMapOf<String, () -> Long>(
         "apply_5000_structs" to {
             val doc = YDoc(clientId = 20)
@@ -114,6 +118,10 @@ fun main(args: Array<String>) {
         },
         "encode_5000_structs" to {
             encodeDoc.encodeStateAsUpdate().size.toLong()
+        },
+        "standard_empty_tx_5000" to {
+            standardTransactionDoc.transact { Unit }
+            standardTransactionDoc.getText("left").length.toLong()
         },
     )
 

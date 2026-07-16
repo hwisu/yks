@@ -10,6 +10,14 @@ data class PendingStructs(
     val update: ByteArray,
 )
 
+internal data class StructStoreSnapshot(
+    val originalClientItems: MutableMap<Long, List<StoreItem>> = linkedMapOf(),
+    val originalDeletedStates: MutableMap<StoreItem, Boolean> = java.util.IdentityHashMap(),
+    val skips: IdSet,
+    val version: Long,
+    val sequenceBuildCount: Int,
+)
+
 class StructStore(private val owner: YDoc? = null) {
     private val clientItems: MutableMap<Long, MutableList<StoreItem>> = linkedMapOf()
     private val structViewOwner: YDoc by lazy(LazyThreadSafetyMode.NONE) { owner ?: YDoc() }
@@ -22,6 +30,7 @@ class StructStore(private val owner: YDoc? = null) {
     private val visibleLengths: MutableMap<String, LongArray> = mutableMapOf()
     private val visibleNativeTextFormats: MutableMap<String, MutableSet<Id>> = mutableMapOf()
     private val visibleTextCache: MutableMap<Pair<String, RootKind>, String> = mutableMapOf()
+    private var activeSnapshot: StructStoreSnapshot? = null
 
     internal val ownerDoc: YDoc? get() = owner
     internal var version: Long = 0
@@ -66,8 +75,57 @@ class StructStore(private val owner: YDoc? = null) {
 
     val skips: IdSet = createIdSet()
 
+    internal fun captureSnapshot(): StructStoreSnapshot {
+        check(activeSnapshot == null) { "a StructStore rollback checkpoint is already active" }
+        return StructStoreSnapshot(
+            skips = skips.copy(),
+            version = version,
+            sequenceBuildCount = sequenceBuildCount,
+        ).also { snapshot -> activeSnapshot = snapshot }
+    }
+
+    internal fun releaseSnapshot(snapshot: StructStoreSnapshot) {
+        check(activeSnapshot === snapshot) { "StructStore rollback checkpoint is not active" }
+        activeSnapshot = null
+    }
+
+    internal fun restoreSnapshot(snapshot: StructStoreSnapshot) {
+        check(activeSnapshot === snapshot) { "StructStore rollback checkpoint is not active" }
+        activeSnapshot = null
+        snapshot.originalDeletedStates.forEach { (item, deleted) -> item.deleted = deleted }
+        snapshot.originalClientItems.forEach { (client, items) ->
+            if (items.isEmpty()) {
+                clientItems.remove(client)
+            } else {
+                clientItems[client] = items.toMutableList()
+            }
+        }
+        skips.replaceWith(snapshot.skips)
+        allItemsCache = null
+        deleteSetCache = null
+        parentItemIdsCache = null
+        sequenceCache.clear()
+        mapEntriesCache.clear()
+        mapOrderCache.clear()
+        visibleLengths.clear()
+        visibleNativeTextFormats.clear()
+        visibleTextCache.clear()
+        clientItems.values.forEach { items -> items.forEach(::addDerivedState) }
+        version = snapshot.version
+        sequenceBuildCount = snapshot.sequenceBuildCount
+    }
+
+    private fun captureClientBeforeMutation(client: Long) {
+        activeSnapshot?.originalClientItems?.putIfAbsent(client, clientItems[client]?.toList().orEmpty())
+    }
+
+    private fun captureDeletedBeforeMutation(item: StoreItem) {
+        activeSnapshot?.originalDeletedStates?.putIfAbsent(item, item.deleted)
+    }
+
     internal fun add(item: StoreItem): Boolean {
         owner?.ensureThreadAccess()
+        captureClientBeforeMutation(item.id.client)
         val structs = clientItems.getOrPut(item.id.client) { mutableListOf() }
         if (structs.isEmpty() || structs.last().endClock() <= item.id.clock) {
             structs.add(item)
@@ -147,6 +205,7 @@ class StructStore(private val owner: YDoc? = null) {
         index: Int,
         diff: Long,
     ): StoreItem {
+        captureClientBeforeMutation(structs[index].id.client)
         val item = structs[index]
         require(diff in 1 until item.length) { "diff must split the store item" }
         val (leftContent, rightContent) = when (val content = item.content) {
@@ -256,6 +315,7 @@ class StructStore(private val owner: YDoc? = null) {
             left.countable != right.countable
         ) return false
 
+        captureClientBeforeMutation(left.id.client)
         val mergedLength = checkedClockAdd(left.length, right.length, "merged deleted item length")
         val merged = left.copy(content = leftContent.copy(length = mergedLength))
         structs[rightIndex - 1] = merged
@@ -273,6 +333,7 @@ class StructStore(private val owner: YDoc? = null) {
         val item = structs[index]
         if (!item.deleted) return null
         if (item.content is ItemContent.Deleted) return null
+        captureClientBeforeMutation(id.client)
         val collected = item.copy(content = ItemContent.Deleted(item.content.kind, item.length))
         structs[index] = collected
         recordReplacement(item, listOf(collected))
@@ -283,6 +344,7 @@ class StructStore(private val owner: YDoc? = null) {
         val structs = clientItems[id.client] ?: return null
         val index = structs.findStartIndex(id.clock)
         if (index < 0) return null
+        captureClientBeforeMutation(id.client)
         val previous = structs[index]
         val updated = previous.copy(content = content)
         structs[index] = updated
@@ -344,28 +406,37 @@ class StructStore(private val owner: YDoc? = null) {
 
     internal fun itemsSince(stateVector: StateVector): List<StoreItem> {
         if (stateVector.isEmpty()) return allItems()
-        return allItems().mapNotNull { item ->
-            val targetClock = stateVector[item.id.client] ?: 0
-            when {
-                item.endClock() <= targetClock -> null
-                item.id.clock >= targetClock -> item
-                item.content is ItemContent.Deleted || item.content is ItemContent.Text -> {
-                    val remaining = item.endClock() - targetClock
-                    val content = when (val current = item.content) {
-                        is ItemContent.Deleted -> current.copy(length = remaining)
-                        is ItemContent.Text -> {
-                            val offset = (targetClock - item.id.clock).toNonNegativeInt("text state-vector offset")
-                            current.copy(value = ContentString(current.value).splice(offset.toLong()).str)
+        return buildList {
+            clientItems.keys.sorted().forEach { client ->
+                val structs = clientItems.getValue(client)
+                val targetClock = stateVector[client] ?: 0
+                var index = structs.findFirstEndingAfter(targetClock)
+                while (index < structs.size) {
+                    val item = structs[index++]
+                    when {
+                        item.id.clock >= targetClock -> add(item)
+                        item.content is ItemContent.Deleted || item.content is ItemContent.Text -> {
+                            val remaining = item.endClock() - targetClock
+                            val content = when (val current = item.content) {
+                                is ItemContent.Deleted -> current.copy(length = remaining)
+                                is ItemContent.Text -> {
+                                    val offset = (targetClock - item.id.clock)
+                                        .toNonNegativeInt("text state-vector offset")
+                                    current.copy(value = ContentString(current.value).splice(offset.toLong()).str)
+                                }
+                                else -> error("unreachable packed content")
+                            }
+                            add(
+                                item.copy(
+                                    id = Id(item.id.client, targetClock),
+                                    origin = if (item.isGc) null else Id(item.id.client, targetClock - 1),
+                                    content = content,
+                                ),
+                            )
                         }
-                        else -> error("unreachable packed content")
+                        else -> error("state vector splits unsupported store item at ${item.id}:$targetClock")
                     }
-                    item.copy(
-                        id = Id(item.id.client, targetClock),
-                        origin = if (item.isGc) null else Id(item.id.client, targetClock - 1),
-                        content = content,
-                    )
                 }
-                else -> error("state vector splits unsupported store item at ${item.id}:$targetClock")
             }
         }
     }
@@ -422,6 +493,7 @@ class StructStore(private val owner: YDoc? = null) {
         var changed = false
         items.forEach { item ->
             if (!item.deleted) {
+                captureDeletedBeforeMutation(item)
                 removeDerivedState(item)
                 item.deleted = true
                 if (item.parentSub == null) sequenceCache[item.parent]?.refresh(item.id)
@@ -733,6 +805,7 @@ class StructStore(private val owner: YDoc? = null) {
             ) return null
         }
 
+        captureClientBeforeMutation(firstItem.id.client)
         val mergedValueLength = items.sumOf(StoreItem::length).toNonNegativeInt("merged text length")
         val mergedValue = buildString(mergedValueLength) {
             items.forEach { item -> append((item.content as ItemContent.Text).value) }

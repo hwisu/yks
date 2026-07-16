@@ -1,6 +1,6 @@
 # YKS Yjs interoperability handoff
 
-마지막 업데이트: 2026-07-16 KST
+마지막 업데이트: 2026-07-17 KST
 
 ## 저장소 상태
 
@@ -60,6 +60,23 @@ a19f4ac feat: decode and integrate Yjs V1 updates
 ```
 
 ## 완료된 작업
+
+### 2026-07-17 Hocuspocus production readiness
+
+- `YThreadAccessPolicy.EXTERNALLY_SERIALIZED`를 추가해 coroutine/thread handoff는 허용하면서 실제 동시 접근은 fail-fast로 거절함
+- `YStandardUpdatePolicy.REQUIRE_STANDARD`를 추가하고 표준 wire로 표현할 수 없는 로컬 transaction을 원자적으로 rollback함
+  - struct store, delete 상태, root/nested type, subdocument, pending update와 preliminary type binding을 복원함
+  - 거절된 transaction은 type observer, standard update observer, lossless update observer를 모두 발생시키지 않음
+- copy-on-write transaction checkpoint와 update-only observer fast path를 도입해 표준 경계 검증 비용을 제한함
+- 5,000-struct apply/append/middle-edit/encode와 표준 empty transaction을 Yjs 기준 parity gate로 고정함
+- JMH 시나리오와 GC profiler 실행 경로를 추가하고, 외부 입력 predecode 거절 및 표준 transaction checkpoint를 별도 측정함
+- archive timestamp/order, manifest revision, Maven POM revision을 고정하고 두 번의 독립 build 결과를 byte 비교하는 재현성 검증을 추가함
+- Hocuspocus JVM provider의 기본 factory가 externally-serialized + require-standard 정책을 사용하도록 sibling workspace 연동 코드를 갱신함
+- 최종 검증:
+  - `./gradlew clean check consumerSmokeTest jmhClasses`
+  - Yjs oracle 106/106, Yrs oracle 4/4
+  - Yjs performance parity 9/9
+  - reproducible JAR/source JAR byte comparison
 
 ### 1. 공식 Yjs V1 상호운용성 하네스
 

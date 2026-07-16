@@ -52,23 +52,68 @@ class YDoc(
     ) {
         configuredUpdateLimits = runtimeOptions.updateLimits
         configuredThreadAccessPolicy = runtimeOptions.threadAccessPolicy
+        configuredStandardUpdatePolicy = runtimeOptions.standardUpdatePolicy
     }
 
     private val ownerThread = AtomicReference<Thread?>()
+    private val activeAccessThread = AtomicReference<Thread?>()
+    private val accessDepth = ThreadLocal<Int>()
     private var configuredUpdateLimits: YUpdateLimits = YUpdateLimits.DEFAULT
     private var configuredThreadAccessPolicy: YThreadAccessPolicy = YThreadAccessPolicy.ENFORCED
+    private var configuredStandardUpdatePolicy: YStandardUpdatePolicy =
+        YStandardUpdatePolicy.ALLOW_LOSSLESS_EXTENSIONS
 
     val updateLimits: YUpdateLimits get() = configuredUpdateLimits
     val threadAccessPolicy: YThreadAccessPolicy get() = configuredThreadAccessPolicy
+    val standardUpdatePolicy: YStandardUpdatePolicy get() = configuredStandardUpdatePolicy
 
     internal fun ensureThreadAccess() {
         if (threadAccessPolicy == YThreadAccessPolicy.UNCHECKED) return
         val current = Thread.currentThread()
+        if (threadAccessPolicy == YThreadAccessPolicy.EXTERNALLY_SERIALIZED) {
+            val active = activeAccessThread.get()
+            if (active == null || active === current) return
+            throw YksConcurrentAccessException(active.name, current.name)
+        }
         val established = ownerThread.get()
         if (established === current) return
         if (established == null && ownerThread.compareAndSet(null, current)) return
         val owner = checkNotNull(ownerThread.get())
         throw YksThreadConfinementException(owner.name, current.name)
+    }
+
+    /**
+     * Runs one logical document operation under the configured access policy.
+     *
+     * [YThreadAccessPolicy.EXTERNALLY_SERIALIZED] deliberately uses a fail-fast ownership token,
+     * not a blocking lock. Server integrations keep control of scheduling and accidental overlap
+     * cannot pin a request thread waiting for another coroutine.
+     */
+    internal fun <T> withDocumentAccess(block: () -> T): T {
+        if (threadAccessPolicy != YThreadAccessPolicy.EXTERNALLY_SERIALIZED) {
+            ensureThreadAccess()
+            return block()
+        }
+
+        val current = Thread.currentThread()
+        val depth = accessDepth.get() ?: 0
+        if (depth == 0 && !activeAccessThread.compareAndSet(null, current)) {
+            val active = checkNotNull(activeAccessThread.get())
+            throw YksConcurrentAccessException(active.name, current.name)
+        }
+        accessDepth.set(depth + 1)
+        return try {
+            block()
+        } finally {
+            if (depth == 0) {
+                accessDepth.remove()
+                check(activeAccessThread.compareAndSet(current, null)) {
+                    "YDoc access ownership changed unexpectedly"
+                }
+            } else {
+                accessDepth.set(depth)
+            }
+        }
     }
 
     var clientId: Long = clientId.also { require(it >= 0) { "clientId must be non-negative" } }
@@ -111,6 +156,28 @@ class YDoc(
         val storeVersion: Long,
         val parentKinds: Map<String, RootKind>,
         val bytes: ByteArray,
+    )
+
+    private data class AtomicTransactionSnapshot(
+        val store: StructStoreSnapshot,
+        val clientId: Long,
+        val rootTypes: Map<String, AbstractYType>,
+        val unopenedRootEntries: Map<String, YUnopenedRoot>,
+        val nestedTypes: Map<String, AbstractYType>,
+        val nestedNames: Set<String>,
+        val referencedNestedNames: Set<String>,
+        val pendingNestedReferenceStack: List<Set<String>>,
+        val pendingStoreParentStack: List<String?>,
+        val pendingPreliminaryAttachments: Map<String, AbstractYType>,
+        val subdocsByInstanceId: Map<String, YDoc>,
+        val pendingItems: List<StoreItem>,
+        val pendingDeletes: DeleteSet,
+        val redoneByOriginal: Map<Id, Id>,
+        val redoneRangeEndByOriginal: Map<Id, Id>,
+        val keptItems: Set<Id>,
+        val nestedTypeCounter: Long,
+        val cachedFullV1Update: CachedFullUpdate?,
+        val typeStates: Map<AbstractYType, YTypeMutableState>,
     )
     private var cachedFullV1Update: CachedFullUpdate? = null
     private val rootTypes = linkedMapOf<String, AbstractYType>()
@@ -166,6 +233,9 @@ class YDoc(
     private val updateV2LosslessEventListeners = mutableListOf<(ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit>()
     private val transactionListeners = mutableListOf<(YTransactionEvent) -> Unit>()
     private var currentTransaction: Transaction? = null
+    private var pendingAtomicPreflightSnapshot: AtomicTransactionSnapshot? = null
+    private val pendingAtomicPreflightTypeStates =
+        java.util.IdentityHashMap<AbstractYType, YTypeMutableState>()
     private var isEmittingTransactions = false
     private var isEmittingTransactionEvent = false
     private val pendingTransactionEmits = ArrayDeque<Transaction>()
@@ -275,7 +345,10 @@ class YDoc(
     }
 
     fun destroy() {
-        ensureThreadAccess()
+        withDocumentAccess(::destroyWithinAccess)
+    }
+
+    private fun destroyWithinAccess() {
         if (isDestroyed) return
         val childSubdocs = getSubdocs()
         val sharedTypes = (rootTypes.values + unopenedRootEntries.values).distinctBy { it.name }
@@ -544,15 +617,32 @@ class YDoc(
     fun getSubdocGuids(): Set<String> = getSubdocs().map { it.guid }.toSortedSet()
 
     fun <T> transact(origin: Any? = null, local: Boolean = true, block: () -> T): T {
-        ensureThreadAccess()
-        val existing = currentTransaction
-        if (existing != null) {
-            return block()
+        return withDocumentAccess {
+            transactWithinAccess(origin, local, block)
         }
+    }
+
+    private fun <T> transactWithinAccess(origin: Any?, local: Boolean, block: () -> T): T {
+        val existing = currentTransaction
+        if (existing != null) return block()
+
         val transaction = Transaction(origin, local, beforeState = store.stateVector())
+        val requireAtomicStandard = local && requiresAtomicStandardTransaction()
+        val rollbackSnapshot = if (requireAtomicStandard) {
+            pendingAtomicPreflightSnapshot ?: captureAtomicTransactionSnapshot()
+        } else {
+            null
+        }
+        if (requireAtomicStandard) {
+            pendingAtomicPreflightTypeStates.forEach(transaction.typeStates::putIfAbsent)
+            pendingAtomicPreflightSnapshot = null
+            pendingAtomicPreflightTypeStates.clear()
+        }
         currentTransaction = transaction
         val emitBeforeAll = !isEmittingTransactionEvent
         var blockError: Throwable? = null
+        var blockCompleted = false
+        var transactionAccepted = false
         var result: T? = null
         try {
             if (emitBeforeAll && hasBeforeAllTransactionListeners()) {
@@ -560,18 +650,51 @@ class YDoc(
             }
             emitBeforeTransaction(transaction)
             result = block()
+            blockCompleted = true
+            if (requireAtomicStandard) validateStandardTransaction(transaction)
+            transactionAccepted = true
         } catch (error: Throwable) {
             blockError = error
+            if (rollbackSnapshot != null) {
+                if (blockCompleted) {
+                    // The block completed and standard-wire validation rejected its result.
+                    restoreAtomicTransactionSnapshot(
+                        rollbackSnapshot,
+                        transaction.typeStates,
+                        transaction.addedMapKeys,
+                    )
+                } else {
+                    // Preserve upstream Yjs' commit-on-callback-error behavior for a representable
+                    // partial transaction. Roll back only when that partial state is non-standard.
+                    try {
+                        validateStandardTransaction(transaction)
+                        transactionAccepted = true
+                    } catch (validationError: Throwable) {
+                        restoreAtomicTransactionSnapshot(
+                            rollbackSnapshot,
+                            transaction.typeStates,
+                            transaction.addedMapKeys,
+                        )
+                        if (validationError !== error) error.addSuppressed(validationError)
+                    }
+                }
+            }
             throw error
         } finally {
             currentTransaction = null
-            try {
-                enqueueEmit(transaction)
-            } catch (emitError: Throwable) {
-                if (blockError == null) {
-                    throw emitError
+            if (rollbackSnapshot != null && transactionAccepted) {
+                store.releaseSnapshot(rollbackSnapshot.store)
+            }
+            val shouldEmit = !transaction.isEmpty || hasNonUpdateTransactionConsumers()
+            if ((!requireAtomicStandard || transactionAccepted) && shouldEmit) {
+                try {
+                    enqueueEmit(transaction)
+                } catch (emitError: Throwable) {
+                    if (blockError == null) {
+                        throw emitError
+                    }
+                    blockError.addSuppressed(emitError)
                 }
-                blockError.addSuppressed(emitError)
             }
         }
         @Suppress("UNCHECKED_CAST")
@@ -579,16 +702,127 @@ class YDoc(
     }
 
     fun <T> transact(block: (YTransaction) -> T, origin: Any? = null, local: Boolean = true): T {
-        ensureThreadAccess()
-        val existing = currentTransaction
-        if (existing != null) {
-            return block(YTransaction(this, existing))
+        return withDocumentAccess {
+            val existing = currentTransaction
+            if (existing != null) {
+                block(YTransaction(this, existing))
+            } else {
+                val runBlock: () -> T = {
+                    val active = currentTransaction ?: error("transaction is not active")
+                    block(YTransaction(this, active))
+                }
+                transactWithinAccess(origin = origin, local = local, block = runBlock)
+            }
         }
-        val runBlock: () -> T = {
-            val active = currentTransaction ?: error("transaction is not active")
-            block(YTransaction(this, active))
+    }
+
+    private fun requiresAtomicStandardTransaction(): Boolean =
+        standardUpdatePolicy == YStandardUpdatePolicy.REQUIRE_STANDARD ||
+            updateListeners.isNotEmpty() ||
+            updateEventListeners.isNotEmpty() ||
+            updateV2EventListeners.isNotEmpty() ||
+            eventListeners["update"].orEmpty().isNotEmpty() ||
+            eventListeners["updateV2"].orEmpty().isNotEmpty()
+
+    private fun validateStandardTransaction(transaction: Transaction) {
+        val items = store.itemsSince(transaction.beforeState)
+        if (items.isEmpty() && transaction.deleteSet.isEmpty) return
+        transaction.validatedStandardUpdate = UpdateCodec.encode(
+            DocumentUpdate(
+                items = items,
+                deleteSet = transaction.deleteSet,
+                parentItemIds = store.parentItemIds(),
+                parentKinds = store.parentKinds(),
+            ),
+        )
+    }
+
+    private fun captureAtomicTransactionSnapshot(): AtomicTransactionSnapshot {
+        val typeStates = java.util.IdentityHashMap<AbstractYType, YTypeMutableState>()
+        (rootTypes.values + unopenedRootEntries.values + nestedTypes.values + pendingPreliminaryAttachments.values)
+            .forEach { type -> typeStates.putIfAbsent(type, type.captureMutableState()) }
+        return AtomicTransactionSnapshot(
+            store = store.captureSnapshot(),
+            clientId = clientId,
+            rootTypes = rootTypes.toMap(),
+            unopenedRootEntries = unopenedRootEntries.toMap(),
+            nestedTypes = nestedTypes.toMap(),
+            nestedNames = nestedNames.toSet(),
+            referencedNestedNames = referencedNestedNames.toSet(),
+            pendingNestedReferenceStack = pendingNestedReferenceStack.map { names -> names.toSet() },
+            pendingStoreParentStack = pendingStoreParentStack.toList(),
+            pendingPreliminaryAttachments = pendingPreliminaryAttachments.toMap(),
+            subdocsByInstanceId = subdocsByInstanceId.toMap(),
+            pendingItems = pendingItems.map(StoreItem::copy),
+            pendingDeletes = pendingDeletes.copy(),
+            redoneByOriginal = redoneByOriginal.toMap(),
+            redoneRangeEndByOriginal = redoneRangeEndByOriginal.toMap(),
+            keptItems = keptItems.toSet(),
+            nestedTypeCounter = nestedTypeCounter,
+            cachedFullV1Update = cachedFullV1Update?.let { cached ->
+                cached.copy(parentKinds = cached.parentKinds.toMap(), bytes = cached.bytes.copyOf())
+            },
+            typeStates = typeStates,
+        )
+    }
+
+    private fun restoreAtomicTransactionSnapshot(
+        snapshot: AtomicTransactionSnapshot,
+        additionalTypeStates: Map<AbstractYType, YTypeMutableState>,
+        addedMapKeys: Map<String, Set<String>>,
+    ) {
+        val typeStates = java.util.IdentityHashMap<AbstractYType, YTypeMutableState>()
+        snapshot.typeStates.forEach(typeStates::put)
+        additionalTypeStates.forEach(typeStates::putIfAbsent)
+        typeStates.forEach { (type, state) -> type.restoreMutableState(state) }
+
+        val currentSubdocs = subdocsByInstanceId.values.toSet()
+        val restoredSubdocs = snapshot.subdocsByInstanceId.values.toSet()
+        (currentSubdocs - restoredSubdocs).forEach { subdoc -> subdoc.parentDocs.remove(this) }
+        restoredSubdocs.forEach { subdoc -> subdoc.parentDocs.add(this) }
+
+        clientId = snapshot.clientId
+        rootTypes.clear()
+        rootTypes.putAll(snapshot.rootTypes)
+        unopenedRootEntries.clear()
+        unopenedRootEntries.putAll(snapshot.unopenedRootEntries)
+        nestedTypes.clear()
+        nestedTypes.putAll(snapshot.nestedTypes)
+        nestedNames.clear()
+        nestedNames.addAll(snapshot.nestedNames)
+        referencedNestedNames.clear()
+        referencedNestedNames.addAll(snapshot.referencedNestedNames)
+        pendingNestedReferenceStack.clear()
+        snapshot.pendingNestedReferenceStack.forEach { names ->
+            pendingNestedReferenceStack.add(names.toMutableSet())
         }
-        return transact(origin = origin, local = local, block = runBlock)
+        pendingStoreParentStack.clear()
+        pendingStoreParentStack.addAll(snapshot.pendingStoreParentStack)
+        pendingPreliminaryAttachments.clear()
+        pendingPreliminaryAttachments.putAll(snapshot.pendingPreliminaryAttachments)
+        subdocsByInstanceId.clear()
+        subdocsByInstanceId.putAll(snapshot.subdocsByInstanceId)
+        pendingItems.clear()
+        pendingItems.addAll(snapshot.pendingItems.map(StoreItem::copy))
+        pendingDeletes.clear()
+        pendingDeletes.addAll(snapshot.pendingDeletes)
+        redoneByOriginal.clear()
+        redoneByOriginal.putAll(snapshot.redoneByOriginal)
+        redoneRangeEndByOriginal.clear()
+        redoneRangeEndByOriginal.putAll(snapshot.redoneRangeEndByOriginal)
+        keptItems.clear()
+        keptItems.addAll(snapshot.keptItems)
+        addedMapKeys.forEach { (parent, keys) ->
+            mapKeyOrders[parent]?.let { order ->
+                order.removeAll(keys)
+                if (order.isEmpty()) mapKeyOrders.remove(parent)
+            }
+        }
+        nestedTypeCounter = snapshot.nestedTypeCounter
+        cachedFullV1Update = snapshot.cachedFullV1Update?.let { cached ->
+            cached.copy(parentKinds = cached.parentKinds.toMap(), bytes = cached.bytes.copyOf())
+        }
+        store.restoreSnapshot(snapshot.store)
     }
 
     fun observeUpdates(listener: (update: ByteArray, origin: Any?) -> Unit): Subscription {
@@ -681,33 +915,34 @@ class YDoc(
         unsubscribe()
     }
 
-    fun encodeStateVector(): ByteArray = dev.yks.encodeStateVector(store.stateVector())
+    fun encodeStateVector(): ByteArray = withDocumentAccess {
+        dev.yks.encodeStateVector(store.stateVector())
+    }
 
-    internal fun stateVector(): StateVector = store.stateVector()
+    internal fun stateVector(): StateVector = withDocumentAccess { store.stateVector() }
 
     internal fun integrityCheck() {
         store.integrityCheck()
     }
 
-    internal fun deleteSet(): DeleteSet = store.deleteSet()
+    internal fun deleteSet(): DeleteSet = withDocumentAccess { store.deleteSet() }
 
-    internal fun encodeSnapshotAsUpdate(snapshot: Snapshot): ByteArray {
+    internal fun encodeSnapshotAsUpdate(snapshot: Snapshot): ByteArray = withDocumentAccess {
         val items = store.allItems()
             .filter { item -> item.id.clock < (snapshot.sv[item.id.client] ?: 0) }
             .map { item -> item.copy(deleted = snapshot.ds.hasId(item.id)) }
-        return UpdateCodec.encodeLossless(
+        UpdateCodec.encodeLossless(
             DocumentUpdate(items, snapshot.deleteSet, store.parentItemIds(), store.parentKinds()),
         )
     }
 
-    fun encodeStateAsUpdate(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
-        ensureThreadAccess()
+    fun encodeStateAsUpdate(encodedStateVector: ByteArray = ByteArray(0)): ByteArray = withDocumentAccess {
         val cacheEligible = encodedStateVector.isEmpty() && pendingItems.isEmpty() && pendingDeletes.isEmpty
         val parentKinds = if (cacheEligible) store.parentKinds() else emptyMap()
         if (cacheEligible) {
             cachedFullV1Update
                 ?.takeIf { cached -> cached.storeVersion == store.version && cached.parentKinds == parentKinds }
-                ?.let { cached -> return cached.bytes.copyOf() }
+                ?.let { cached -> return@withDocumentAccess cached.bytes.copyOf() }
         }
         val stateVector = decodeStateVector(encodedStateVector)
         val updates = mutableListOf(
@@ -728,11 +963,10 @@ class YDoc(
         if (cacheEligible) {
             cachedFullV1Update = CachedFullUpdate(store.version, parentKinds.toMap(), encoded.copyOf())
         }
-        return encoded
+        encoded
     }
 
-    fun encodeStateAsUpdateLossless(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
-        ensureThreadAccess()
+    fun encodeStateAsUpdateLossless(encodedStateVector: ByteArray = ByteArray(0)): ByteArray = withDocumentAccess {
         val stateVector = decodeStateVector(encodedStateVector)
         val updates = mutableListOf(
             UpdateCodec.encodeLossless(
@@ -748,11 +982,10 @@ class YDoc(
         pendingStructsView()?.update
             ?.let { pendingUpdate -> diffUpdateLossless(pendingUpdate, encodedStateVector) }
             ?.let(updates::add)
-        return if (updates.size == 1) updates.single() else mergeUpdatesLossless(updates)
+        if (updates.size == 1) updates.single() else mergeUpdatesLossless(updates)
     }
 
-    internal fun encodeStateAsUpdateV2(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
-        ensureThreadAccess()
+    internal fun encodeStateAsUpdateV2(encodedStateVector: ByteArray = ByteArray(0)): ByteArray = withDocumentAccess {
         val stateVector = decodeStateVector(encodedStateVector)
         val updates = mutableListOf(
             UpdateCodec.encodeV2(
@@ -773,11 +1006,10 @@ class YDoc(
             ?.let(UpdateCodec::decode)
             ?.let(UpdateCodec::encodeV2)
             ?.let(updates::add)
-        return if (updates.size == 1) updates.single() else mergeUpdatesV2(updates)
+        if (updates.size == 1) updates.single() else mergeUpdatesV2(updates)
     }
 
-    internal fun encodeStateAsUpdateV2Lossless(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
-        ensureThreadAccess()
+    internal fun encodeStateAsUpdateV2Lossless(encodedStateVector: ByteArray = ByteArray(0)): ByteArray = withDocumentAccess {
         val stateVector = decodeStateVector(encodedStateVector)
         val updates = mutableListOf(
             UpdateCodec.encodeV2Lossless(
@@ -798,41 +1030,44 @@ class YDoc(
             ?.let(UpdateCodec::decode)
             ?.let(UpdateCodec::encodeV2Lossless)
             ?.let(updates::add)
-        return if (updates.size == 1) updates.single() else mergeUpdatesV2Lossless(updates)
+        if (updates.size == 1) updates.single() else mergeUpdatesV2Lossless(updates)
     }
 
     fun applyUpdate(update: ByteArray, origin: Any? = null) {
-        ensureThreadAccess()
-        updateLimits.requireEncodedSize(update.size)
-        val decoded = UpdateCodec.decode(
-            update,
-            updateLimits.maxStructs,
-            updateLimits.maxDeleteRanges,
-        )
-        applyUpdate(decoded, origin)
-    }
-
-    fun applyUpdateV2(update: ByteArray, origin: Any? = null) {
-        ensureThreadAccess()
-        updateLimits.requireEncodedSize(update.size)
-        applyUpdate(
-            UpdateCodec.decodeV2(
+        withDocumentAccess {
+            updateLimits.requireEncodedSize(update.size)
+            val decoded = UpdateCodec.decode(
                 update,
                 updateLimits.maxStructs,
                 updateLimits.maxDeleteRanges,
-            ),
-            origin,
-        )
+            )
+            applyUpdate(decoded, origin)
+        }
+    }
+
+    fun applyUpdateV2(update: ByteArray, origin: Any? = null) {
+        withDocumentAccess {
+            updateLimits.requireEncodedSize(update.size)
+            applyUpdate(
+                UpdateCodec.decodeV2(
+                    update,
+                    updateLimits.maxStructs,
+                    updateLimits.maxDeleteRanges,
+                ),
+                origin,
+            )
+        }
     }
 
     internal fun applyUpdate(update: DocumentUpdate, origin: Any? = null) {
-        ensureThreadAccess()
-        updateLimits.requireStructCount(update.items.size)
-        updateLimits.requireDeleteRangeCount(update.deleteSet.rangeCount())
-        avoidClientIdCollision(update)
-        transact(origin, local = false) {
-            integrateRemote(update.items)
-            applyDeleteSet(update.deleteSet)
+        withDocumentAccess {
+            updateLimits.requireStructCount(update.items.size)
+            updateLimits.requireDeleteRangeCount(update.deleteSet.rangeCount())
+            avoidClientIdCollision(update)
+            transact(origin, local = false) {
+                integrateRemote(update.items)
+                applyDeleteSet(update.deleteSet)
+            }
         }
     }
 
@@ -922,20 +1157,18 @@ class YDoc(
     ): List<StoreItem> {
         val items = mutableListOf<StoreItem>()
         idSet.ranges().forEach { (client, range) ->
-            store.allItems()
-                .filter { item ->
-                    item.id.client == client &&
-                        item.id.clock < range.end &&
-                        range.clock < checkedClockAdd(item.id.clock, item.length) &&
-                        predicate(item)
-                }
-                .forEach { item ->
-                    val itemEnd = checkedClockAdd(item.id.clock, item.length)
-                    val start = maxOf(item.id.clock, range.clock)
-                    val end = minOf(itemEnd, range.end)
-                    val selected = item.sliceClocks(start, end)
-                    items.add(if (deletedOverride == null) selected else selected.copy(deleted = deletedOverride))
-                }
+            val clientItems = store.itemsForClient(client)
+            var index = store.firstItemEndingAfter(client, range.clock)
+            while (index < clientItems.size) {
+                val item = clientItems[index++]
+                if (item.id.clock >= range.end) break
+                if (!predicate(item)) continue
+                val itemEnd = checkedClockAdd(item.id.clock, item.length)
+                val start = maxOf(item.id.clock, range.clock)
+                val end = minOf(itemEnd, range.end)
+                val selected = item.sliceClocks(start, end)
+                items.add(if (deletedOverride == null) selected else selected.copy(deleted = deletedOverride))
+            }
         }
         return items
     }
@@ -1051,13 +1284,53 @@ class YDoc(
     }
 
     internal fun preflightNestedValue(value: Any?) {
-        validateStoreValue(value)
-        preparePreliminaryGraph(value)
+        prepareAtomicPreflightIfNeeded()
+        try {
+            validateStoreValue(value)
+            preparePreliminaryGraph(value)
+        } catch (error: Throwable) {
+            rollbackPendingAtomicPreflight()
+            throw error
+        }
     }
 
     /** Preflights only shared-type identity/binding for APIs that transform non-YValue inputs. */
     internal fun preflightSharedTypes(value: Any?) {
-        preparePreliminaryGraph(value)
+        prepareAtomicPreflightIfNeeded()
+        try {
+            preparePreliminaryGraph(value)
+        } catch (error: Throwable) {
+            rollbackPendingAtomicPreflight()
+            throw error
+        }
+    }
+
+    private fun prepareAtomicPreflightIfNeeded() {
+        if (
+            currentTransaction == null &&
+            requiresAtomicStandardTransaction() &&
+            pendingAtomicPreflightSnapshot == null
+        ) {
+            pendingAtomicPreflightSnapshot = captureAtomicTransactionSnapshot()
+        }
+    }
+
+    private fun rollbackPendingAtomicPreflight() {
+        val snapshot = pendingAtomicPreflightSnapshot ?: return
+        val typeStates = java.util.IdentityHashMap<AbstractYType, YTypeMutableState>()
+        pendingAtomicPreflightTypeStates.forEach(typeStates::put)
+        pendingAtomicPreflightSnapshot = null
+        pendingAtomicPreflightTypeStates.clear()
+        restoreAtomicTransactionSnapshot(snapshot, typeStates, emptyMap())
+    }
+
+    private fun captureTypeStateForMutation(type: AbstractYType) {
+        val transaction = currentTransaction
+        if (transaction != null) {
+            transaction.captureTypeState(type)
+        } else if (pendingAtomicPreflightSnapshot != null) {
+            pendingAtomicPreflightTypeStates.putIfAbsent(type, type.captureMutableState())
+        }
     }
 
     private fun validateStoreValue(value: Any?) {
@@ -1264,7 +1537,9 @@ class YDoc(
 
     private fun rememberMapKey(item: StoreItem) {
         val key = item.parentSub ?: return
-        mapKeyOrders.getOrPut(item.parent) { linkedSetOf() }.add(key)
+        if (mapKeyOrders.getOrPut(item.parent) { linkedSetOf() }.add(key)) {
+            currentTransaction?.addedMapKeys?.getOrPut(item.parent) { linkedSetOf() }?.add(key)
+        }
     }
 
     private fun ItemContent.mapContentValue(): YValue? = when (this) {
@@ -2140,6 +2415,10 @@ class YDoc(
             cleanupUnobservedTransaction(transaction)
             return
         }
+        if (hasSimpleStandardUpdateConsumersOnly()) {
+            emitSimpleStandardUpdate(transaction)
+            return
+        }
         pendingTransactionEmits.addLast(transaction)
         if (isEmittingTransactions) return
         isEmittingTransactions = true
@@ -2184,6 +2463,32 @@ class YDoc(
             isEmittingTransactions = false
         }
         firstError?.let { throw it }
+    }
+
+    /**
+     * Fast server path for `observeUpdates`: no transaction/type event DTOs or whole-store
+     * representative maps are needed when the standard update bytes are the only observation.
+     */
+    private fun emitSimpleStandardUpdate(transaction: Transaction) {
+        val beforeState = transaction.beforeState
+        val afterState = store.stateVector()
+        val hasWireContent = afterState.any { (client, clock) ->
+            clock > (beforeState[client] ?: 0)
+        } || !transaction.deleteSet.isEmpty
+        cleanupUnobservedTransaction(transaction)
+        if (!hasWireContent) return
+
+        val update = transaction.validatedStandardUpdate ?: UpdateCodec.encode(
+            DocumentUpdate(
+                items = store.itemsSince(beforeState),
+                deleteSet = transaction.deleteSet,
+                parentItemIds = store.parentItemIds(),
+                parentKinds = store.parentKinds(),
+            ),
+        )
+        callAllYksCallbacks(updateListeners.toList()) { listener ->
+            listener(update, transaction.origin)
+        }
     }
 
     private fun cleanupUnobservedTransaction(transaction: Transaction) {
@@ -2262,6 +2567,24 @@ class YDoc(
             docOnlyEventListeners["beforeAllTransactions"].orEmpty().isNotEmpty() ||
             eventListeners["beforeAllTransactions"].orEmpty().isNotEmpty()
 
+    /** Empty transactions do not produce update events, so update-only consumers need no cleanup pass. */
+    private fun hasNonUpdateTransactionConsumers(): Boolean =
+        beforeAllTransactionListeners.isNotEmpty() ||
+            beforeTransactionListeners.isNotEmpty() ||
+            beforeObserverCallsListeners.isNotEmpty() ||
+            afterTransactionListeners.isNotEmpty() ||
+            afterTransactionCleanupListeners.isNotEmpty() ||
+            afterAllTransactionsListeners.isNotEmpty() ||
+            transactionListeners.isNotEmpty() ||
+            transactionEventListeners.isNotEmpty() ||
+            afterAllTransactionsEventListeners.isNotEmpty() ||
+            subdocObservers.isNotEmpty() ||
+            subdocEventListeners.isNotEmpty() ||
+            docOnlyEventListeners.isNotEmpty() ||
+            eventListeners.any { (name, listeners) ->
+                listeners.isNotEmpty() && name !in setOf("update", "updateV2", "updateLossless", "updateV2Lossless")
+            }
+
     private fun hasTransactionConsumers(): Boolean =
         beforeAllTransactionListeners.isNotEmpty() ||
             beforeTransactionListeners.isNotEmpty() ||
@@ -2282,6 +2605,16 @@ class YDoc(
             eventListeners.isNotEmpty() ||
             docOnlyEventListeners["beforeAllTransactions"].orEmpty().isNotEmpty() ||
             materializedTypes().any { type -> type.needsTransactionSnapshot }
+
+    private fun hasSimpleStandardUpdateConsumersOnly(): Boolean =
+        updateListeners.isNotEmpty() &&
+            updateEventListeners.isEmpty() &&
+            updateV2EventListeners.isEmpty() &&
+            updateLosslessEventListeners.isEmpty() &&
+            updateV2LosslessEventListeners.isEmpty() &&
+            eventListeners.isEmpty() &&
+            !hasNonUpdateTransactionConsumers() &&
+            !needsTransactionSnapshots()
 
     private fun createTransactionEvent(transaction: Transaction): YTransactionEvent {
         val update = UpdateCodec.encodeLossless(
@@ -3153,6 +3486,7 @@ class YDoc(
         ensureThreadAccess()
         val name = nextNestedTypeName()
         return factory(name).also { type ->
+            captureTypeStateForMutation(type)
             check(type.kind == kind) { "nested type factory returned ${type.kind}, expected $kind" }
             type.markDetached()
             type.reserve(this, name)
@@ -3292,6 +3626,7 @@ class YDoc(
     private fun attachAndReplayPreliminaryTypes(content: ItemContent, ownerId: Id) {
         content.nestedTypeRefNames().forEach { name ->
             val type = pendingPreliminaryAttachments.remove(name) ?: return@forEach
+            captureTypeStateForMutation(type)
             type.integrateReserved(this, ownerId)
             currentTransaction?.preliminaryReplayedParents?.add(type.name)
             type.replayPreliminaryContent()
@@ -3363,6 +3698,7 @@ class YDoc(
         }
 
         visitType = { type ->
+            captureTypeStateForMutation(type)
             require(visiting[type] != true) { "shared type graph contains a cycle" }
             require(visited[type] != true) { "shared type instance occurs more than once in the inserted graph" }
             when (val current = type.binding) {
@@ -3481,7 +3817,7 @@ class YDoc(
                 autoLoad = ref.autoLoad,
                 isSuggestionDoc = ref.isSuggestionDoc,
             ),
-            YDocRuntimeOptions(updateLimits, threadAccessPolicy),
+            YDocRuntimeOptions(updateLimits, threadAccessPolicy, standardUpdatePolicy),
         ).also { subdoc ->
             subdocsByInstanceId[ref.instanceId] = subdoc
             subdoc.parentDocs.add(this)
@@ -3712,13 +4048,17 @@ class YDoc(
         val changedParentSubs = linkedMapOf<String, MutableSet<String?>>()
         val preliminaryReplayedParents = linkedSetOf<String>()
         val beforeParents = linkedMapOf<String, ParentSnapshot>()
+        val typeStates = java.util.IdentityHashMap<AbstractYType, YTypeMutableState>()
+        val addedMapKeys = linkedMapOf<String, MutableSet<String>>()
         var hasSubdocContentChanges: Boolean = false
             private set
         var afterState: StateVector = beforeState
         var update: ByteArray = ByteArray(0)
+        var validatedStandardUpdate: ByteArray? = null
         val isEmpty: Boolean
             get() = addedItems.isEmpty() &&
                 deleteSet.isEmpty &&
+                mergeStructs.isEmpty() &&
                 addedSubdocs.isEmpty() &&
                 removedSubdocs.isEmpty() &&
                 loadedSubdocs.isEmpty() &&
@@ -3737,6 +4077,10 @@ class YDoc(
         fun recordDeleted(item: StoreItem, hasSubdocRefs: Boolean) {
             deletedItems.add(item)
             hasSubdocContentChanges = hasSubdocContentChanges || hasSubdocRefs
+        }
+
+        fun captureTypeState(type: AbstractYType) {
+            typeStates.putIfAbsent(type, type.captureMutableState())
         }
     }
 

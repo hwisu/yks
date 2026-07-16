@@ -1186,14 +1186,12 @@ class UpdateApiTest {
 
         assertTrue(standard.isEmpty())
         assertTrue(standardV2.isEmpty())
-        assertEquals(1, lossless.size)
-        assertEquals(1, onceLossless.size)
-        assertEquals(1, onceLosslessV2.size)
+        assertTrue(lossless.isEmpty())
+        assertTrue(onceLossless.isEmpty())
+        assertTrue(onceLosslessV2.isEmpty())
         assertTrue(removedLossless.isEmpty())
         assertTrue(removedLosslessV2.isEmpty())
-        assertTrue(lossless.single().hasPrivateUpdateMagic())
-        assertTrue(onceLossless.single().hasPrivateUpdateMagic())
-        assertTrue(onceLosslessV2.single().hasPrivateUpdateMagic())
+        assertEquals("", source.getXmlFragment("xml").toString())
     }
 
     private fun ByteArray.hasPrivateUpdateMagic(): Boolean =

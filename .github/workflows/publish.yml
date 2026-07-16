@@ -64,10 +64,15 @@ jobs:
       - run: npm run interop:generate
       - run: npm run test:interop
 
+      - name: Verify reproducible release artifacts
+        env:
+          BUILD_REVISION: ${{ github.sha }}
+        run: ./scripts/verify-reproducible-artifacts.sh "${{ steps.version.outputs.value }}"
+
       - name: Verify Kotlin, interoperability, and published consumer
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.value }}
-        run: ./gradlew clean check consumerSmokeTest --no-daemon "-PreleaseVersion=$RELEASE_VERSION"
+        run: ./gradlew clean check consumerSmokeTest --no-daemon "-PreleaseVersion=$RELEASE_VERSION" "-PbuildRevision=$GITHUB_SHA"
 
       - run: npm run interop:check-clean
       - run: git diff --exit-code
@@ -91,7 +96,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_VERSION: ${{ needs.verify.outputs.version }}
-        run: ./gradlew publishAllPublicationsToGitHubPackagesRepository --no-daemon "-PreleaseVersion=$RELEASE_VERSION"
+        run: ./gradlew publishAllPublicationsToGitHubPackagesRepository --no-daemon "-PreleaseVersion=$RELEASE_VERSION" "-PbuildRevision=$GITHUB_SHA"
 
   verify-consumer:
     needs:

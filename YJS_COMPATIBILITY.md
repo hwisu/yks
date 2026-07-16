@@ -117,10 +117,21 @@ peers may additionally opt into the lossless and extension APIs.
 `YDoc` and attached shared types are thread-confined mutable objects, matching
 the Yjs execution model. The default `ENFORCED` policy lazily binds the document
 on its first CRDT operation and rejects other threads with
-`YksThreadConfinementException`. `UNCHECKED` is an explicit Kotlin/JVM escape
-hatch for callers that provide external serialization; it does not add internal
-locking. JVM applications should use encoded bytes or copied snapshots as
-hand-off values.
+`YksThreadConfinementException`. `EXTERNALLY_SERIALIZED` is the safe coroutine
+integration policy: sequential calls may resume on different JVM threads, while
+overlap in transactions, update application/encoding, snapshots, and destroy is
+rejected with `YksConcurrentAccessException`. It is fail-fast and does not add
+internal locking. `UNCHECKED` remains an explicit no-check escape hatch. JVM
+applications without external serialization should use encoded bytes or copied
+snapshots as hand-off values.
+
+Registering a standard V1/V2 update listener makes local transactions atomic at
+the standard-wire boundary. A Kotlin-only mutation that cannot produce a
+genuine Yjs update is rolled back before type, standard, or lossless observer
+delivery. `YStandardUpdatePolicy.REQUIRE_STANDARD` applies the same rule even
+without a listener and is the intended Hocuspocus/server mode. This policy does
+not change remote update semantics or permit private `YKS` envelopes on a
+standard channel.
 
 Yjs itself does not impose transport resource limits. YKS adds configurable
 `YUpdateLimits` at the document-application boundary as a secure JVM adaptation.
