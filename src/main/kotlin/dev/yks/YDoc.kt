@@ -68,18 +68,22 @@ class YDoc(
     val standardUpdatePolicy: YStandardUpdatePolicy get() = configuredStandardUpdatePolicy
 
     internal fun ensureThreadAccess() {
-        if (threadAccessPolicy == YThreadAccessPolicy.UNCHECKED) return
         val current = Thread.currentThread()
-        if (threadAccessPolicy == YThreadAccessPolicy.EXTERNALLY_SERIALIZED) {
-            val active = activeAccessThread.get()
-            if (active == null || active === current) return
-            throw YksConcurrentAccessException(active.name, current.name)
-        }
         val established = ownerThread.get()
         if (established === current) return
-        if (established == null && ownerThread.compareAndSet(null, current)) return
-        val owner = checkNotNull(ownerThread.get())
-        throw YksThreadConfinementException(owner.name, current.name)
+        when (threadAccessPolicy) {
+            YThreadAccessPolicy.UNCHECKED -> return
+            YThreadAccessPolicy.EXTERNALLY_SERIALIZED -> {
+                val active = activeAccessThread.get()
+                if (active == null || active === current) return
+                throw YksConcurrentAccessException(active.name, current.name)
+            }
+            YThreadAccessPolicy.ENFORCED -> {
+                if (established == null && ownerThread.compareAndSet(null, current)) return
+                val owner = checkNotNull(ownerThread.get())
+                throw YksThreadConfinementException(owner.name, current.name)
+            }
+        }
     }
 
     /**

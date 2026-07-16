@@ -878,24 +878,22 @@ git diff --check
   and invalidated on every structural, content, or deletion mutation.
 - `YText.length` and `toString()` retain versioned per-type read caches; delete-set and nested
   parent-ID derivations are also invalidation based.
-- `npm run benchmark:performance:check` enforces the local parity contract: stable workloads must
-  stay within 2x of Yjs; workloads whose Yjs median is below 0.1 ms may add at most 0.1 ms because
-  timer/runtime overhead dominates their ratio.
+- `npm run benchmark:performance:check` batches sub-millisecond operations until timer/GC overhead
+  is no longer dominant, then requires every measured workload to stay within 1.5x of Yjs.
 
 Latest warmed medians on this machine against Yjs 13.6.31:
 
 | Scenario | Yjs | YKS | YKS/Yjs |
 |---|---:|---:|---:|
-| apply 5,000 structs | 2.455 ms | 3.181 ms | 1.30x |
-| append 5,000 chars | 8.361 ms | 4.382 ms | 0.52x |
-| 1,000 middle edits, GC | 4.326 ms | 4.886 ms | 1.13x |
-| 1,000 middle edits, no GC | 3.892 ms | 3.505 ms | 0.90x |
-| 1,000 batched middle edits | 9.654 ms | 7.657 ms | 0.79x |
-| encode unchanged 5,000-struct state | 0.760 ms | 0.011 ms | 0.02x |
-
-The cached read scenarios add 0.053 ms for 20,000 `length` reads and 0.008 ms for
-100 `toString()` reads; their raw ratios are not treated as meaningful because both medians are
-well below 0.1 ms.
+| apply 5,000 structs | 2.469 ms | 1.707 ms | 0.69x |
+| append 5,000 chars | 8.741 ms | 3.836 ms | 0.44x |
+| 1,000 middle edits, GC | 4.218 ms | 3.966 ms | 0.94x |
+| 1,000 middle edits, no GC | 3.567 ms | 3.260 ms | 0.91x |
+| 1,000 batched middle edits | 9.601 ms | 7.377 ms | 0.77x |
+| 200,000 cached length reads | 0.668 ms | 0.212 ms | 0.32x |
+| 50,000 cached string reads | 0.195 ms | 0.068 ms | 0.35x |
+| encode unchanged 5,000-struct state | 0.789 ms | 0.014 ms | 0.02x |
+| 1,000 standard empty transactions | 1.430 ms | 0.406 ms | 0.28x |
 
 Validation:
 
@@ -904,7 +902,7 @@ Validation:
   - 85 Kotlin interop tests, including 500-seed differential coverage
   - standalone Maven Local consumer smoke test
 - `npm run test:interop`: Yjs 106 passed, Yrs 4 passed
-- `npm run benchmark:performance:check`: all 8 scenarios passed
+- `npm run benchmark:performance:check`: all 9 scenarios passed under the strict 1.5x gate
 - `npm run interop:check-clean`: generated fixtures clean
 - `git diff --check`: passed
 
@@ -977,3 +975,19 @@ Validation:
 - `npm audit`: 0 vulnerabilities
 - `cargo audit --file interop/yrs-oracle/Cargo.lock`: 0 vulnerabilities
 - `git diff --check`: passed
+
+## 2026-07-17 strict Yjs performance parity
+
+- `StructStore` now keeps a client-local lookup cursor. Monotonic origin/parent resolution advances
+  to the adjacent struct in O(1), while random and packed-clock lookups retain binary-search fallback.
+- The private V1 decoder DTO owns parent, parent-sub, kind, and unresolved-parent resolution caches.
+  Reusable path buffers and per-resolution generation marks preserve malformed-cycle rejection without
+  allocating a `HashSet`, path list, and result-map entry for every decoded struct.
+- Singleton wire contents reuse the decoded item ID and write directly to the result list instead of
+  creating per-struct singleton collections and duplicate IDs.
+- JMH `applyFiveThousandStructs` improved from 2.576 ms/op and 9,435,178 B/op to 1.724 ms/op and
+  2,946,551 B/op during the allocation-guided pass.
+- The cross-runtime benchmark now batches cached reads and empty transactions above timer/GC noise,
+  and its regression threshold is tightened from 2.0x/absolute fallback to 1.5x for every scenario.
+- In the final 30-warmup/50-sample run every YKS workload is at least as fast as Yjs; the highest
+  observed YKS/Yjs ratio is 0.94x for GC middle-edit workloads.

@@ -1097,7 +1097,18 @@ private data class DecodedWireItem(
     val parentSub: String?,
     val content: WireContent,
     val isGc: Boolean = false,
-)
+) {
+    var resolvedParent: String? = null
+    var resolvedParentSub: String? = null
+    var isParentSubResolved: Boolean = false
+    var resolvedKind: RootKind? = null
+    var resolvedUnresolvedParent: UnresolvedYjsParent? = null
+    var isUnresolvedParentResolved: Boolean = false
+    var parentResolutionMark: Int = 0
+    var parentSubResolutionMark: Int = 0
+    var kindResolutionMark: Int = 0
+    var unresolvedParentResolutionMark: Int = 0
+}
 
 private sealed interface WireContent {
     val length: Long
@@ -1179,24 +1190,45 @@ private fun StoreItem.canPackTextWith(right: StoreItem): Boolean {
 }
 
 private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
-    val resolvedParents = mutableMapOf<Id, String>()
-    val resolvedParentSubs = mutableMapOf<Id, String?>()
-    val resolvedKinds = mutableMapOf<Id, RootKind>()
-    val resolvedUnresolvedParents = mutableMapOf<Id, UnresolvedYjsParent?>()
-    val itemsByClient = groupBy { item -> item.id.client }
-        .mapValues { (_, items) -> items.sortedBy { item -> item.id.clock } }
+    val itemsByClient = linkedMapOf<Long, MutableList<DecodedWireItem>>()
+    for (item in this) itemsByClient.getOrPut(item.id.client) { mutableListOf() }.add(item)
+    itemsByClient.values.forEach { items ->
+        var sorted = true
+        var index = 1
+        while (index < items.size) {
+            if (items[index - 1].id.clock > items[index].id.clock) {
+                sorted = false
+                break
+            }
+            index++
+        }
+        if (!sorted) items.sortBy { item -> item.id.clock }
+    }
     val denseUnitClockStarts = itemsByClient.mapValues { (_, items) ->
         val firstClock = items.firstOrNull()?.id?.clock ?: return@mapValues null
-        firstClock.takeIf {
-            items.withIndex().all { (index, item) ->
-                item.content.length == 1L && item.id.clock == checkedClockAdd(firstClock, index.toLong())
+        var index = 0
+        while (index < items.size) {
+            val item = items[index]
+            if (item.content.length != 1L || item.id.clock != checkedClockAdd(firstClock, index.toLong())) {
+                return@mapValues null
             }
+            index++
         }
+        firstClock
     }
 
+    var cachedClient = -1L
+    var cachedClientItems: List<DecodedWireItem> = emptyList()
+    var cachedDenseUnitClockStart: Long? = null
     fun containing(id: Id): DecodedWireItem? {
-        val items = itemsByClient[id.client] ?: return null
-        denseUnitClockStarts[id.client]?.let { firstClock ->
+        if (cachedClient != id.client) {
+            cachedClient = id.client
+            cachedClientItems = itemsByClient[id.client] ?: emptyList()
+            cachedDenseUnitClockStart = denseUnitClockStarts[id.client]
+        }
+        val items = cachedClientItems
+        if (items.isEmpty()) return null
+        cachedDenseUnitClockStart?.let { firstClock ->
             val index = id.clock - firstClock
             if (index >= 0 && index < items.size.toLong()) return items[index.toInt()]
             return null
@@ -1219,19 +1251,24 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
         }
     }
 
+    val parentPath = ArrayList<DecodedWireItem>()
+    var parentResolutionGeneration = 0
     fun resolveParent(item: DecodedWireItem): String {
-        resolvedParents[item.id]?.let { return it }
-        val path = mutableListOf<DecodedWireItem>()
-        val seen = hashSetOf<Id>()
+        item.resolvedParent?.let { return it }
+        val generation = ++parentResolutionGeneration
+        parentPath.clear()
         var current = item
         var result: String
         while (true) {
-            resolvedParents[current.id]?.let { cached ->
+            current.resolvedParent?.let { cached ->
                 result = cached
                 break
             }
-            check(seen.add(current.id)) { "cyclic Yjs parent reference at ${current.id}" }
-            path.add(current)
+            check(current.parentResolutionMark != generation) {
+                "cyclic Yjs parent reference at ${current.id}"
+            }
+            current.parentResolutionMark = generation
+            parentPath.add(current)
             when (val reference = current.parent) {
                 is ParentReference.Root -> {
                     result = reference.name
@@ -1253,23 +1290,28 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
                 }
             }
         }
-        path.forEach { candidate -> resolvedParents[candidate.id] = result }
+        parentPath.forEach { candidate -> candidate.resolvedParent = result }
         return result
     }
 
+    val parentSubPath = ArrayList<DecodedWireItem>()
+    var parentSubResolutionGeneration = 0
     fun resolveParentSub(item: DecodedWireItem): String? {
-        if (resolvedParentSubs.containsKey(item.id)) return resolvedParentSubs[item.id]
-        val path = mutableListOf<DecodedWireItem>()
-        val seen = hashSetOf<Id>()
+        if (item.isParentSubResolved) return item.resolvedParentSub
+        val generation = ++parentSubResolutionGeneration
+        parentSubPath.clear()
         var current = item
         var result: String?
         while (true) {
-            if (resolvedParentSubs.containsKey(current.id)) {
-                result = resolvedParentSubs[current.id]
+            if (current.isParentSubResolved) {
+                result = current.resolvedParentSub
                 break
             }
-            check(seen.add(current.id)) { "cyclic Yjs parent-sub reference at ${current.id}" }
-            path.add(current)
+            check(current.parentSubResolutionMark != generation) {
+                "cyclic Yjs parent-sub reference at ${current.id}"
+            }
+            current.parentSubResolutionMark = generation
+            parentSubPath.add(current)
             when (val reference = current.parent) {
                 is ParentReference.Root,
                 is ParentReference.Nested -> {
@@ -1286,35 +1328,45 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
                 }
             }
         }
-        path.forEach { candidate -> resolvedParentSubs[candidate.id] = result }
+        parentSubPath.forEach { candidate ->
+            candidate.resolvedParentSub = result
+            candidate.isParentSubResolved = true
+        }
         return result
     }
 
+    val kindPath = ArrayList<DecodedWireItem>()
+    var kindResolutionGeneration = 0
     fun resolveKind(item: DecodedWireItem): RootKind {
-        resolvedKinds[item.id]?.let { return it }
-        val path = mutableListOf<DecodedWireItem>()
-        val seen = hashSetOf<Id>()
+        item.resolvedKind?.let { return it }
+        val generation = ++kindResolutionGeneration
+        kindPath.clear()
         var current = item
-        while (resolvedKinds[current.id] == null) {
-            check(seen.add(current.id)) { "cyclic Yjs kind reference at ${current.id}" }
-            path.add(current)
+        while (current.resolvedKind == null) {
+            check(current.kindResolutionMark != generation) {
+                "cyclic Yjs kind reference at ${current.id}"
+            }
+            current.kindResolutionMark = generation
+            kindPath.add(current)
             val reference = current.parent as? ParentReference.Inherit ?: break
             val anchor = containing(reference.id)?.takeUnless { candidate ->
                 candidate.content is WireContent.Deleted
             } ?: break
             current = anchor
         }
-        path.asReversed().forEach { candidate ->
-            if (resolvedKinds[candidate.id] != null) return@forEach
+        var pathIndex = kindPath.lastIndex
+        while (pathIndex >= 0) {
+            val candidate = kindPath[pathIndex--]
+            if (candidate.resolvedKind != null) continue
             val parentSub = resolveParentSub(candidate)
             val ownerKind = when (val reference = candidate.parent) {
                 is ParentReference.Nested -> (containing(reference.id)?.content as? WireContent.Type)?.kind
                 is ParentReference.Inherit -> containing(reference.id)
                     ?.takeUnless { anchor -> anchor.content is WireContent.Deleted }
-                    ?.let { anchor -> resolvedKinds[anchor.id] }
+                    ?.resolvedKind
                 is ParentReference.Root -> null
             }
-            resolvedKinds[candidate.id] = if (parentSub != null) {
+            candidate.resolvedKind = if (parentSub != null) {
                 ownerKind?.takeIf { it == RootKind.XmlHook } ?: RootKind.Map
             } else {
                 candidate.content.definitiveSequenceKindOrNull()
@@ -1322,27 +1374,38 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
                     ?: candidate.content.inferRootKind(parentSub)
             }
         }
-        return checkNotNull(resolvedKinds[item.id]) { "failed to resolve Yjs kind for ${item.id}" }
+        return checkNotNull(item.resolvedKind) { "failed to resolve Yjs kind for ${item.id}" }
     }
 
-    fun resolvesToGc(item: DecodedWireItem): Boolean = item.isGc ||
-        listOfNotNull(item.origin, item.rightOrigin).any { anchorId -> containing(anchorId)?.isGc == true } ||
-        ((item.parent as? ParentReference.Nested)?.let { reference -> containing(reference.id)?.isGc } == true)
+    fun resolvesToGc(item: DecodedWireItem): Boolean {
+        if (item.isGc) return true
+        if (item.origin?.let(::containing)?.isGc == true) return true
+        if (item.rightOrigin?.let(::containing)?.isGc == true) return true
+        val parent = item.parent as? ParentReference.Nested ?: return false
+        return containing(parent.id)?.isGc == true
+    }
 
+    val unresolvedParentPath = ArrayList<DecodedWireItem>()
+    var unresolvedParentResolutionGeneration = 0
     fun unresolvedParent(item: DecodedWireItem): UnresolvedYjsParent? {
-        if (resolvedUnresolvedParents.containsKey(item.id)) return resolvedUnresolvedParents[item.id]
-        val path = mutableListOf<DecodedWireItem>()
-        val seen = hashSetOf<Id>()
+        if (item.isUnresolvedParentResolved) return item.resolvedUnresolvedParent
+        val generation = ++unresolvedParentResolutionGeneration
+        unresolvedParentPath.clear()
         var current = item
-        while (!resolvedUnresolvedParents.containsKey(current.id)) {
-            check(seen.add(current.id)) { "cyclic Yjs unresolved parent reference at ${current.id}" }
-            path.add(current)
+        while (!current.isUnresolvedParentResolved) {
+            check(current.unresolvedParentResolutionMark != generation) {
+                "cyclic Yjs unresolved parent reference at ${current.id}"
+            }
+            current.unresolvedParentResolutionMark = generation
+            unresolvedParentPath.add(current)
             val reference = current.parent as? ParentReference.Inherit ?: break
             current = containing(reference.id) ?: break
         }
-        path.asReversed().forEach { candidate ->
-            if (resolvedUnresolvedParents.containsKey(candidate.id)) return@forEach
-            resolvedUnresolvedParents[candidate.id] = when (val reference = candidate.parent) {
+        var pathIndex = unresolvedParentPath.lastIndex
+        while (pathIndex >= 0) {
+            val candidate = unresolvedParentPath[pathIndex--]
+            if (candidate.isUnresolvedParentResolved) continue
+            candidate.resolvedUnresolvedParent = when (val reference = candidate.parent) {
                 is ParentReference.Root -> null
                 is ParentReference.Nested -> if (containing(reference.id) == null) {
                     UnresolvedYjsParent.Nested(reference.id)
@@ -1351,24 +1414,26 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
                 }
                 is ParentReference.Inherit -> {
                     val anchor = containing(reference.id)
-                    if (anchor == null || resolvedUnresolvedParents[anchor.id] != null) {
+                    if (anchor == null || anchor.resolvedUnresolvedParent != null) {
                         UnresolvedYjsParent.Inherit(reference.id)
                     } else {
                         null
                     }
                 }
             }
+            candidate.isUnresolvedParentResolved = true
         }
-        return resolvedUnresolvedParents[item.id]
+        return item.resolvedUnresolvedParent
     }
 
-    return flatMap { item ->
+    val result = ArrayList<StoreItem>(size)
+    for (item in this) {
         val isGc = resolvesToGc(item)
         val parent = if (isGc) gcParentName(item.id.client) else resolveParent(item)
         val parentSub = if (isGc) null else resolveParentSub(item)
         val kind = if (isGc) RootKind.Array else resolveKind(item)
         if (isGc || item.content is WireContent.Deleted) {
-            return@flatMap listOf(
+            result.add(
                 StoreItem(
                     id = item.id,
                     origin = item.origin,
@@ -1382,16 +1447,43 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
                     unresolvedParent = if (isGc) null else unresolvedParent(item),
                 ),
             )
+            continue
         }
-        val contents = item.content.toItemContents(kind)
+        val unresolvedParent = unresolvedParent(item)
+        val singleContent = item.content.toSingleItemContentOrNull(kind)
+        if (singleContent != null) {
+            check(singleContent.clockLength == item.content.length) {
+                "decoded content length ${singleContent.clockLength} does not match ${item.content.length}"
+            }
+            result.add(
+                StoreItem(
+                    id = item.id,
+                    origin = item.origin,
+                    rightOrigin = item.rightOrigin,
+                    parent = parent,
+                    parentSub = parentSub,
+                    content = singleContent,
+                    deleted = false,
+                    requiresClockContinuity = true,
+                    isGc = false,
+                    unresolvedParent = unresolvedParent,
+                ),
+            )
+            continue
+        }
+        val contents = item.content.toMultipleItemContents(kind)
         val contentLength = contents.sumOf { content -> content.clockLength }
         check(contentLength == item.content.length) {
             "decoded content length $contentLength does not match ${item.content.length}"
         }
         var clockOffset = 0L
-        contents.map { content ->
+        for (content in contents) {
             val storeItem = StoreItem(
-                id = Id(item.id.client, checkedClockAdd(item.id.clock, clockOffset)),
+                id = if (clockOffset == 0L) {
+                    item.id
+                } else {
+                    Id(item.id.client, checkedClockAdd(item.id.clock, clockOffset))
+                },
                 origin = if (clockOffset == 0L) {
                     item.origin
                 } else {
@@ -1401,15 +1493,16 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
                 parent = parent,
                 parentSub = parentSub,
                 content = content,
-                deleted = isGc || item.content is WireContent.Deleted,
+                deleted = false,
                 requiresClockContinuity = true,
-                isGc = isGc,
-                unresolvedParent = if (isGc) null else unresolvedParent(item),
+                isGc = false,
+                unresolvedParent = unresolvedParent,
             )
             clockOffset = checkedClockAdd(clockOffset, storeItem.length, "decoded content offset")
-            storeItem
+            result.add(storeItem)
         }
     }
+    return result
 }
 
 private fun WireContent.definitiveSequenceKindOrNull(): RootKind? = when (this) {
@@ -1431,18 +1524,18 @@ private fun WireContent.inferRootKind(parentSub: String?): RootKind = when {
     else -> RootKind.Array
 }
 
-private fun WireContent.toItemContents(kind: RootKind): List<ItemContent> = when (this) {
-    is WireContent.Deleted -> listOf(ItemContent.Deleted(kind, length))
+private fun WireContent.toSingleItemContentOrNull(kind: RootKind): ItemContent? = when (this) {
+    is WireContent.Deleted -> ItemContent.Deleted(kind, length)
     is WireContent.StringContent -> {
         value.length.toLong().toDecodedCount("text UTF-16 length")
-        listOf(ItemContent.Text(value, kind = kind))
+        ItemContent.Text(value, kind = kind)
     }
-    is WireContent.Embed -> listOf(ItemContent.TextEmbed(YValue.from(value), kind = kind))
-    is WireContent.Format -> listOf(toItemContent(kind))
-    is WireContent.Binary -> listOf(value.toSequenceContent(kind))
-    is WireContent.Json -> values.map { value -> value.toSequenceContent(kind) }
-    is WireContent.AnyContent -> values.map { value -> value.toSequenceContent(kind) }
-    is WireContent.Type -> listOf(
+    is WireContent.Embed -> ItemContent.TextEmbed(YValue.from(value), kind = kind)
+    is WireContent.Format -> toItemContent(kind)
+    is WireContent.Binary -> value.toSequenceContent(kind)
+    is WireContent.Json,
+    is WireContent.AnyContent -> null
+    is WireContent.Type ->
         if (
             kind == RootKind.XmlFragment ||
             kind == RootKind.XmlElement ||
@@ -1456,9 +1549,14 @@ private fun WireContent.toItemContents(kind: RootKind): List<ItemContent> = when
         } else {
             val value = YValue.TypeRef(this.kind, name)
             if (kind == RootKind.Map) ItemContent.MapEntry(value) else ItemContent.Value(value)
-        },
-    )
-    is WireContent.Doc -> listOf(options.toSubdocValue(guid, instanceId).toSequenceContent(kind))
+        }
+    is WireContent.Doc -> options.toSubdocValue(guid, instanceId).toSequenceContent(kind)
+}
+
+private fun WireContent.toMultipleItemContents(kind: RootKind): List<ItemContent> = when (this) {
+    is WireContent.Json -> values.map { value -> value.toSequenceContent(kind) }
+    is WireContent.AnyContent -> values.map { value -> value.toSequenceContent(kind) }
+    else -> error("wire content ${this::class.simpleName} has a single item representation")
 }
 
 private fun WireContent.Format.toItemContent(kind: RootKind): ItemContent =

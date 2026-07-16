@@ -263,6 +263,7 @@ Requirements:
 ./gradlew test
 npm ci
 npm run test:interop
+npm run benchmark:performance:check
 ./gradlew check consumerSmokeTest
 ./gradlew jmh
 ./scripts/verify-reproducible-artifacts.sh
@@ -287,7 +288,9 @@ shared Yjs wire contract instead of Yrs-only defaults.
 `jmh` records forked latency plus the GC profiler's allocation metrics for
 insert, middle edit, standard update apply/encode, standard-listener
 transactions, and an adversarial pre-decode limit rejection. Results are
-written to `build/reports/jmh/results.json`. Release JARs disable file
+written to `build/reports/jmh/results.json`. The cross-runtime performance gate
+batches sub-millisecond reads and empty transactions, then requires every
+measured YKS workload to remain within 1.5x of pinned Yjs 13.6.31. Release JARs disable file
 timestamps, use reproducible entry order, embed the exact `YKS-Revision`, and
 are built twice and byte-compared before publication.
 

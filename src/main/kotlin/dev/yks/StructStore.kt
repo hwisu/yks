@@ -30,6 +30,8 @@ class StructStore(private val owner: YDoc? = null) {
     private val visibleLengths: MutableMap<String, LongArray> = mutableMapOf()
     private val visibleNativeTextFormats: MutableMap<String, MutableSet<Id>> = mutableMapOf()
     private val visibleTextCache: MutableMap<Pair<String, RootKind>, String> = mutableMapOf()
+    private var lookupHintClient: Long = -1
+    private var lookupHintIndex: Int = -1
     private var activeSnapshot: StructStoreSnapshot? = null
 
     internal val ownerDoc: YDoc? get() = owner
@@ -110,6 +112,7 @@ class StructStore(private val owner: YDoc? = null) {
         visibleLengths.clear()
         visibleNativeTextFormats.clear()
         visibleTextCache.clear()
+        clearLookupHint()
         clientItems.values.forEach { items -> items.forEach(::addDerivedState) }
         version = snapshot.version
         sequenceBuildCount = snapshot.sequenceBuildCount
@@ -121,6 +124,37 @@ class StructStore(private val owner: YDoc? = null) {
 
     private fun captureDeletedBeforeMutation(item: StoreItem) {
         activeSnapshot?.originalDeletedStates?.putIfAbsent(item, item.deleted)
+    }
+
+    private fun findContainingIndex(client: Long, clock: Long, structs: List<StoreItem>): Int {
+        if (lookupHintClient == client && lookupHintIndex >= 0 && lookupHintIndex < structs.size) {
+            val index = lookupHintIndex
+            val hinted = structs[index]
+            if (clock >= hinted.id.clock && clock < hinted.endClock()) return index
+
+            val adjacentIndex = if (clock >= hinted.endClock()) index + 1 else index - 1
+            if (adjacentIndex >= 0 && adjacentIndex < structs.size) {
+                val adjacent = structs[adjacentIndex]
+                if (clock >= adjacent.id.clock && clock < adjacent.endClock()) {
+                    lookupHintIndex = adjacentIndex
+                    return adjacentIndex
+                }
+            }
+        }
+
+        return structs.findContainingIndex(clock).also { index ->
+            if (index >= 0) {
+                lookupHintClient = client
+                lookupHintIndex = index
+            }
+        }
+    }
+
+    private fun clearLookupHint(client: Long? = null) {
+        if (client == null || lookupHintClient == client) {
+            lookupHintClient = -1
+            lookupHintIndex = -1
+        }
     }
 
     internal fun add(item: StoreItem): Boolean {
@@ -146,6 +180,7 @@ class StructStore(private val owner: YDoc? = null) {
             (left != null && item.id.clock < left.endClock()) ||
             (right != null && right.id.clock < itemEnd)
         ) return false
+        clearLookupHint(item.id.client)
         structs.add(insertionIndex, item)
         recordAdded(item)
         return true
@@ -163,7 +198,7 @@ class StructStore(private val owner: YDoc? = null) {
         owner?.ensureThreadAccess()
         val storeItems = clientItems[id.client].orEmpty()
         require(storeItems.isNotEmpty()) { "structs must not be empty" }
-        val index = storeItems.findContainingIndex(id.clock)
+        val index = findContainingIndex(id.client, id.clock, storeItems)
         if (index < 0) error("clock ${id.clock} is not covered by structs")
         val viewOwner = structViewOwner
         return StructStoreIndex(storeItems.map { item -> item.toItemStruct(viewOwner) }, index)
@@ -171,7 +206,7 @@ class StructStore(private val owner: YDoc? = null) {
 
     internal fun getStoreItem(id: Id): StoreItem? =
         clientItems[id.client]?.let { structs ->
-            structs.getOrNull(structs.findContainingIndex(id.clock))
+            structs.getOrNull(findContainingIndex(id.client, id.clock, structs))
         }
 
     internal fun getStoreItemCleanStart(
@@ -179,7 +214,7 @@ class StructStore(private val owner: YDoc? = null) {
         onSplit: (StoreItem) -> Unit = {},
     ): StoreItem {
         val structs = clientItems[id.client] ?: error("struct not found: $id")
-        val index = structs.findContainingIndex(id.clock)
+        val index = findContainingIndex(id.client, id.clock, structs)
         if (index < 0) error("struct not found: $id")
         val item = structs[index]
         if (item.id.clock == id.clock || item.isGc) return item
@@ -191,7 +226,7 @@ class StructStore(private val owner: YDoc? = null) {
         onSplit: (StoreItem) -> Unit = {},
     ): StoreItem {
         val structs = clientItems[id.client] ?: error("struct not found: $id")
-        val index = structs.findContainingIndex(id.clock)
+        val index = findContainingIndex(id.client, id.clock, structs)
         if (index < 0) error("struct not found: $id")
         val item = structs[index]
         val splitOffset = id.clock - item.id.clock + 1
@@ -205,8 +240,9 @@ class StructStore(private val owner: YDoc? = null) {
         index: Int,
         diff: Long,
     ): StoreItem {
-        captureClientBeforeMutation(structs[index].id.client)
         val item = structs[index]
+        captureClientBeforeMutation(item.id.client)
+        clearLookupHint(item.id.client)
         require(diff in 1 until item.length) { "diff must split the store item" }
         val (leftContent, rightContent) = when (val content = item.content) {
             is ItemContent.Deleted ->
@@ -316,6 +352,7 @@ class StructStore(private val owner: YDoc? = null) {
         ) return false
 
         captureClientBeforeMutation(left.id.client)
+        clearLookupHint(left.id.client)
         val mergedLength = checkedClockAdd(left.length, right.length, "merged deleted item length")
         val merged = left.copy(content = leftContent.copy(length = mergedLength))
         structs[rightIndex - 1] = merged
@@ -328,7 +365,7 @@ class StructStore(private val owner: YDoc? = null) {
 
     internal fun collectItemContent(id: Id): StoreItem? {
         val structs = clientItems[id.client] ?: return null
-        val index = structs.findContainingIndex(id.clock)
+        val index = findContainingIndex(id.client, id.clock, structs)
         if (index < 0) return null
         val item = structs[index]
         if (!item.deleted) return null
@@ -806,6 +843,7 @@ class StructStore(private val owner: YDoc? = null) {
         }
 
         captureClientBeforeMutation(firstItem.id.client)
+        clearLookupHint(firstItem.id.client)
         val mergedValueLength = items.sumOf(StoreItem::length).toNonNegativeInt("merged text length")
         val mergedValue = buildString(mergedValueLength) {
             items.forEach { item -> append((item.content as ItemContent.Text).value) }

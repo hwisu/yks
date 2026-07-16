@@ -107,19 +107,19 @@ const yjsScenarios = {
     })
     return text.length
   },
-  length_read_20000: () => {
+  length_read_200000: () => {
     let sum = 0
-    for (let index = 0; index < 20_000; index += 1) sum += lengthText.length
+    for (let index = 0; index < 200_000; index += 1) sum += lengthText.length
     return sum
   },
-  string_read_100: () => {
+  string_read_50000: () => {
     let sum = 0
-    for (let index = 0; index < 100; index += 1) sum += stringText.toString().length
+    for (let index = 0; index < 50_000; index += 1) sum += stringText.toString().length
     return sum
   },
   encode_5000_structs: () => Y.encodeStateAsUpdate(encodeDoc).length,
   standard_empty_tx_5000: () => {
-    standardTransactionDoc.transact(() => {})
+    for (let index = 0; index < 1_000; index += 1) standardTransactionDoc.transact(() => {})
     return standardTransactionDoc.store.clients.size
   },
 }
@@ -155,9 +155,7 @@ const comparison = Object.fromEntries(
     yjs: yjsResults[name],
     yks: yksResults[name],
     medianRatio: yksResults[name].medianMs / yjsResults[name].medianMs,
-    parity: yjsResults[name].medianMs < 0.1
-      ? yksResults[name].medianMs - yjsResults[name].medianMs <= 0.1
-      : yksResults[name].medianMs / yjsResults[name].medianMs <= 2,
+    parity: yksResults[name].medianMs / yjsResults[name].medianMs <= 1.5,
   }]),
 )
 fs.writeFileSync(
@@ -177,7 +175,7 @@ if (assertParity) {
   assert.deepEqual(
     failures.map(([name]) => name),
     [],
-    'YKS parity requires at most 2x Yjs for stable workloads, or at most 0.1 ms absolute overhead for sub-0.1 ms workloads',
+    'YKS parity requires every measured workload to remain within 1.5x of Yjs',
   )
 }
 if (sink === Number.MIN_SAFE_INTEGER) console.log('unreachable', sink)

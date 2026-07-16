@@ -106,21 +106,21 @@ fun main(args: Array<String>) {
             }
             text.length.toLong()
         },
-        "length_read_20000" to {
+        "length_read_200000" to {
             var sum = 0L
-            repeat(20_000) { sum += lengthText.length }
+            repeat(200_000) { sum += lengthText.length }
             sum
         },
-        "string_read_100" to {
+        "string_read_50000" to {
             var sum = 0L
-            repeat(100) { sum += stringText.toString().length }
+            repeat(50_000) { sum += stringText.toString().length }
             sum
         },
         "encode_5000_structs" to {
             encodeDoc.encodeStateAsUpdate().size.toLong()
         },
         "standard_empty_tx_5000" to {
-            standardTransactionDoc.transact { Unit }
+            repeat(1_000) { standardTransactionDoc.transact { Unit } }
             standardTransactionDoc.getText("left").length.toLong()
         },
     )

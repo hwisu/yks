@@ -35,6 +35,8 @@ public class YksCoreBenchmark {
     private YDoc standardAppendDocument;
     private YText standardAppendText;
     private int standardAppendBytes;
+    private YDoc standardEmptyDocument;
+    private YText readText;
 
     @State(Scope.Thread)
     public static class StandardTransactionState {
@@ -91,6 +93,14 @@ public class YksCoreBenchmark {
             standardAppendBytes = update.length;
             return Unit.INSTANCE;
         });
+
+        standardEmptyDocument = new YDoc();
+        standardEmptyDocument.applyUpdate(standardUpdate, null);
+        standardEmptyDocument.observeUpdates((update, origin) -> Unit.INSTANCE);
+
+        YDoc readDocument = new YDoc();
+        readText = readDocument.getText("body");
+        readText.insert(0, "x".repeat(5_000), Map.of());
 
         YUpdateLimits limits = new YUpdateLimits(standardUpdate.length - 1, 50_000, 50_000);
         limitedDocument = new YDoc(
@@ -152,6 +162,26 @@ public class YksCoreBenchmark {
     public int standardWireCheckpointOnFiveThousandStructDocument(StandardTransactionState state) {
         state.document.transact(null, true, () -> Unit.INSTANCE);
         return state.emittedBytes;
+    }
+
+    @Benchmark
+    public long standardWireEmptyTransactionSteady() {
+        standardEmptyDocument.transact(null, true, () -> Unit.INSTANCE);
+        return standardUpdate.length;
+    }
+
+    @Benchmark
+    public long readCachedLengthTwentyThousandTimes() {
+        long sum = 0;
+        for (int index = 0; index < 20_000; index++) sum += readText.getLength();
+        return sum;
+    }
+
+    @Benchmark
+    public long readCachedStringOneHundredTimes() {
+        long sum = 0;
+        for (int index = 0; index < 100; index++) sum += readText.toString().length();
+        return sum;
     }
 
     @Benchmark
