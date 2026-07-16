@@ -773,6 +773,35 @@ BUILD SUCCESSFUL
   - `./gradlew interopTest --no-daemon`: 85 passed, including the 500-seed differential
   - `npm run test:interop`: Yjs 106 passed, Yrs 4 passed
 
+## 2026-07-17 typed safety boundaries and runtime confinement
+
+- External V1/V2 application now checks immutable per-document `YUpdateLimits` before mutation:
+  - encoded byte budget, default 16 MiB
+  - decoded wire-struct budget, default 50,000
+  - decoded delete-range budget, default 50,000
+  - both budgets are configurable through immutable `YDocRuntimeOptions`
+- Malformed public update and state-vector boundaries now throw `YksDecodingException` while
+  retaining the concrete decoder failure as `cause`; budget failures use
+  `YksUpdateLimitException` and remain distinguishable from malformed input.
+- `YDoc` lazily binds to the first CRDT access thread under the default
+  `YThreadAccessPolicy.ENFORCED` policy. Reads, writes, store views, lifecycle operations, and
+  listener registration/removal reject foreign threads with `YksThreadConfinementException`.
+- `YThreadAccessPolicy.UNCHECKED` is an explicit escape hatch for integrations that already
+  serialize all document access. It adds no locking and does not permit concurrent mutation.
+- Decoder-object application paths use the same per-document struct budget, so the byte-array
+  API cannot be bypassed merely by constructing a decoder first.
+- New regressions prove malformed input typing, cause preservation, V1/V2 struct/delete-range
+  pre-mutation rejection, invalid limit validation, default cross-thread rejection, and
+  serialized unchecked hand-off.
+- Final validation:
+  - `./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.1-test`:
+    676 normal tests, 85 Kotlin interop tests, and the standalone Maven consumer passed
+  - `npm run test:interop`: Yjs 106 passed, Yrs 4 passed
+  - `npm run interop:check-clean`: generated fixtures clean
+  - `npm audit --audit-level=low`: 0 vulnerabilities
+  - `cargo audit --file interop/yrs-oracle/Cargo.lock`: 0 vulnerabilities across 49 crates
+  - `git diff --check`: passed
+
 검증 명령:
 
 ```sh

@@ -26,6 +26,7 @@ class StructStore(private val owner: YDoc? = null) {
 
     val clients: Map<Long, List<ItemStruct>>
         get() {
+            owner?.ensureThreadAccess()
             val viewOwner = structViewOwner
             return clientItems.mapValues { (_, structs) ->
                 structs.map { item -> item.toItemStruct(viewOwner) }
@@ -33,23 +34,35 @@ class StructStore(private val owner: YDoc? = null) {
         }
 
     val ds: IdSet
-        get() = deleteSet().toIdSet()
+        get() {
+            owner?.ensureThreadAccess()
+            return deleteSet().toIdSet()
+        }
 
     var pendingStructs: PendingStructs?
-        get() = owner?.pendingStructsView()
+        get() {
+            owner?.ensureThreadAccess()
+            return owner?.pendingStructsView()
+        }
         set(value) {
+            owner?.ensureThreadAccess()
             owner?.setPendingStructsView(value)
         }
 
     var pendingDs: ByteArray?
-        get() = owner?.pendingDeleteSetUpdate()
+        get() {
+            owner?.ensureThreadAccess()
+            return owner?.pendingDeleteSetUpdate()
+        }
         set(value) {
+            owner?.ensureThreadAccess()
             owner?.setPendingDeleteSetUpdate(value)
         }
 
     val skips: IdSet = createIdSet()
 
     internal fun add(item: StoreItem): Boolean {
+        owner?.ensureThreadAccess()
         val structs = clientItems.getOrPut(item.id.client) { mutableListOf() }
         if (structs.isEmpty() || structs.last().endClock() <= item.id.clock) {
             structs.add(item)
@@ -76,6 +89,7 @@ class StructStore(private val owner: YDoc? = null) {
     }
 
     fun get(id: Id): AbstractStruct {
+        owner?.ensureThreadAccess()
         val item = getStoreItem(id) ?: error("struct not found: $id")
         return item.toItemStruct(structViewOwner)
     }
@@ -83,6 +97,7 @@ class StructStore(private val owner: YDoc? = null) {
     fun getItem(id: Id): ItemStruct = get(id) as ItemStruct
 
     fun getIndex(id: Id): StructStoreIndex {
+        owner?.ensureThreadAccess()
         val storeItems = clientItems[id.client].orEmpty()
         require(storeItems.isNotEmpty()) { "structs must not be empty" }
         val index = storeItems.findContainingIndex(id.clock)
@@ -272,11 +287,13 @@ class StructStore(private val owner: YDoc? = null) {
     }
 
     fun getClock(client: Long): Long {
+        owner?.ensureThreadAccess()
         val structs = clientItems[client] ?: return 0
         return structs.lastOrNull()?.endClock() ?: 0
     }
 
     fun stateVector(): StateVector {
+        owner?.ensureThreadAccess()
         val state = linkedMapOf<Long, Long>()
         clientItems.forEach { (client, structs) ->
             val clock = structs.lastOrNull()?.endClock() ?: 0
@@ -289,6 +306,7 @@ class StructStore(private val owner: YDoc? = null) {
     }
 
     fun integrityCheck() {
+        owner?.ensureThreadAccess()
         clientItems.values.forEach { structs ->
             for (index in 1 until structs.size) {
                 val left = structs[index - 1]
@@ -300,11 +318,14 @@ class StructStore(private val owner: YDoc? = null) {
         }
     }
 
-    internal fun allItems(): List<StoreItem> = allItemsCache ?: buildList(
-        clientItems.values.sumOf { structs -> structs.size },
-    ) {
-        clientItems.keys.sorted().forEach { client -> addAll(clientItems.getValue(client)) }
-    }.also { items -> allItemsCache = items }
+    internal fun allItems(): List<StoreItem> {
+        owner?.ensureThreadAccess()
+        return allItemsCache ?: buildList(
+            clientItems.values.sumOf { structs -> structs.size },
+        ) {
+            clientItems.keys.sorted().forEach { client -> addAll(clientItems.getValue(client)) }
+        }.also { items -> allItemsCache = items }
+    }
 
     internal fun itemsForClient(client: Long): List<StoreItem> = clientItems[client].orEmpty()
 
@@ -403,6 +424,7 @@ class StructStore(private val owner: YDoc? = null) {
     }
 
     fun deleteSet(): DeleteSet {
+        owner?.ensureThreadAccess()
         val deleteSet = DeleteSet.empty()
         allItems().forEach { item ->
             if (item.deleted) {
@@ -413,17 +435,24 @@ class StructStore(private val owner: YDoc? = null) {
     }
 
     internal fun sequence(parent: String): List<StoreItem> {
+        owner?.ensureThreadAccess()
         return sequenceIndex(parent).snapshot()
     }
 
-    internal fun visibleLength(parent: String, kind: RootKind): Long =
-        visibleLengths[parent]?.get(kind.ordinal) ?: 0L
+    internal fun visibleLength(parent: String, kind: RootKind): Long {
+        owner?.ensureThreadAccess()
+        return visibleLengths[parent]?.get(kind.ordinal) ?: 0L
+    }
 
-    internal fun hasVisibleNativeTextFormat(parent: String): Boolean =
-        visibleNativeTextFormats[parent]?.isNotEmpty() == true
+    internal fun hasVisibleNativeTextFormat(parent: String): Boolean {
+        owner?.ensureThreadAccess()
+        return visibleNativeTextFormats[parent]?.isNotEmpty() == true
+    }
 
-    internal fun lastSequenceItem(parent: String, kind: RootKind): StoreItem? =
-        sequenceIndex(parent).last { item -> item.content.kind == kind }
+    internal fun lastSequenceItem(parent: String, kind: RootKind): StoreItem? {
+        owner?.ensureThreadAccess()
+        return sequenceIndex(parent).last { item -> item.content.kind == kind }
+    }
 
     private fun sequenceIndex(parent: String): IndexedSequence =
         sequenceCache.getOrPut(parent) {

@@ -2,6 +2,7 @@ package dev.yks
 
 import java.security.SecureRandom
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.atomic.AtomicReference
 import java.util.UUID
 import kotlin.jvm.JvmName
 
@@ -22,8 +23,8 @@ private val docOnlyEventNames = setOf(
  * Mutable Yjs-compatible document.
  *
  * Like an upstream Yjs document, a [YDoc] and its attached shared types are thread-confined.
- * Callers must serialize access when using them from multiple JVM threads. Encoded updates,
- * state vectors, and copied value snapshots are safe hand-off boundaries.
+ * The default runtime policy binds on first CRDT access and rejects every other thread. Encoded
+ * updates, state vectors, and copied value snapshots are safe hand-off boundaries.
  */
 class YDoc(
     clientId: Long = randomClientId(),
@@ -36,7 +37,9 @@ class YDoc(
     var autoLoad: Boolean = false,
     var isSuggestionDoc: Boolean = false,
 ) {
-    constructor(options: YDocOptions) : this(
+    constructor(options: YDocOptions) : this(options, YDocRuntimeOptions.DEFAULT)
+
+    constructor(options: YDocOptions, runtimeOptions: YDocRuntimeOptions) : this(
         clientId = options.clientId,
         guid = options.guid,
         collectionId = options.collectionId,
@@ -46,10 +49,31 @@ class YDoc(
         shouldLoad = options.shouldLoad,
         autoLoad = options.autoLoad,
         isSuggestionDoc = options.isSuggestionDoc,
-    )
+    ) {
+        configuredUpdateLimits = runtimeOptions.updateLimits
+        configuredThreadAccessPolicy = runtimeOptions.threadAccessPolicy
+    }
+
+    private val ownerThread = AtomicReference<Thread?>()
+    private var configuredUpdateLimits: YUpdateLimits = YUpdateLimits.DEFAULT
+    private var configuredThreadAccessPolicy: YThreadAccessPolicy = YThreadAccessPolicy.ENFORCED
+
+    val updateLimits: YUpdateLimits get() = configuredUpdateLimits
+    val threadAccessPolicy: YThreadAccessPolicy get() = configuredThreadAccessPolicy
+
+    internal fun ensureThreadAccess() {
+        if (threadAccessPolicy == YThreadAccessPolicy.UNCHECKED) return
+        val current = Thread.currentThread()
+        val established = ownerThread.get()
+        if (established === current) return
+        if (established == null && ownerThread.compareAndSet(null, current)) return
+        val owner = checkNotNull(ownerThread.get())
+        throw YksThreadConfinementException(owner.name, current.name)
+    }
 
     var clientId: Long = clientId.also { require(it >= 0) { "clientId must be non-negative" } }
         set(value) {
+            ensureThreadAccess()
             require(value >= 0) { "clientId must be non-negative" }
             field = value
         }
@@ -75,6 +99,10 @@ class YDoc(
     var whenSynced: CompletableFuture<YDoc> = CompletableFuture()
         private set
     var cleanupFormatting: Boolean = !isSuggestionDoc
+        set(value) {
+            ensureThreadAccess()
+            field = value
+        }
 
     val `$type`: (Any?) -> Boolean get() = `$ydoc`
 
@@ -139,14 +167,19 @@ class YDoc(
     internal val subdocInstanceId: String = randomGuid()
 
     val share: Map<String, AbstractYType>
-        get() = shareView
+        get() {
+            ensureThreadAccess()
+            return shareView
+        }
 
     @get:JvmName("getSubdocsProperty")
     val subdocs: Set<YDoc>
         get() = getSubdocs()
 
-    operator fun get(name: String): AbstractYType =
-        rootType(name) ?: unopenedRoot(name) ?: createUnopenedRoot(name)
+    operator fun get(name: String): AbstractYType {
+        ensureThreadAccess()
+        return rootType(name) ?: unopenedRoot(name) ?: createUnopenedRoot(name)
+    }
 
     fun get(name: String, kind: RootKind): AbstractYType = when (kind) {
         RootKind.Array -> getArray(name)
@@ -160,7 +193,10 @@ class YDoc(
 
     fun get(name: String, typeRef: Int): AbstractYType = get(name, rootKindFromTypeRefId(typeRef))
 
-    fun getOrNull(name: String): AbstractYType? = rootType(name) ?: unopenedRoot(name)
+    fun getOrNull(name: String): AbstractYType? {
+        ensureThreadAccess()
+        return rootType(name) ?: unopenedRoot(name)
+    }
 
     fun get(): YArray = getArray("")
 
@@ -201,18 +237,21 @@ class YDoc(
         createNestedType(RootKind.XmlText) { nestedName -> YXmlTextType(this, nestedName) }
 
     fun toJson(): Map<String, Any?> {
+        ensureThreadAccess()
         return rootTypes
             .mapValues { (_, type) -> type.toJson() }
             .inJavaScriptObjectKeyOrder()
     }
 
     fun toJSON(): Map<String, Any?> {
+        ensureThreadAccess()
         return rootTypes
             .mapValues { (_, type) -> type.toJSON() }
             .inJavaScriptObjectKeyOrder()
     }
 
     fun load() {
+        ensureThreadAccess()
         if (!shouldLoad) {
             shouldLoad = true
             parentDocs.forEach { parent ->
@@ -225,10 +264,12 @@ class YDoc(
     }
 
     fun sync(synced: Boolean = true) {
+        ensureThreadAccess()
         emit("sync", YDocEvent(name = "sync", synced = synced))
     }
 
     fun destroy() {
+        ensureThreadAccess()
         if (isDestroyed) return
         val childSubdocs = getSubdocs()
         val sharedTypes = (rootTypes.values + unopenedRootEntries.values).distinctBy { it.name }
@@ -268,26 +309,30 @@ class YDoc(
     }
 
     fun observeSubdocs(listener: (YSubdocEvent) -> Unit): Subscription {
+        ensureThreadAccess()
         subdocObservers.add(listener)
-        return Subscription { subdocObservers.remove(listener) }
+        return confinedSubscription { subdocObservers.remove(listener) }
     }
 
     fun onSubdocs(listener: (YSubdocEvent, YDoc, YTransactionEvent?) -> Unit): Subscription {
+        ensureThreadAccess()
         subdocEventListeners.add(listener)
-        return Subscription { subdocEventListeners.remove(listener) }
+        return confinedSubscription { subdocEventListeners.remove(listener) }
     }
 
     fun on(eventName: String, listener: (YDocEvent) -> Unit): Subscription {
+        ensureThreadAccess()
         val listeners = eventListeners.getOrPut(eventName) { mutableListOf() }
         listeners.add(listener)
-        return Subscription { off(eventName, listener) }
+        return confinedSubscription { off(eventName, listener) }
     }
 
     fun onDoc(eventName: String, listener: (YDoc) -> Unit): Subscription {
+        ensureThreadAccess()
         require(eventName in docOnlyEventNames) { "event '$eventName' does not provide document callback arguments" }
         val listeners = docOnlyEventListeners.getOrPut(eventName) { mutableListOf() }
         listeners.add(listener)
-        return Subscription { offDoc(eventName, listener) }
+        return confinedSubscription { offDoc(eventName, listener) }
     }
 
     fun on(eventName: String, listener: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit): Subscription =
@@ -300,22 +345,25 @@ class YDoc(
         }
 
     fun onSync(listener: (Boolean, YDoc) -> Unit): Subscription {
+        ensureThreadAccess()
         syncEventListeners.add(listener)
-        return Subscription { offSync(listener) }
+        return confinedSubscription { offSync(listener) }
     }
 
     fun on(eventName: String, listener: (YTransactionEvent, YDoc) -> Unit): Subscription {
+        ensureThreadAccess()
         require(eventName in transactionEventNames) {
             "event '$eventName' does not provide transaction callback arguments"
         }
         val listeners = transactionEventListeners.getOrPut(eventName) { mutableListOf() }
         listeners.add(listener)
-        return Subscription { off(eventName, listener) }
+        return confinedSubscription { off(eventName, listener) }
     }
 
     fun onAfterAllTransactions(listener: (YDoc, List<YTransactionEvent>) -> Unit): Subscription {
+        ensureThreadAccess()
         afterAllTransactionsEventListeners.add(listener)
-        return Subscription { offAfterAllTransactions(listener) }
+        return confinedSubscription { offAfterAllTransactions(listener) }
     }
 
     fun on(eventName: String, listener: (YSubdocEvent, YDoc, YTransactionEvent?) -> Unit): Subscription {
@@ -394,6 +442,7 @@ class YDoc(
     }
 
     fun off(eventName: String, listener: (YDocEvent) -> Unit) {
+        ensureThreadAccess()
         val listeners = eventListeners[eventName] ?: return
         listeners.remove(listener)
         if (listeners.isEmpty()) {
@@ -402,6 +451,7 @@ class YDoc(
     }
 
     fun offDoc(eventName: String, listener: (YDoc) -> Unit) {
+        ensureThreadAccess()
         val listeners = docOnlyEventListeners[eventName] ?: return
         listeners.remove(listener)
         if (listeners.isEmpty()) {
@@ -410,6 +460,7 @@ class YDoc(
     }
 
     fun off(eventName: String, listener: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit) {
+        ensureThreadAccess()
         when (eventName) {
             "update" -> updateEventListeners.remove(listener)
             "updateV2" -> updateV2EventListeners.remove(listener)
@@ -419,10 +470,12 @@ class YDoc(
     }
 
     fun offSync(listener: (Boolean, YDoc) -> Unit) {
+        ensureThreadAccess()
         syncEventListeners.remove(listener)
     }
 
     fun off(eventName: String, listener: (YTransactionEvent, YDoc) -> Unit) {
+        ensureThreadAccess()
         val listeners = transactionEventListeners[eventName] ?: return
         listeners.remove(listener)
         if (listeners.isEmpty()) {
@@ -431,10 +484,12 @@ class YDoc(
     }
 
     fun offAfterAllTransactions(listener: (YDoc, List<YTransactionEvent>) -> Unit) {
+        ensureThreadAccess()
         afterAllTransactionsEventListeners.remove(listener)
     }
 
     fun off(eventName: String, listener: (YSubdocEvent, YDoc, YTransactionEvent?) -> Unit) {
+        ensureThreadAccess()
         if (eventName == "subdocs") {
             subdocEventListeners.remove(listener)
         }
@@ -445,6 +500,7 @@ class YDoc(
     }
 
     fun emit(event: YDocEvent) {
+        ensureThreadAccess()
         when (event.name) {
             "load" -> {
                 if (!isLoaded) {
@@ -471,15 +527,18 @@ class YDoc(
         }
     }
 
-    fun getSubdocs(): Set<YDoc> =
-        visibleSubdocRefs()
+    fun getSubdocs(): Set<YDoc> {
+        ensureThreadAccess()
+        return visibleSubdocRefs()
             .map(::subdocFromRef)
             .distinctBy { it.subdocInstanceId }
             .toCollection(linkedSetOf())
+    }
 
     fun getSubdocGuids(): Set<String> = getSubdocs().map { it.guid }.toSortedSet()
 
     fun <T> transact(origin: Any? = null, local: Boolean = true, block: () -> T): T {
+        ensureThreadAccess()
         val existing = currentTransaction
         if (existing != null) {
             return block()
@@ -514,6 +573,7 @@ class YDoc(
     }
 
     fun <T> transact(block: (YTransaction) -> T, origin: Any? = null, local: Boolean = true): T {
+        ensureThreadAccess()
         val existing = currentTransaction
         if (existing != null) {
             return block(YTransaction(this, existing))
@@ -526,75 +586,93 @@ class YDoc(
     }
 
     fun observeUpdates(listener: (update: ByteArray, origin: Any?) -> Unit): Subscription {
+        ensureThreadAccess()
         updateListeners.add(listener)
-        return Subscription { updateListeners.remove(listener) }
+        return confinedSubscription { updateListeners.remove(listener) }
     }
 
     fun observeUpdatesLossless(listener: (update: ByteArray, origin: Any?) -> Unit): Subscription {
+        ensureThreadAccess()
         val wrapper: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit = { update, origin, _, _ ->
             listener(update, origin)
         }
         updateLosslessEventListeners.add(wrapper)
-        return Subscription { updateLosslessEventListeners.remove(wrapper) }
+        return confinedSubscription { updateLosslessEventListeners.remove(wrapper) }
     }
 
     fun onUpdate(listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit): Subscription {
+        ensureThreadAccess()
         updateEventListeners.add(listener)
-        return Subscription { updateEventListeners.remove(listener) }
+        return confinedSubscription { updateEventListeners.remove(listener) }
     }
 
     fun onUpdateV2(listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit): Subscription {
+        ensureThreadAccess()
         updateV2EventListeners.add(listener)
-        return Subscription { updateV2EventListeners.remove(listener) }
+        return confinedSubscription { updateV2EventListeners.remove(listener) }
     }
 
     fun onUpdateLossless(
         listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit,
     ): Subscription {
+        ensureThreadAccess()
         updateLosslessEventListeners.add(listener)
-        return Subscription { updateLosslessEventListeners.remove(listener) }
+        return confinedSubscription { updateLosslessEventListeners.remove(listener) }
     }
 
     fun onUpdateV2Lossless(
         listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit,
     ): Subscription {
+        ensureThreadAccess()
         updateV2LosslessEventListeners.add(listener)
-        return Subscription { updateV2LosslessEventListeners.remove(listener) }
+        return confinedSubscription { updateV2LosslessEventListeners.remove(listener) }
     }
 
     fun observeBeforeAllTransactions(listener: () -> Unit): Subscription {
+        ensureThreadAccess()
         beforeAllTransactionListeners.add(listener)
-        return Subscription { beforeAllTransactionListeners.remove(listener) }
+        return confinedSubscription { beforeAllTransactionListeners.remove(listener) }
     }
 
     fun observeBeforeTransactions(listener: (YTransactionEvent) -> Unit): Subscription {
+        ensureThreadAccess()
         beforeTransactionListeners.add(listener)
-        return Subscription { beforeTransactionListeners.remove(listener) }
+        return confinedSubscription { beforeTransactionListeners.remove(listener) }
     }
 
     fun observeBeforeObserverCalls(listener: (YTransactionEvent) -> Unit): Subscription {
+        ensureThreadAccess()
         beforeObserverCallsListeners.add(listener)
-        return Subscription { beforeObserverCallsListeners.remove(listener) }
+        return confinedSubscription { beforeObserverCallsListeners.remove(listener) }
     }
 
     fun observeAfterTransactions(listener: (YTransactionEvent) -> Unit): Subscription {
+        ensureThreadAccess()
         afterTransactionListeners.add(listener)
-        return Subscription { afterTransactionListeners.remove(listener) }
+        return confinedSubscription { afterTransactionListeners.remove(listener) }
     }
 
     fun observeAfterTransactionCleanup(listener: (YTransactionEvent) -> Unit): Subscription {
+        ensureThreadAccess()
         afterTransactionCleanupListeners.add(listener)
-        return Subscription { afterTransactionCleanupListeners.remove(listener) }
+        return confinedSubscription { afterTransactionCleanupListeners.remove(listener) }
     }
 
     fun observeAfterAllTransactions(listener: (List<YTransactionEvent>) -> Unit): Subscription {
+        ensureThreadAccess()
         afterAllTransactionsListeners.add(listener)
-        return Subscription { afterAllTransactionsListeners.remove(listener) }
+        return confinedSubscription { afterAllTransactionsListeners.remove(listener) }
     }
 
     internal fun observeTransactions(listener: (YTransactionEvent) -> Unit): Subscription {
+        ensureThreadAccess()
         transactionListeners.add(listener)
-        return Subscription { transactionListeners.remove(listener) }
+        return confinedSubscription { transactionListeners.remove(listener) }
+    }
+
+    private fun confinedSubscription(unsubscribe: () -> Unit): Subscription = Subscription {
+        ensureThreadAccess()
+        unsubscribe()
     }
 
     fun encodeStateVector(): ByteArray = dev.yks.encodeStateVector(store.stateVector())
@@ -617,6 +695,7 @@ class YDoc(
     }
 
     fun encodeStateAsUpdate(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
+        ensureThreadAccess()
         val stateVector = decodeStateVector(encodedStateVector)
         val updates = mutableListOf(
             UpdateCodec.encode(
@@ -636,6 +715,7 @@ class YDoc(
     }
 
     fun encodeStateAsUpdateLossless(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
+        ensureThreadAccess()
         val stateVector = decodeStateVector(encodedStateVector)
         val updates = mutableListOf(
             UpdateCodec.encodeLossless(
@@ -655,6 +735,7 @@ class YDoc(
     }
 
     internal fun encodeStateAsUpdateV2(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
+        ensureThreadAccess()
         val stateVector = decodeStateVector(encodedStateVector)
         val updates = mutableListOf(
             UpdateCodec.encodeV2(
@@ -679,6 +760,7 @@ class YDoc(
     }
 
     internal fun encodeStateAsUpdateV2Lossless(encodedStateVector: ByteArray = ByteArray(0)): ByteArray {
+        ensureThreadAccess()
         val stateVector = decodeStateVector(encodedStateVector)
         val updates = mutableListOf(
             UpdateCodec.encodeV2Lossless(
@@ -703,11 +785,33 @@ class YDoc(
     }
 
     fun applyUpdate(update: ByteArray, origin: Any? = null) {
-        val decoded = UpdateCodec.decode(update)
+        ensureThreadAccess()
+        updateLimits.requireEncodedSize(update.size)
+        val decoded = UpdateCodec.decode(
+            update,
+            updateLimits.maxStructs,
+            updateLimits.maxDeleteRanges,
+        )
         applyUpdate(decoded, origin)
     }
 
+    fun applyUpdateV2(update: ByteArray, origin: Any? = null) {
+        ensureThreadAccess()
+        updateLimits.requireEncodedSize(update.size)
+        applyUpdate(
+            UpdateCodec.decodeV2(
+                update,
+                updateLimits.maxStructs,
+                updateLimits.maxDeleteRanges,
+            ),
+            origin,
+        )
+    }
+
     internal fun applyUpdate(update: DocumentUpdate, origin: Any? = null) {
+        ensureThreadAccess()
+        updateLimits.requireStructCount(update.items.size)
+        updateLimits.requireDeleteRangeCount(update.deleteSet.rangeCount())
         avoidClientIdCollision(update)
         transact(origin, local = false) {
             integrateRemote(update.items)
@@ -717,14 +821,22 @@ class YDoc(
 
     internal fun nextId(): Id = Id(clientId, store.getClock(clientId))
 
-    internal fun visibleSequence(parent: String): List<StoreItem> =
-        store.sequence(parent)
+    internal fun visibleSequence(parent: String): List<StoreItem> {
+        ensureThreadAccess()
+        return store.sequence(parent)
             .filter { !it.deleted && it.countable }
             .flatMap(StoreItem::logicalUnits)
+    }
 
-    internal fun visibleLength(parent: String, kind: RootKind): Long = store.visibleLength(parent, kind)
+    internal fun visibleLength(parent: String, kind: RootKind): Long {
+        ensureThreadAccess()
+        return store.visibleLength(parent, kind)
+    }
 
-    internal fun sequence(parent: String): List<StoreItem> = store.sequence(parent)
+    internal fun sequence(parent: String): List<StoreItem> {
+        ensureThreadAccess()
+        return store.sequence(parent)
+    }
 
     internal fun typeChildren(type: AbstractYType): List<StoreItem> {
         require(type.doc === this) { "type must belong to this document" }
@@ -871,6 +983,7 @@ class YDoc(
     internal fun rootType(name: String): AbstractYType? = rootTypes[name]
 
     fun rootNames(): Set<String> {
+        ensureThreadAccess()
         return (rootTypes.keys + unopenedRootEntries.keys + store.allItems().map { it.parent })
             .filterNot { it in nestedNames }
             .filterNot { it.startsWith("__yjs_gc__:") }
@@ -1071,6 +1184,7 @@ class YDoc(
     }
 
     internal fun visibleMapValue(parent: String, key: String): YValue? {
+        ensureThreadAccess()
         return currentMapItem(parent, key)
             ?.takeIf { item -> !item.deleted }
             ?.content
@@ -1078,6 +1192,7 @@ class YDoc(
     }
 
     internal fun visibleMap(parent: String): Map<String, YValue> {
+        ensureThreadAccess()
         return mapKeysInInsertionOrder(parent)
             .mapNotNull { key -> visibleMapValue(parent, key)?.let { key to it } }
             .toMap(linkedMapOf())
@@ -1089,6 +1204,7 @@ class YDoc(
             .toMap(linkedMapOf())
 
     internal fun mapValueAtSnapshot(type: AbstractYType, key: String, snapshot: Snapshot): YValue? {
+        ensureThreadAccess()
         require(type.doc === this) { "type must belong to this document" }
         val item = mapItemOrder(type.name, key)
             .asReversed()
@@ -1099,6 +1215,7 @@ class YDoc(
     }
 
     internal fun mapAtSnapshot(type: AbstractYType, snapshot: Snapshot): Map<String, YValue> {
+        ensureThreadAccess()
         require(type.doc === this) { "type must belong to this document" }
         return mapKeysInInsertionOrder(type.name)
             .mapNotNull { key -> mapValueAtSnapshot(type, key, snapshot)?.let { key to it } }
@@ -1146,8 +1263,10 @@ class YDoc(
         else -> null
     }
 
-    internal fun mapItemOrder(parent: String, key: String): List<StoreItem> =
-        store.cachedMapOrder(parent, key) { buildMapItemOrder(parent, key) }
+    internal fun mapItemOrder(parent: String, key: String): List<StoreItem> {
+        ensureThreadAccess()
+        return store.cachedMapOrder(parent, key) { buildMapItemOrder(parent, key) }
+    }
 
     private fun buildMapItemOrder(parent: String, key: String): List<StoreItem> {
         val entries = store.mapEntries(parent, key)
@@ -2822,6 +2941,7 @@ class YDoc(
     }
 
     private fun <T : AbstractYType> getOrCreate(name: String, kind: RootKind, factory: () -> T): T {
+        ensureThreadAccess()
         val existing = rootTypes[name]
         if (existing != null) {
             require(existing.kind == kind) { "root type '$name' already exists as ${existing.kind}" }
@@ -2861,6 +2981,7 @@ class YDoc(
     }
 
     private fun <T : AbstractYType> createNestedType(kind: RootKind, factory: (String) -> T): T {
+        ensureThreadAccess()
         val name = nextNestedTypeName()
         return factory(name).also { type ->
             check(type.kind == kind) { "nested type factory returned ${type.kind}, expected $kind" }
@@ -3182,13 +3303,16 @@ class YDoc(
             ref.shouldLoad || ref.autoLoad
         }
         return YDoc(
-            guid = ref.guid,
-            gc = ref.gc,
-            collectionId = ref.collectionId,
-            meta = ref.meta.toAny(),
-            shouldLoad = shouldLoad,
-            autoLoad = ref.autoLoad,
-            isSuggestionDoc = ref.isSuggestionDoc,
+            YDocOptions(
+                guid = ref.guid,
+                gc = ref.gc,
+                collectionId = ref.collectionId,
+                meta = ref.meta.toAny(),
+                shouldLoad = shouldLoad,
+                autoLoad = ref.autoLoad,
+                isSuggestionDoc = ref.isSuggestionDoc,
+            ),
+            YDocRuntimeOptions(updateLimits, threadAccessPolicy),
         ).also { subdoc ->
             subdocsByInstanceId[ref.instanceId] = subdoc
             subdoc.parentDocs.add(this)

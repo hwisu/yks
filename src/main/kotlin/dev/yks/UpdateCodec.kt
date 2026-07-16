@@ -48,22 +48,31 @@ internal object LegacyUpdateCodec {
         return encoder
     }
 
-    fun decode(bytes: ByteArray): DocumentUpdate =
-        decode(BinaryDecoder(bytes))
+    fun decode(
+        bytes: ByteArray,
+        maxStructs: Int = MAX_DECODED_COLLECTION_SIZE,
+        maxDeleteRanges: Int = MAX_DECODED_COLLECTION_SIZE,
+    ): DocumentUpdate = decode(BinaryDecoder(bytes), maxStructs, maxDeleteRanges)
 
-    fun decode(decoder: BinaryDecoder): DocumentUpdate {
+    fun decode(
+        decoder: BinaryDecoder,
+        maxStructs: Int = MAX_DECODED_COLLECTION_SIZE,
+        maxDeleteRanges: Int = MAX_DECODED_COLLECTION_SIZE,
+    ): DocumentUpdate {
         check(decoder.readByte() == 'Y'.code && decoder.readByte() == 'K'.code && decoder.readByte() == 'S'.code) {
             "unsupported update format"
         }
         val version = decoder.readByte()
         check(version in 1..5) { "unsupported legacy update version: $version" }
+        val budget = DecodedUpdateBudget(maxStructs, maxDeleteRanges)
         val itemCount = decoder.readVarUInt().toDecodedCount()
+        budget.structs.consume(itemCount)
         val items = buildList {
             repeat(itemCount) {
                 add(readItem(decoder, version))
             }
         }
-        val deleteSet = readDeleteSet(decoder)
+        val deleteSet = readDeleteSet(decoder, budget.deleteRanges)
         check(!decoder.hasRemaining()) { "update has trailing bytes" }
         return DocumentUpdate(items, deleteSet)
     }
@@ -337,12 +346,13 @@ internal object LegacyUpdateCodec {
         }
     }
 
-    private fun readDeleteSet(decoder: BinaryDecoder): DeleteSet {
+    private fun readDeleteSet(decoder: BinaryDecoder, rangeBudget: DecodedCountBudget): DeleteSet {
         val deleteSet = DeleteSet.empty()
         val clientCount = decoder.readVarUInt().toDecodedCount()
         repeat(clientCount) {
             val client = decoder.readVarUInt()
             val rangeCount = decoder.readVarUInt().toDecodedCount()
+            rangeBudget.consume(rangeCount)
             repeat(rangeCount) {
                 val clock = decoder.readVarUInt()
                 val length = decoder.readVarUInt()

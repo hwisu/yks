@@ -83,12 +83,12 @@ fun encodeStateVectorV2(doc: YDoc, encoder: IdSetEncoderV1 = IdSetEncoderV2()): 
     return encoder.toByteArray()
 }
 
-fun decodeStateVector(bytes: ByteArray): StateVector {
-    if (bytes.isEmpty()) return emptyMap()
+fun decodeStateVector(bytes: ByteArray): StateVector = decodeBoundary("Yjs state vector") {
+    if (bytes.isEmpty()) return@decodeBoundary emptyMap()
     val decoder = BinaryDecoder(bytes)
     val stateVector = readStateVector(decoder)
     check(!decoder.hasRemaining()) { "state vector has trailing bytes" }
-    return stateVector
+    stateVector
 }
 
 fun decodeStateVectorV2(bytes: ByteArray): StateVector = decodeStateVector(bytes)

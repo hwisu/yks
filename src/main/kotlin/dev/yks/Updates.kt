@@ -15,17 +15,9 @@ data class YDocOptions(
 ) {
     val collectionid: String? get() = collectionId
 
-    fun toDoc(): YDoc = YDoc(
-        clientId = clientId,
-        guid = guid,
-        collectionId = collectionId,
-        gc = gc,
-        gcFilter = gcFilter,
-        meta = meta,
-        shouldLoad = shouldLoad,
-        autoLoad = autoLoad,
-        isSuggestionDoc = isSuggestionDoc,
-    )
+    fun toDoc(): YDoc = YDoc(this)
+
+    fun toDoc(runtimeOptions: YDocRuntimeOptions): YDoc = YDoc(this, runtimeOptions)
 }
 
 fun applyUpdate(doc: YDoc, update: ByteArray, origin: Any? = null) {
@@ -33,7 +25,7 @@ fun applyUpdate(doc: YDoc, update: ByteArray, origin: Any? = null) {
 }
 
 fun applyUpdateV2(doc: YDoc, update: ByteArray, origin: Any? = null) {
-    doc.applyUpdate(UpdateCodec.decodeV2(update), origin)
+    doc.applyUpdateV2(update, origin)
 }
 
 fun readUpdate(doc: YDoc, update: ByteArray, origin: Any? = null) {
@@ -41,7 +33,7 @@ fun readUpdate(doc: YDoc, update: ByteArray, origin: Any? = null) {
 }
 
 fun readUpdate(decoder: BinaryDecoder, doc: YDoc, origin: Any? = null) {
-    doc.applyUpdate(UpdateCodec.decode(decoder), origin)
+    doc.applyUpdate(decoder.readRemainingBytes(), origin)
 }
 
 fun readUpdate(decoder: UpdateDecoderV1, doc: YDoc, origin: Any? = null) {
@@ -53,11 +45,18 @@ fun readUpdateV2(doc: YDoc, update: ByteArray, origin: Any? = null) {
 }
 
 fun readUpdateV2(decoder: BinaryDecoder, doc: YDoc, origin: Any? = null) {
-    doc.applyUpdate(UpdateCodec.decodeV2(decoder.readRemainingBytes()), origin)
+    doc.applyUpdateV2(decoder.readRemainingBytes(), origin)
 }
 
 fun readUpdateV2(decoder: UpdateDecoderV2, doc: YDoc, origin: Any? = null) {
-    doc.applyUpdate(UpdateCodec.decodeV2(decoder), origin)
+    doc.applyUpdate(
+        UpdateCodec.decodeV2(
+            decoder,
+            maxStructs = doc.updateLimits.maxStructs,
+            maxDeleteRanges = doc.updateLimits.maxDeleteRanges,
+        ),
+        origin,
+    )
 }
 
 fun encodeStateAsUpdate(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =

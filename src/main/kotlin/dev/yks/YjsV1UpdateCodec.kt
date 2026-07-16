@@ -130,32 +130,53 @@ internal object UpdateCodec {
         return encoder
     }
 
-    fun decode(bytes: ByteArray): DocumentUpdate {
-        if (bytes.hasLegacyMagic()) return LegacyUpdateCodec.decode(bytes)
-        return decodeV1(BinaryDecoder(bytes))
+    fun decode(
+        bytes: ByteArray,
+        maxStructs: Int = MAX_DECODED_COLLECTION_SIZE,
+        maxDeleteRanges: Int = MAX_DECODED_COLLECTION_SIZE,
+    ): DocumentUpdate = decodeBoundary("Yjs update V1") {
+        val budget = DecodedUpdateBudget(maxStructs, maxDeleteRanges)
+        if (bytes.hasLegacyMagic()) LegacyUpdateCodec.decode(bytes, maxStructs, maxDeleteRanges)
+        else decodeV1(BinaryDecoder(bytes), budget = budget)
     }
 
-    fun parseMeta(bytes: ByteArray): UpdateMeta {
-        if (bytes.hasLegacyMagic()) return LegacyUpdateCodec.decode(bytes).toUpdateMeta()
+    fun parseMeta(bytes: ByteArray): UpdateMeta = decodeBoundary("Yjs update V1 metadata") {
+        if (bytes.hasLegacyMagic()) return@decodeBoundary LegacyUpdateCodec.decode(bytes).toUpdateMeta()
         val from = linkedMapOf<Long, Long>()
         val to = linkedMapOf<Long, Long>()
         decodeV1(BinaryDecoder(bytes), from, to)
-        return UpdateMeta(from, to)
+        UpdateMeta(from, to)
     }
 
-    fun decode(decoder: BinaryDecoder): DocumentUpdate = decode(decoder.readRemainingBytes())
+    fun decode(
+        decoder: BinaryDecoder,
+        maxStructs: Int = MAX_DECODED_COLLECTION_SIZE,
+        maxDeleteRanges: Int = MAX_DECODED_COLLECTION_SIZE,
+    ): DocumentUpdate = decode(decoder.readRemainingBytes(), maxStructs, maxDeleteRanges)
 
-    fun decodeV2(bytes: ByteArray): DocumentUpdate {
-        if (bytes.isNotEmpty() && bytes[0] != 0.toByte()) return decode(bytes)
-        return decodeZeroPrefixedV2OrV1(
-            decodeV2 = { decodeV2(UpdateDecoderV2(bytes)) },
-            decodeV1 = { decode(bytes) },
+    fun decodeV2(
+        bytes: ByteArray,
+        maxStructs: Int = MAX_DECODED_COLLECTION_SIZE,
+        maxDeleteRanges: Int = MAX_DECODED_COLLECTION_SIZE,
+    ): DocumentUpdate = decodeBoundary("Yjs update V2") {
+        if (bytes.isNotEmpty() && bytes[0] != 0.toByte()) {
+            return@decodeBoundary decode(bytes, maxStructs, maxDeleteRanges)
+        }
+        decodeZeroPrefixedV2OrV1(
+            decodeV2 = {
+                decodeV2(
+                    UpdateDecoderV2(bytes),
+                    maxStructs = maxStructs,
+                    maxDeleteRanges = maxDeleteRanges,
+                )
+            },
+            decodeV1 = { decode(bytes, maxStructs, maxDeleteRanges) },
         )
     }
 
-    fun parseMetaV2(bytes: ByteArray): UpdateMeta {
-        if (bytes.isNotEmpty() && bytes[0] != 0.toByte()) return parseMeta(bytes)
-        return decodeZeroPrefixedV2OrV1(
+    fun parseMetaV2(bytes: ByteArray): UpdateMeta = decodeBoundary("Yjs update V2 metadata") {
+        if (bytes.isNotEmpty() && bytes[0] != 0.toByte()) return@decodeBoundary parseMeta(bytes)
+        decodeZeroPrefixedV2OrV1(
             decodeV2 = {
                 val from = linkedMapOf<Long, Long>()
                 val to = linkedMapOf<Long, Long>()
@@ -177,6 +198,8 @@ internal object UpdateCodec {
         decodeV1: () -> T,
     ): T = try {
         decodeV2()
+    } catch (limitError: YksUpdateLimitException) {
+        throw limitError
     } catch (v2Error: RuntimeException) {
         try {
             decodeV1()
@@ -190,11 +213,17 @@ internal object UpdateCodec {
         decoder: UpdateDecoderV2,
         metaFrom: MutableMap<Long, Long>? = null,
         metaTo: MutableMap<Long, Long>? = null,
-    ): DocumentUpdate {
-        if (decoder.usesLegacyRest) return decode(decoder.restDecoder)
+        maxStructs: Int = MAX_DECODED_COLLECTION_SIZE,
+        maxDeleteRanges: Int = MAX_DECODED_COLLECTION_SIZE,
+    ): DocumentUpdate = decodeBoundary("Yjs update V2") {
+        if (decoder.usesLegacyRest) {
+            return@decodeBoundary decode(decoder.restDecoder, maxStructs, maxDeleteRanges)
+        }
+        val budget = DecodedUpdateBudget(maxStructs, maxDeleteRanges)
         val structs = mutableListOf<DecodedWireItem>()
         repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
             val numberOfStructs = decoder.restDecoder.readVarUInt().toDecodedCount()
+            budget.structs.consume(numberOfStructs)
             val client = decoder.readClient()
             var clock = decoder.restDecoder.readVarUInt()
             recordMetaStart(metaFrom, client, clock)
@@ -245,22 +274,29 @@ internal object UpdateCodec {
         repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
             decoder.resetDsCurVal()
             val client = decoder.restDecoder.readVarUInt()
-            repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
+            val rangeCount = decoder.restDecoder.readVarUInt().toDecodedCount()
+            budget.deleteRanges.consume(rangeCount)
+            repeat(rangeCount) {
                 deleteSet.add(Id(client, decoder.readDsClock()), decoder.readDsLen())
             }
         }
         check(!decoder.hasRemaining()) { "V2 update has trailing rest-stream bytes" }
-        return DocumentUpdate(structs.toStoreItems(), deleteSet)
+        DocumentUpdate(structs.toStoreItems(), deleteSet)
     }
 
     private fun decodeV1(
         decoder: BinaryDecoder,
         metaFrom: MutableMap<Long, Long>? = null,
         metaTo: MutableMap<Long, Long>? = null,
+        budget: DecodedUpdateBudget = DecodedUpdateBudget(
+            MAX_DECODED_COLLECTION_SIZE,
+            MAX_DECODED_COLLECTION_SIZE,
+        ),
     ): DocumentUpdate {
         val structs = mutableListOf<DecodedWireItem>()
         repeat(decoder.readVarUInt().toDecodedCount()) {
             val numberOfStructs = decoder.readVarUInt().toDecodedCount()
+            budget.structs.consume(numberOfStructs)
             val client = decoder.readVarUInt()
             var clock = decoder.readVarUInt()
             recordMetaStart(metaFrom, client, clock)
@@ -311,7 +347,7 @@ internal object UpdateCodec {
             }
             recordMetaEnd(metaTo, client, clock)
         }
-        val deleteSet = readDeleteSet(decoder)
+        val deleteSet = readDeleteSet(decoder, budget.deleteRanges)
         check(!decoder.hasRemaining()) { "update has trailing bytes" }
         return DocumentUpdate(structs.toStoreItems(), deleteSet)
     }
@@ -600,11 +636,13 @@ internal object UpdateCodec {
         }
     }
 
-    private fun readDeleteSet(decoder: BinaryDecoder): DeleteSet {
+    private fun readDeleteSet(decoder: BinaryDecoder, rangeBudget: DecodedCountBudget): DeleteSet {
         val deleteSet = DeleteSet.empty()
         repeat(decoder.readVarUInt().toDecodedCount()) {
             val client = decoder.readVarUInt()
-            repeat(decoder.readVarUInt().toDecodedCount()) {
+            val rangeCount = decoder.readVarUInt().toDecodedCount()
+            rangeBudget.consume(rangeCount)
+            repeat(rangeCount) {
                 deleteSet.add(Id(client, decoder.readVarUInt()), decoder.readVarUInt())
             }
         }

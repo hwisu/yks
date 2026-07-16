@@ -186,9 +186,36 @@ API fails explicitly until it becomes representable.
 ## Concurrency and untrusted input
 
 `YDoc` and document-owned shared types are mutable and thread-confined, as they
-are in Yjs. Serialize access when multiple JVM threads can reach the same
-document. Encoded update/state-vector byte arrays and copied value snapshots are
-the supported hand-off boundaries between threads.
+are in Yjs. By default, the first CRDT operation lazily binds a document to the
+current thread; later access from another thread throws
+`YksThreadConfinementException`. Encoded update/state-vector byte arrays and
+copied value snapshots are the supported hand-off boundaries between threads.
+`YThreadAccessPolicy.UNCHECKED` disables the runtime check only for callers that
+already serialize every access externally; it does not make a document safe for
+concurrent use.
+
+External update application has immutable, per-document resource limits:
+
+```kotlin
+val doc = YDoc(
+    YDocOptions(),
+    YDocRuntimeOptions(
+        updateLimits = YUpdateLimits(
+            maxEncodedBytes = 8 * 1024 * 1024,
+            maxStructs = 50_000,
+            maxDeleteRanges = 50_000,
+        ),
+    ),
+)
+```
+
+The defaults are 16 MiB of encoded bytes, 50,000 decoded structs, and 50,000
+delete ranges. Limits are checked before document mutation and report
+`YksUpdateLimitException`.
+Malformed update/state-vector input reports `YksDecodingException` with the
+original decoder failure retained as its cause. Applications should still set
+limits appropriate to their protocol and add request deadlines, concurrency
+limits, and rate limiting at the transport boundary.
 
 Public `DeleteSet`, `IdSet`, and `IdMap` collection properties return defensive
 snapshots; use their mutation methods instead of editing returned collections.

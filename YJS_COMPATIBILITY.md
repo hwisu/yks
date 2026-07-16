@@ -115,5 +115,19 @@ V1/V2 APIs and use explicit typed getters for remotely created roots. Kotlin-onl
 peers may additionally opt into the lossless and extension APIs.
 
 `YDoc` and attached shared types are thread-confined mutable objects, matching
-the Yjs execution model. JVM applications must serialize cross-thread access and
-use encoded bytes or copied snapshots as hand-off values.
+the Yjs execution model. The default `ENFORCED` policy lazily binds the document
+on its first CRDT operation and rejects other threads with
+`YksThreadConfinementException`. `UNCHECKED` is an explicit Kotlin/JVM escape
+hatch for callers that provide external serialization; it does not add internal
+locking. JVM applications should use encoded bytes or copied snapshots as
+hand-off values.
+
+Yjs itself does not impose transport resource limits. YKS adds configurable
+`YUpdateLimits` at the document-application boundary as a secure JVM adaptation.
+Encoded byte, decoded struct, and delete-range limits are enforced before
+mutation, so a rejected V1/V2 update leaves document and pending-delete state
+unchanged. This means a valid but over-limit Yjs update must be chunked or
+applied to a document configured with a larger budget. Malformed
+update/state-vector payloads use the stable
+`YksDecodingException` boundary, while limit and thread violations have their
+own typed exceptions.

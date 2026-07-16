@@ -64,9 +64,12 @@ class CodecValueCorrectnessTest {
             encoder.writeVarUInt(length)
         }.toByteArray()
 
-        val doc = YDoc(clientId = 2)
-        assertTimeoutPreemptively(Duration.ofSeconds(2)) { applyUpdate(doc, update) }
-        assertTrue(doc.store.pendingDs != null)
+        val hasPendingDeleteSet = assertTimeoutPreemptively(Duration.ofSeconds(2)) {
+            val doc = YDoc(clientId = 2)
+            applyUpdate(doc, update)
+            doc.store.pendingDs != null
+        }
+        assertTrue(hasPendingDeleteSet)
     }
 
     @Test

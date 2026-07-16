@@ -74,6 +74,8 @@ class DeleteSet internal constructor(
         clientRanges.clear()
     }
 
+    internal fun rangeCount(): Int = clientRanges.values.sumOf { ranges -> ranges.size }
+
     companion object {
         fun empty(): DeleteSet = DeleteSet()
     }

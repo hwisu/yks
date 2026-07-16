@@ -2,6 +2,7 @@ package dev.yks
 
 import java.time.Duration
 import java.util.Base64
+import org.junit.jupiter.api.assertTimeout
 import org.junit.jupiter.api.assertTimeoutPreemptively
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -78,29 +79,32 @@ class StructStoreTest {
         assertEquals(5_000, decodeUpdate(update).structs.size)
         assertTrue(update.size < 64_000)
 
-        val target = assertTimeoutPreemptively(Duration.ofSeconds(2)) {
-            YDoc(clientId = 2).also { doc -> doc.applyUpdate(update) }
+        val result = assertTimeoutPreemptively(Duration.ofSeconds(2)) {
+            val target = YDoc(clientId = 2).also { doc -> doc.applyUpdate(update) }
+            listOf(
+                target.getText("left").length,
+                target.getText("right").length,
+                target.getText("left").toString(),
+                target.getText("right").toString(),
+            )
         }
-        assertEquals(2_500, target.getText("left").length)
-        assertEquals(2_500, target.getText("right").length)
-        assertEquals("x".repeat(2_500), target.getText("left").toString())
-        assertEquals("x".repeat(2_500), target.getText("right").toString())
+        assertEquals(listOf(2_500, 2_500, "x".repeat(2_500), "x".repeat(2_500)), result)
     }
 
     @Test
     fun sequentialTextAppendsStayPackedAndLengthReadsStayCheap() {
-        val doc = assertTimeoutPreemptively(Duration.ofSeconds(2)) {
-            YDoc(clientId = 1).also { created ->
-                val text = created.getText("body")
-                repeat(5_000) { text.insert(text.length, "x") }
-            }
-        }
-        val text = doc.getText("body")
+        assertTimeoutPreemptively(Duration.ofSeconds(2)) {
+            val doc = YDoc(clientId = 1)
+            val text = doc.getText("body")
+            repeat(5_000) { text.insert(text.length, "x") }
 
-        assertEquals(1, doc.store.clients.getValue(1).size)
-        assertEquals(5_000L, doc.store.clients.getValue(1).single().length)
-        assertTimeoutPreemptively(Duration.ofSeconds(1)) {
-            repeat(20_000) { assertEquals(5_000, text.length) }
+            assertEquals(1, doc.store.clients.getValue(1).size)
+            assertEquals(5_000L, doc.store.clients.getValue(1).single().length)
+            assertTimeout(Duration.ofSeconds(1)) {
+                repeat(20_000) {
+                    assertEquals(5_000, text.length)
+                }
+            }
         }
     }
 
