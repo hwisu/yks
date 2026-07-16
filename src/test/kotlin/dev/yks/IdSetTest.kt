@@ -9,6 +9,21 @@ import kotlin.test.assertTrue
 
 class IdSetTest {
     @Test
+    fun constructorInputsAndPublicViewsCannotCorruptNormalizedState() {
+        val sourceRanges = mutableListOf(IdRange(5, 1), IdRange(0, 2))
+        val source = mutableMapOf<Long, List<IdRange>>(1L to sourceRanges)
+        val idSet = IdSet(source)
+
+        sourceRanges.clear()
+        source.clear()
+        @Suppress("UNCHECKED_CAST")
+        (idSet.clients as MutableMap<Long, List<IdRange>>).clear()
+
+        assertEquals(listOf(IdRange(0, 2), IdRange(5, 1)), idSet.ranges(1))
+        assertTrue(idSet.has(1, 5))
+    }
+
+    @Test
     fun idSetCanBeConstructedAndIteratedLikeUpstreamExport() {
         val idSet = IdSet()
         val seen = mutableListOf<Pair<Long, IdRange>>()

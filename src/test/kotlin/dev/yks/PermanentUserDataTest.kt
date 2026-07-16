@@ -33,7 +33,8 @@ class PermanentUserDataTest {
         permanentUserData.setUserMapping(doc, 7, "alice")
         val text = doc.getText("body")
         text.insert(0, "abc")
-        val deletedId = getTypeStructs(text)[1].id
+        val textItem = getTypeStructs(text).single()
+        val deletedId = Id(textItem.id.client, textItem.id.clock + 1)
 
         text.delete(1, 1)
 
@@ -61,7 +62,8 @@ class PermanentUserDataTest {
         sourceUserData.setUserMapping(source, 22, "bob")
         val text = source.getText("body")
         text.insert(0, "hello")
-        val deletedId = getTypeStructs(text)[1].id
+        val textItem = getTypeStructs(text).single()
+        val deletedId = Id(textItem.id.client, textItem.id.clock + 1)
         text.delete(1, 1)
 
         val update = encodeStateAsUpdate(source)

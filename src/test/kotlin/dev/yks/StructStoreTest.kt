@@ -11,6 +11,54 @@ import kotlin.test.assertTrue
 
 class StructStoreTest {
     @Test
+    fun longTextUsesOnePackedStructAndNearPayloadSizedStandardUpdate() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val payload = "x".repeat(20_000)
+
+        text.insert(0, payload)
+
+        val structs = doc.store.clients.getValue(1)
+        val update = doc.encodeStateAsUpdate()
+        assertEquals(1, structs.size)
+        assertEquals(20_000L, structs.single().length)
+        assertEquals(payload, (structs.single().content as ContentString).str)
+        assertTrue(update.size < payload.encodeToByteArray().size + 128)
+        assertEquals(payload, createDocFromUpdate(update).getText("body").toString())
+    }
+
+    @Test
+    fun editingPackedTextSplitsOnlyAtEditBoundaries() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        text.insert(0, "a".repeat(10_000) + "b".repeat(10_000))
+
+        text.insert(10_000, "Z")
+        text.delete(9_999, 3)
+
+        assertEquals("a".repeat(9_999) + "b".repeat(9_999), text.toString())
+        assertTrue(doc.store.clients.getValue(1).size < 10)
+        assertEquals(text.toString(), createDocFromUpdate(doc.encodeStateAsUpdate()).getText("body").toString())
+    }
+
+    @Test
+    fun materializedSequenceIsMaintainedIncrementallyAcrossEdits() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        text.insert(0, "seed")
+        text.toString()
+        val buildsAfterMaterialization = doc.store.sequenceBuildCount
+
+        repeat(200) {
+            text.insert(text.length, "x")
+            text.toString()
+        }
+
+        assertEquals("seed" + "x".repeat(200), text.toString())
+        assertEquals(buildsAfterMaterialization, doc.store.sequenceBuildCount)
+    }
+
+    @Test
     fun sequenceMatchesYjsGlobalConflictOrdering() {
         val updates = listOf(
             "AQEKAAgBAWEBdwJvYQA=",
@@ -155,6 +203,25 @@ class StructStoreTest {
 
         assertEquals("", target.getText("body").toString())
         assertTrue(target.store.ds.hasId(Id(1, 0)))
+        assertNull(target.store.pendingDs)
+    }
+
+    @Test
+    fun pendingDeleteInsidePackedTextAppliesAfterTheTextArrives() {
+        val source = YDoc(clientId = 1, gc = false)
+        val text = source.getText("body")
+        text.insert(0, "A😀BC")
+        val base = source.encodeStateAsUpdate()
+        val insertedState = source.encodeStateVector()
+        text.delete(3, 1)
+        val deletion = source.encodeStateAsUpdate(insertedState)
+        val target = YDoc(clientId = 2, gc = false)
+
+        target.applyUpdate(deletion)
+        assertNotNull(target.store.pendingDs)
+        target.applyUpdate(base)
+
+        assertEquals("A😀C", target.getText("body").toString())
         assertNull(target.store.pendingDs)
     }
 

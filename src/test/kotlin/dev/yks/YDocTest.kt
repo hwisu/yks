@@ -341,8 +341,9 @@ class YDocTest {
         }
 
         val event = events.first()
-        assertEquals(listOf(Id(1, 0), Id(1, 1)), event.addedStructs.map { it.id })
-        assertEquals(listOf(false, true), event.addedStructs.map { it.deleted })
+        assertEquals(listOf(Id(1, 0)), event.addedStructs.map { it.id })
+        assertEquals(listOf(2L), event.addedStructs.map { it.length })
+        assertEquals(listOf(false), event.addedStructs.map { it.deleted })
         assertEquals(listOf(Id(1, 1)), event.deletedStructs.map { it.id })
         assertTrue(event.deleteIdSet.has(1, 1))
         assertTrue(event.cleanUps.isEmpty())

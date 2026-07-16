@@ -6,6 +6,42 @@ import java.nio.charset.CodingErrorAction
 
 internal const val MAX_DECODED_COLLECTION_SIZE: Int = 1_000_000
 internal const val MAX_DECODED_BINARY_SIZE: Int = 64 * 1024 * 1024
+internal const val MAX_DECODED_NESTING_DEPTH: Int = 256
+internal const val MAX_DECODED_VALUE_NODES: Int = 1_000_000
+internal const val MAX_DECODED_TOTAL_PAYLOAD_SIZE: Long = 128L * 1024 * 1024
+
+internal class DecodeBudget {
+    private var depth = 0
+    private var nodes = 0
+    private var payloadBytes = 0L
+
+    fun consumeNode() {
+        check(nodes < MAX_DECODED_VALUE_NODES) {
+            "decoded value node count exceeds limit $MAX_DECODED_VALUE_NODES"
+        }
+        nodes++
+    }
+
+    fun consumePayloadBytes(length: Int) {
+        check(length >= 0) { "decoded payload length must be non-negative: $length" }
+        payloadBytes = checkedClockAdd(payloadBytes, length.toLong(), "decoded payload size")
+        check(payloadBytes <= MAX_DECODED_TOTAL_PAYLOAD_SIZE) {
+            "decoded payload size exceeds limit $MAX_DECODED_TOTAL_PAYLOAD_SIZE: $payloadBytes"
+        }
+    }
+
+    fun <T> nested(block: () -> T): T {
+        check(depth < MAX_DECODED_NESTING_DEPTH) {
+            "decoded value nesting exceeds limit $MAX_DECODED_NESTING_DEPTH"
+        }
+        depth++
+        return try {
+            block()
+        } finally {
+            depth--
+        }
+    }
+}
 
 internal fun Long.toDecodedCount(
     label: String = "decoded count",
@@ -132,7 +168,11 @@ class BinaryEncoder {
     fun toByteArray(): ByteArray = out.toByteArray()
 }
 
-class BinaryDecoder(private val bytes: ByteArray) {
+class BinaryDecoder(
+    private val bytes: ByteArray,
+) {
+    internal val decodeBudget: DecodeBudget = DecodeBudget()
+
     private var offset = 0
 
     fun hasRemaining(): Boolean = offset < bytes.size
@@ -186,6 +226,7 @@ class BinaryDecoder(private val bytes: ByteArray) {
     fun readString(): String {
         val length = readVarUInt().toDecodedCount("string byte length", minOf(MAX_DECODED_BINARY_SIZE, bytes.size - offset))
         check(length <= bytes.size - offset) { "invalid string length: $length" }
+        decodeBudget.consumePayloadBytes(length)
         val decoder = Charsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT)
@@ -201,6 +242,7 @@ class BinaryDecoder(private val bytes: ByteArray) {
     fun readBytes(): ByteArray {
         val length = readVarUInt().toDecodedCount("byte array length", minOf(MAX_DECODED_BINARY_SIZE, bytes.size - offset))
         check(length <= bytes.size - offset) { "invalid byte array length: $length" }
+        decodeBudget.consumePayloadBytes(length)
         val value = bytes.copyOfRange(offset, offset + length)
         offset += length
         return value
@@ -225,6 +267,7 @@ class BinaryDecoder(private val bytes: ByteArray) {
     }
 
     fun readRemainingBytes(): ByteArray {
+        decodeBudget.consumePayloadBytes(bytes.size - offset)
         val value = bytes.copyOfRange(offset, bytes.size)
         offset = bytes.size
         return value

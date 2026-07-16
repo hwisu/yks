@@ -14,6 +14,31 @@ class IdMapTest {
     private val a3 = createContentAttribute("time", 1)
 
     @Test
+    fun constructorInputsAndPublicViewsCannotCorruptNormalizedState() {
+        val sourceRanges = mutableListOf(AttrRange(3, 1, listOf(a1)), AttrRange(0, 1, listOf(a2)))
+        val sourceClients = mutableMapOf<Long, List<AttrRange>>(1L to sourceRanges)
+        val sourceHashes = mutableMapOf(a3.hash() to a3)
+        val sourceAttributes = mutableSetOf(a3)
+        val map = IdMap(sourceClients, sourceHashes, sourceAttributes)
+
+        sourceRanges.clear()
+        sourceClients.clear()
+        sourceHashes.clear()
+        sourceAttributes.clear()
+        @Suppress("UNCHECKED_CAST")
+        (map.clients as MutableMap<Long, List<AttrRange>>).clear()
+        @Suppress("UNCHECKED_CAST")
+        (map.attrsH as MutableMap<String, ContentAttribute>).clear()
+
+        assertEquals(
+            listOf(1L to AttrRange(0, 1, listOf(a2)), 1L to AttrRange(3, 1, listOf(a1))),
+            map.ranges(),
+        )
+        assertTrue(map.attrs.containsAll(listOf(a1, a2, a3)))
+    }
+
+
+    @Test
     fun idMapCanBeConstructedAndIteratedLikeUpstreamExport() {
         val map = IdMap()
         val seen = mutableListOf<Pair<Long, AttrRange>>()

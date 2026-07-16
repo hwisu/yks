@@ -177,48 +177,53 @@ fun writeYValue(encoder: BinaryEncoder, value: YValue) {
     }
 }
 
-fun readYValue(decoder: BinaryDecoder): YValue = when (val tag = decoder.readByte()) {
-    0 -> YValue.Null
-    1 -> YValue.Bool(false)
-    2 -> YValue.Bool(true)
-    3 -> YValue.LongNumber(decoder.readVarInt())
-    4 -> {
-        var bits = 0L
-        repeat(Long.SIZE_BYTES) { index ->
-            bits = bits or (decoder.readByte().toLong() shl (index * 8))
-        }
-        YValue.DoubleNumber(java.lang.Double.longBitsToDouble(bits))
-    }
-    5 -> YValue.StringValue(decoder.readString())
-    6 -> YValue.BinaryValue(decoder.readBytes())
-    7 -> {
-        val size = decoder.readVarUInt().toDecodedCount()
-        YValue.ListValue(List(size) { readYValue(decoder) })
-    }
-    8 -> {
-        val size = decoder.readVarUInt().toDecodedCount()
-        YValue.MapValue(buildMap {
-            repeat(size) {
-                put(decoder.readString(), readYValue(decoder))
+fun readYValue(decoder: BinaryDecoder): YValue {
+    decoder.decodeBudget.consumeNode()
+    return when (val tag = decoder.readByte()) {
+        0 -> YValue.Null
+        1 -> YValue.Bool(false)
+        2 -> YValue.Bool(true)
+        3 -> YValue.LongNumber(decoder.readVarInt())
+        4 -> {
+            var bits = 0L
+            repeat(Long.SIZE_BYTES) { index ->
+                bits = bits or (decoder.readByte().toLong() shl (index * 8))
             }
-        })
+            YValue.DoubleNumber(java.lang.Double.longBitsToDouble(bits))
+        }
+        5 -> YValue.StringValue(decoder.readString())
+        6 -> YValue.BinaryValue(decoder.readBytes())
+        7 -> decoder.decodeBudget.nested {
+            val size = decoder.readVarUInt().toDecodedCount()
+            YValue.ListValue(List(size) { readYValue(decoder) })
+        }
+        8 -> decoder.decodeBudget.nested {
+            val size = decoder.readVarUInt().toDecodedCount()
+            YValue.MapValue(buildMap {
+                repeat(size) {
+                    put(decoder.readString(), readYValue(decoder))
+                }
+            })
+        }
+        9 -> {
+            val ordinal = decoder.readByte()
+            val kind = RootKind.entries.getOrNull(ordinal) ?: error("unknown type ref kind: $ordinal")
+            YValue.TypeRef(kind, decoder.readString())
+        }
+        10 -> decoder.decodeBudget.nested {
+            YValue.SubdocRef(
+                guid = decoder.readString(),
+                gc = decoder.readBoolean(),
+                shouldLoad = false,
+                autoLoad = decoder.readBoolean(),
+                instanceId = decoder.readString(),
+                collectionId = if (decoder.readBoolean()) decoder.readString() else null,
+                meta = readYValue(decoder),
+                isSuggestionDoc = decoder.readBoolean(),
+            )
+        }
+        11 -> YValue.Undefined
+        12 -> YValue.BigIntNumber(decoder.readString().toBigInteger())
+        else -> error("unknown YValue tag: $tag")
     }
-    9 -> {
-        val ordinal = decoder.readByte()
-        val kind = RootKind.entries.getOrNull(ordinal) ?: error("unknown type ref kind: $ordinal")
-        YValue.TypeRef(kind, decoder.readString())
-    }
-    10 -> YValue.SubdocRef(
-        guid = decoder.readString(),
-        gc = decoder.readBoolean(),
-        shouldLoad = false,
-        autoLoad = decoder.readBoolean(),
-        instanceId = decoder.readString(),
-        collectionId = if (decoder.readBoolean()) decoder.readString() else null,
-        meta = readYValue(decoder),
-        isSuggestionDoc = decoder.readBoolean(),
-    )
-    11 -> YValue.Undefined
-    12 -> YValue.BigIntNumber(decoder.readString().toBigInteger())
-    else -> error("unknown YValue tag: $tag")
 }

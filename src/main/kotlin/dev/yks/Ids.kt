@@ -83,9 +83,20 @@ fun findRangeStartInIdRanges(ranges: List<IdRange>, clock: Long): Int? {
 }
 
 class IdSet(
-    val clients: MutableMap<Long, MutableList<IdRange>> = linkedMapOf(),
+    clients: Map<Long, List<IdRange>> = emptyMap(),
 ) {
-    fun isEmpty(): Boolean = clients.values.all { it.isEmpty() }
+    private val clientRanges: MutableMap<Long, MutableList<IdRange>> = linkedMapOf()
+
+    init {
+        clients.forEach { (client, ranges) ->
+            ranges.forEach { range -> add(client, range.clock, range.len) }
+        }
+    }
+
+    val clients: Map<Long, List<IdRange>>
+        get() = clientRanges.mapValues { (_, ranges) -> ranges.toList() }
+
+    fun isEmpty(): Boolean = clientRanges.values.all { it.isEmpty() }
 
     fun forEach(action: (range: IdRange, client: Long) -> Unit) {
         ranges().forEach { (client, range) -> action(range, client) }
@@ -96,7 +107,7 @@ class IdSet(
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return
-        clients.getOrPut(client) { mutableListOf() }.addAndMerge(IdRange(clock, len))
+        clientRanges.getOrPut(client) { mutableListOf() }.addAndMerge(IdRange(clock, len))
     }
 
     fun add(id: Id, len: Long = 1) {
@@ -107,7 +118,7 @@ class IdSet(
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return
-        val ranges = clients[client] ?: return
+        val ranges = clientRanges[client] ?: return
         val deleteEnd = checkedClockAdd(clock, len, "id-set delete end")
         val next = mutableListOf<IdRange>()
         ranges.forEach { range ->
@@ -124,14 +135,14 @@ class IdSet(
             }
         }
         if (next.isEmpty()) {
-            clients.remove(client)
+            clientRanges.remove(client)
         } else {
-            clients[client] = next
+            clientRanges[client] = next
         }
     }
 
     fun has(client: Long, clock: Long): Boolean =
-        clients[client]?.let { ranges -> findIndexInIdRanges(ranges, clock) != null } == true
+        clientRanges[client]?.let { ranges -> findIndexInIdRanges(ranges, clock) != null } == true
 
     fun hasId(id: Id): Boolean = has(id.client, id.clock)
 
@@ -140,7 +151,7 @@ class IdSet(
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return false
         val end = checkedClockAdd(clock, len, "id-set intersection end")
-        val ranges = clients[client] ?: return false
+        val ranges = clientRanges[client] ?: return false
         val index = findRangeStartInIdRanges(ranges, clock) ?: return false
         return ranges[index].clock < end
     }
@@ -180,16 +191,16 @@ class IdSet(
         return result
     }
 
-    fun ranges(client: Long): List<IdRange> = clients[client].orEmpty()
+    fun ranges(client: Long): List<IdRange> = clientRanges[client]?.toList().orEmpty()
 
     fun ranges(): List<Pair<Long, IdRange>> = buildList {
-        clients.keys.sorted().forEach { client ->
-            clients.getValue(client).forEach { range -> add(client to range) }
+        clientRanges.keys.sorted().forEach { client ->
+            clientRanges.getValue(client).forEach { range -> add(client to range) }
         }
     }
 
     internal fun copy(): IdSet =
-        IdSet(clients.mapValuesTo(linkedMapOf()) { (_, ranges) -> ranges.toMutableList() })
+        IdSet(clientRanges.mapValuesTo(linkedMapOf()) { (_, ranges) -> ranges.toList() })
 }
 
 private fun MutableList<IdRange>.addAndMerge(incoming: IdRange) {
@@ -453,17 +464,32 @@ class AttrRanges(ids: List<AttrRange> = emptyList()) {
 }
 
 class IdMap(
-    val clients: MutableMap<Long, MutableList<AttrRange>> = linkedMapOf(),
-    val attrsH: MutableMap<String, ContentAttribute> = linkedMapOf(),
-    val attrs: MutableSet<ContentAttribute> = linkedSetOf(),
+    clients: Map<Long, List<AttrRange>> = emptyMap(),
+    attrsH: Map<String, ContentAttribute> = emptyMap(),
+    attrs: Set<ContentAttribute> = emptySet(),
 ) {
+    private val clientRanges: MutableMap<Long, MutableList<AttrRange>> = linkedMapOf()
+    private val attributeHashes: MutableMap<String, ContentAttribute> = linkedMapOf()
+    private val attributes: MutableSet<ContentAttribute> = linkedSetOf()
+
     init {
-        clients.values.flatten().forEach { range ->
-            range.attrs.forEach(::cacheAttribute)
+        attrsH.values.forEach(::cacheAttribute)
+        attrs.forEach(::cacheAttribute)
+        clients.forEach { (client, ranges) ->
+            ranges.forEach { range -> add(client, range.clock, range.len, range.attrs) }
         }
     }
 
-    fun isEmpty(): Boolean = clients.values.all { it.isEmpty() }
+    val clients: Map<Long, List<AttrRange>>
+        get() = clientRanges.mapValues { (_, ranges) -> ranges.toList() }
+
+    val attrsH: Map<String, ContentAttribute>
+        get() = attributeHashes.toMap()
+
+    val attrs: Set<ContentAttribute>
+        get() = attributes.toSet()
+
+    fun isEmpty(): Boolean = clientRanges.values.all { it.isEmpty() }
 
     fun forEach(action: (range: AttrRange, client: Long) -> Unit) {
         ranges().forEach { (client, range) -> action(range, client) }
@@ -477,7 +503,7 @@ class IdMap(
         val range = AttrRange(clock, len, attrs)
         val checkedAttrs = attrs.map(::cacheAttribute).distinct()
         val storedRange = range.copy(attrs = checkedAttrs)
-        val ranges = clients.getOrPut(client) { mutableListOf() }
+        val ranges = clientRanges.getOrPut(client) { mutableListOf() }
         if (!ranges.addIfDisjoint(storedRange)) {
             ranges.add(storedRange)
             normalize(client)
@@ -488,7 +514,7 @@ class IdMap(
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return
-        val oldRanges = clients[client] ?: return
+        val oldRanges = clientRanges[client] ?: return
         val deleteEnd = checkedClockAdd(clock, len, "id-map delete end")
         val remaining = buildList {
             oldRanges.forEach { range ->
@@ -502,13 +528,13 @@ class IdMap(
             }
         }
         if (remaining.isEmpty()) {
-            clients.remove(client)
+            clientRanges.remove(client)
         } else {
-            clients[client] = remaining.toMutableList()
+            clientRanges[client] = remaining.toMutableList()
         }
     }
 
-    fun has(client: Long, clock: Long): Boolean = clients[client]?.findContainingIndex(clock) != null
+    fun has(client: Long, clock: Long): Boolean = clientRanges[client]?.findContainingIndex(clock) != null
 
     fun hasId(id: Id): Boolean = has(id.client, id.clock)
 
@@ -520,7 +546,7 @@ class IdMap(
 
         val result = mutableListOf<MaybeAttrRange>()
         var cursor = clock
-        val ranges = clients[client].orEmpty()
+        val ranges = clientRanges[client].orEmpty()
         val firstRangeIndex = ranges.findRangeStartIndex(clock) ?: ranges.size
         for (index in firstRangeIndex until ranges.size) {
             val range = ranges[index]
@@ -543,33 +569,33 @@ class IdMap(
 
     fun sliceId(id: Id, len: Long): List<MaybeAttrRange> = slice(id.client, id.clock, len)
 
-    fun ranges(client: Long): List<AttrRange> = clients[client].orEmpty()
+    fun ranges(client: Long): List<AttrRange> = clientRanges[client]?.toList().orEmpty()
 
     fun ranges(): List<Pair<Long, AttrRange>> = buildList {
-        clients.keys.sorted().forEach { client ->
-            clients.getValue(client).forEach { range -> add(client to range) }
+        clientRanges.keys.sorted().forEach { client ->
+            clientRanges.getValue(client).forEach { range -> add(client to range) }
         }
     }
 
     internal fun copy(): IdMap {
-        return IdMap(clients.mapValuesTo(linkedMapOf()) { (_, ranges) -> ranges.toMutableList() })
+        return IdMap(clientRanges.mapValuesTo(linkedMapOf()) { (_, ranges) -> ranges.toList() })
     }
 
     private fun cacheAttribute(attr: ContentAttribute): ContentAttribute {
         val hash = attr.hash()
-        val existing = attrsH[hash]
+        val existing = attributeHashes[hash]
         if (existing != null) return existing
-        attrsH[hash] = attr
-        attrs.add(attr)
+        attributeHashes[hash] = attr
+        attributes.add(attr)
         return attr
     }
 
     private fun normalize(client: Long) {
-        val normalized = normalizeAttrRanges(clients[client].orEmpty())
+        val normalized = normalizeAttrRanges(clientRanges[client].orEmpty())
         if (normalized.isEmpty()) {
-            clients.remove(client)
+            clientRanges.remove(client)
         } else {
-            clients[client] = normalized.toMutableList()
+            clientRanges[client] = normalized.toMutableList()
         }
     }
 }

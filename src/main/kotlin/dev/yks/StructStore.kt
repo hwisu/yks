@@ -14,11 +14,13 @@ class StructStore(private val owner: YDoc? = null) {
     private val clientItems: MutableMap<Long, MutableList<StoreItem>> = linkedMapOf()
     private val structViewOwner: YDoc by lazy(LazyThreadSafetyMode.NONE) { owner ?: YDoc() }
     private var allItemsCache: List<StoreItem>? = null
-    private val sequenceCache: MutableMap<String, List<StoreItem>> = mutableMapOf()
+    private val sequenceCache: MutableMap<String, MutableList<StoreItem>> = mutableMapOf()
     private val mapEntriesCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
     private val mapOrderCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
 
     internal val ownerDoc: YDoc? get() = owner
+    internal var sequenceBuildCount: Int = 0
+        private set
 
     val clients: Map<Long, List<ItemStruct>>
         get() {
@@ -49,7 +51,7 @@ class StructStore(private val owner: YDoc? = null) {
         val structs = clientItems.getOrPut(item.id.client) { mutableListOf() }
         if (structs.isEmpty() || structs.last().endClock() <= item.id.clock) {
             structs.add(item)
-            invalidateCaches(item)
+            recordAdded(item)
             return true
         }
         val itemEnd = item.endClock()
@@ -67,7 +69,7 @@ class StructStore(private val owner: YDoc? = null) {
             (right != null && right.id.clock < itemEnd)
         ) return false
         structs.add(insertionIndex, item)
-        invalidateCaches(item)
+        recordAdded(item)
         return true
     }
 
@@ -125,18 +127,48 @@ class StructStore(private val owner: YDoc? = null) {
     ): StoreItem {
         val item = structs[index]
         require(diff in 1 until item.length) { "diff must split the store item" }
-        val content = item.content as? ItemContent.Deleted
-            ?: error("only packed deleted store items can require splitting")
-        val left = item.copy(content = content.copy(length = diff))
+        val (leftContent, rightContent) = when (val content = item.content) {
+            is ItemContent.Deleted ->
+                content.copy(length = diff) to content.copy(length = item.length - diff)
+            is ItemContent.Text -> {
+                val splitIndex = diff.toNonNegativeInt("text split offset")
+                var leftValue = content.value.substring(0, splitIndex)
+                var rightValue = content.value.substring(splitIndex)
+                if (leftValue.last().isHighSurrogate()) {
+                    leftValue = leftValue.dropLast(1) + '\uFFFD'
+                    rightValue = "\uFFFD" + rightValue.drop(1)
+                }
+                content.copy(value = leftValue) to content.copy(value = rightValue)
+            }
+            else -> error("only packed text or deleted store items can require splitting")
+        }
+        val left = item.copy(content = leftContent)
         val right = item.copy(
             id = Id(item.id.client, checkedClockAdd(item.id.clock, diff, "split item clock")),
             origin = Id(item.id.client, checkedClockAdd(item.id.clock, diff - 1, "split item origin")),
-            content = content.copy(length = item.length - diff),
+            content = rightContent,
         )
         structs[index] = left
         structs.add(index + 1, right)
-        invalidateCaches(item)
+        recordReplacement(item, listOf(left, right))
         return right
+    }
+
+    internal fun splitAtDeleteSetBoundaries(
+        deleteSet: DeleteSet,
+        onSplit: (StoreItem) -> Unit = {},
+    ) {
+        deleteSet.clients.forEach { (client, ranges) ->
+            ranges.forEach { range ->
+                getStoreItem(Id(client, range.clock))
+                    ?.takeIf { item -> !item.isGc && item.id.clock < range.clock }
+                    ?.let { getStoreItemCleanStart(Id(client, range.clock), onSplit) }
+                val lastClock = range.end - 1
+                getStoreItem(Id(client, lastClock))
+                    ?.takeIf { item -> !item.isGc && lastClock < item.endClock() - 1 }
+                    ?.let { getStoreItemCleanEnd(Id(client, lastClock), onSplit) }
+            }
+        }
     }
 
     /** Merge compatible deleted-item fragments touched by a delete-set, from right to left. */
@@ -204,9 +236,10 @@ class StructStore(private val owner: YDoc? = null) {
         ) return false
 
         val mergedLength = checkedClockAdd(left.length, right.length, "merged deleted item length")
-        structs[rightIndex - 1] = left.copy(content = leftContent.copy(length = mergedLength))
+        val merged = left.copy(content = leftContent.copy(length = mergedLength))
+        structs[rightIndex - 1] = merged
         structs.removeAt(rightIndex)
-        invalidateCaches(left)
+        recordReplacement(left, listOf(merged), additionallyRemoved = listOf(right))
         return true
     }
 
@@ -221,7 +254,7 @@ class StructStore(private val owner: YDoc? = null) {
         if (item.content is ItemContent.Deleted) return null
         val collected = item.copy(content = ItemContent.Deleted(item.content.kind, item.length))
         structs[index] = collected
-        invalidateCaches(item)
+        recordReplacement(item, listOf(collected))
         return collected
     }
 
@@ -229,9 +262,10 @@ class StructStore(private val owner: YDoc? = null) {
         val structs = clientItems[id.client] ?: return null
         val index = structs.findStartIndex(id.clock)
         if (index < 0) return null
-        val updated = structs[index].copy(content = content)
+        val previous = structs[index]
+        val updated = previous.copy(content = content)
         structs[index] = updated
-        invalidateCaches(structs[index])
+        recordReplacement(previous, listOf(updated))
         return updated
     }
 
@@ -286,12 +320,20 @@ class StructStore(private val owner: YDoc? = null) {
         when {
             item.endClock() <= targetClock -> null
             item.id.clock >= targetClock -> item
-            item.content is ItemContent.Deleted -> {
+            item.content is ItemContent.Deleted || item.content is ItemContent.Text -> {
                 val remaining = item.endClock() - targetClock
+                val content = when (val current = item.content) {
+                    is ItemContent.Deleted -> current.copy(length = remaining)
+                    is ItemContent.Text -> {
+                        val offset = (targetClock - item.id.clock).toNonNegativeInt("text state-vector offset")
+                        current.copy(value = ContentString(current.value).splice(offset.toLong()).str)
+                    }
+                    else -> error("unreachable packed content")
+                }
                 item.copy(
                     id = Id(item.id.client, targetClock),
                     origin = if (item.isGc) null else Id(item.id.client, targetClock - 1),
-                    content = item.content.copy(length = remaining),
+                    content = content,
                 )
             }
             else -> error("state vector splits unsupported store item at ${item.id}:$targetClock")
@@ -368,10 +410,13 @@ class StructStore(private val owner: YDoc? = null) {
     }
 
     internal fun sequence(parent: String): List<StoreItem> {
-        return sequenceCache[parent] ?: buildSequence(parent).also { sequence -> sequenceCache[parent] = sequence }
+        return sequenceCache[parent] ?: buildSequence(parent).toMutableList().also { sequence ->
+            sequenceCache[parent] = sequence
+        }
     }
 
     private fun buildSequence(parent: String): List<StoreItem> {
+        sequenceBuildCount++
         val items = allItems().filter { it.parent == parent && it.parentSub == null }
         if (items.size < 2) return items
 
@@ -497,14 +542,77 @@ class StructStore(private val owner: YDoc? = null) {
     internal fun cachedMapOrder(parent: String, key: String, compute: () -> List<StoreItem>): List<StoreItem> =
         mapOrderCache.getOrPut(parent to key, compute)
 
-    private fun invalidateCaches(item: StoreItem) {
+    private fun invalidateNonSequenceCaches(item: StoreItem) {
         allItemsCache = null
-        sequenceCache.remove(item.parent)
         item.parentSub?.let { key ->
             val cacheKey = item.parent to key
             mapEntriesCache.remove(cacheKey)
             mapOrderCache.remove(cacheKey)
         }
+    }
+
+    private fun recordAdded(item: StoreItem) {
+        invalidateNonSequenceCaches(item)
+        if (item.parentSub == null) {
+            sequenceCache[item.parent]?.let { sequence -> integrateIntoCachedSequence(sequence, item) }
+        }
+    }
+
+    private fun recordReplacement(
+        previous: StoreItem,
+        replacements: List<StoreItem>,
+        additionallyRemoved: List<StoreItem> = emptyList(),
+    ) {
+        invalidateNonSequenceCaches(previous)
+        val sequence = sequenceCache[previous.parent] ?: return
+        val index = sequence.indexOfFirst { item -> item.id == previous.id }
+        if (index >= 0) {
+            sequence.removeAt(index)
+            sequence.addAll(index, replacements)
+        }
+        additionallyRemoved.forEach { removed -> sequence.removeAll { item -> item.id == removed.id } }
+    }
+
+    private fun integrateIntoCachedSequence(sequence: MutableList<StoreItem>, item: StoreItem) {
+        fun find(id: Id?): StoreItem? = id?.let { target ->
+            sequence.firstOrNull { candidate -> candidate.contains(target) }
+        }
+
+        var left = find(item.origin)
+        val right = find(item.rightOrigin)
+        var otherIndex = left?.let(sequence::indexOf)?.plus(1) ?: 0
+        val conflictingItems = hashSetOf<Id>()
+        val itemsBeforeOrigin = hashSetOf<Id>()
+
+        while (otherIndex < sequence.size) {
+            val other = sequence[otherIndex]
+            if (other.id == right?.id) break
+            itemsBeforeOrigin.add(other.id)
+            conflictingItems.add(other.id)
+            when {
+                compareIDs(item.origin, other.origin) -> {
+                    if (other.id.client < item.id.client) {
+                        left = other
+                        conflictingItems.clear()
+                    } else if (compareIDs(item.rightOrigin, other.rightOrigin)) {
+                        break
+                    }
+                }
+                other.origin != null -> {
+                    val otherOrigin = find(other.origin)?.id
+                    if (otherOrigin !in itemsBeforeOrigin) break
+                    if (otherOrigin !in conflictingItems) {
+                        left = other
+                        conflictingItems.clear()
+                    }
+                }
+                else -> break
+            }
+            otherIndex++
+        }
+
+        val insertionIndex = left?.let(sequence::indexOf)?.plus(1) ?: 0
+        sequence.add(insertionIndex, item)
     }
 
     private fun StoreItem.contains(id: Id): Boolean =

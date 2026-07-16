@@ -801,3 +801,31 @@ git diff --check
 - delete set은 struct integration 뒤에 적용되며 아직 없는 range는 pending으로 유지해야 함.
 - standard writer eligibility를 넓힐 때는 손실 없는 경우만 허용하고, 애매하면 표준 API는 예외,
   explicit `*Lossless` API만 private envelope를 사용하도록 유지할 것.
+
+## 2026-07-16 packed text, incremental sequence, decoder hardening
+
+- `ContentString`을 UTF-16 code-unit별 `StoreItem`으로 풀지 않고 Yjs처럼 packed text로 보존함.
+  중간 insert/delete/format/snapshot/update selection은 필요한 clock 경계에서만 split하며,
+  surrogate pair 중간 분할은 upstream과 같은 replacement-character 의미를 사용함.
+- materialize된 sequence는 매 mutation마다 전체 dependency graph를 재구축하지 않고 Yjs conflict
+  scan으로 증분 통합함. split/GC/content replacement도 기존 cache 위치를 증분 갱신함.
+- V1/V2, state-vector diff, undo/redo, relative position, deep delta, PermanentUserData, GC와
+  partial content-id selection을 packed clock range 기준으로 수정함.
+- private lossless packed text용 `YKS\x05`를 추가하고 `YKS\x01`~`YKS\x04` reader 호환을 유지함.
+- decoder에 depth 256, value-node 1,000,000, aggregate payload 128 MiB 제한을 추가하고,
+  legacy JSON을 JSON.parse 수준으로 엄격하게 처리함.
+- `DeleteSet`/`IdSet`/`IdMap`은 constructor 입력을 방어 복사하고 public collection view를 snapshot으로
+  반환해 정렬·병합 invariant를 외부 mutation으로 깨뜨릴 수 없게 함.
+- `YDoc`/attached shared types의 thread confinement와 encoded bytes/snapshot hand-off 경계를 문서화함.
+
+검증 결과:
+
+- `./gradlew clean check consumerSmokeTest --no-daemon -PreleaseVersion=0.1.1-test`: passed
+  - 일반 Kotlin tests: 667 passed
+  - Kotlin interop tests: 85 passed, 500-seed differential 포함
+  - Maven Local standalone consumer: passed
+- `npm run test:interop`: Yjs 106 passed, Yrs 4 passed
+- 20,000 UTF-16 code-unit text: YKS/Yjs 모두 struct 1개, V1 update 20,015 bytes
+- `npm audit`: 0 vulnerabilities
+- `cargo audit --file interop/yrs-oracle/Cargo.lock`: 0 vulnerabilities
+- `git diff --check`: passed

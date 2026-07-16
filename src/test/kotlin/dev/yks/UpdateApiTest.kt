@@ -466,7 +466,7 @@ class UpdateApiTest {
         val target = createDocFromUpdate(updateEncoder.toByteArray())
 
         assertEquals("ab", target.getText("body").toString())
-        assertEquals(2, writer.written)
+        assertEquals(1, writer.written)
         assertEquals(1L, writer.currClient)
         assertEquals(Id(1, 0), writer.clientStructs.first().id)
         assertContentEquals(updateEncoder.toByteArray(), writer.toUint8Array())
@@ -518,9 +518,9 @@ class UpdateApiTest {
         assertEquals(1L, sliceWriter.currClient)
         assertEquals(Id(1, 1), sliceWriter.clientStructs.single().id)
         assertEquals(2, sliceWriter.clientStructs.single().length)
-        assertEquals(listOf(Id(1, 1), Id(1, 2)), decoded.structs.map { it.id })
-        assertEquals(listOf(Id(1, 0), Id(1, 1)), decoded.structs.map { it.origin })
-        assertEquals(listOf("b", "c"), decoded.structs.map { (it.content as ContentString).str })
+        assertEquals(listOf(Id(1, 1)), decoded.structs.map { it.id })
+        assertEquals(listOf(Id(1, 0)), decoded.structs.map { it.origin })
+        assertEquals(listOf("bc"), decoded.structs.map { (it.content as ContentString).str })
     }
 
     @Test
@@ -594,14 +594,22 @@ class UpdateApiTest {
         val convertedDecoded = decodeUpdate(converted)
 
         assertEquals(YTextDelta().insert("z", mapOf("bold" to true)), convertedDoc.getText("body").toDelta())
-        val deletedTextId = convertedDecoded.structs.single { struct ->
-            struct.deleted && struct.content is ContentString
-        }.id
+        val deletedTextId = convertedDecoded.deleteSet.ranges().single().let { (client, range) ->
+            Id(client, range.clock)
+        }
+        assertTrue(convertedDecoded.structs.any { struct ->
+            struct.content is ContentString &&
+                deletedTextId.client == struct.id.client &&
+                deletedTextId.clock in struct.id.clock until struct.id.clock + struct.length
+        })
         assertTrue(convertedDecoded.deleteSet.contains(deletedTextId))
-        assertEquals(
-            decodeUpdate(update).structs.map { it.structuralFields() },
-            convertedDecoded.structs.map { it.structuralFields() },
-        )
+        fun logicalStructuralFields(decoded: DecodedUpdate): List<List<Any?>> = decoded.structs.flatMap { struct ->
+            (0 until struct.length).map { offset ->
+                val id = Id(struct.id.client, struct.id.clock + offset)
+                listOf(id, struct.parent, struct.parentSub, struct.kind, struct.deleted || decoded.deleteSet.contains(id))
+            }
+        }
+        assertEquals(logicalStructuralFields(decodeUpdate(update)), logicalStructuralFields(convertedDecoded))
     }
 
     @Test
@@ -622,8 +630,9 @@ class UpdateApiTest {
             YTextDelta().insert("xy"),
             createDocFromUpdate(converted).getText("body").toDelta(),
         )
-        assertEquals(listOf(Id(1, 0), Id(1, 1)), decoded.structs.map { it.id })
-        assertEquals(listOf(null, Id(1, 0)), decoded.structs.map { it.origin })
+        assertEquals(listOf(Id(1, 0)), decoded.structs.map { it.id })
+        assertEquals(listOf(null), decoded.structs.map { it.origin })
+        assertEquals(listOf(2L), decoded.structs.map { it.length })
         assertEquals(mapOf(1L to 2L), decodeStateVector(encodeStateVectorFromUpdate(converted)))
     }
 
@@ -826,7 +835,8 @@ class UpdateApiTest {
 
         val structsOnly = writeStructsFromTransaction(insertEvent)
         val decoded = decodeUpdate(structsOnly)
-        assertEquals(listOf(Id(1, 0), Id(1, 1)), decoded.structs.map { it.id })
+        assertEquals(listOf(Id(1, 0)), decoded.structs.map { it.id })
+        assertEquals(listOf(2L), decoded.structs.map { it.length })
         assertTrue(decoded.deleteSet.isEmpty)
         assertContentEquals(structsOnly, encodeStructsFromTransaction(insertEvent))
         assertEquals(decoded.structs, decodeUpdateV2(writeStructsFromTransactionV2(insertEvent)).structs)
@@ -1188,7 +1198,7 @@ class UpdateApiTest {
 
     private fun ByteArray.hasPrivateUpdateMagic(): Boolean =
         size >= 4 && this[0] == 'Y'.code.toByte() && this[1] == 'K'.code.toByte() &&
-            this[2] == 'S'.code.toByte() && this[3] in setOf(1.toByte(), 2.toByte(), 3.toByte(), 4.toByte())
+            this[2] == 'S'.code.toByte() && this[3] in setOf(1.toByte(), 2.toByte(), 3.toByte(), 4.toByte(), 5.toByte())
 
     private fun DecodedUpdateStruct.structuralFields(): List<Any?> = listOf(
         id,

@@ -77,6 +77,10 @@ private `YKS` envelope and must not be sent to JavaScript Yjs.
      value items. Their values are preserved, but the original constructor
      distinction is unavailable for the rare case where it alone prevents an
      upstream cleanup merge.
+   - Adjacent UTF-16 text is retained as packed `ContentString` storage and is
+     split only at edit, delete, snapshot, or update-selection boundaries. A
+     valid encoder may choose different packing without changing clock or CRDT
+     semantics.
    - Packed deleted items merge conservatively when YKS-specific structural
      metadata differs. This may retain more internal store structs than Yjs in
      order to preserve relative-position and private-wire metadata.
@@ -93,9 +97,8 @@ private `YKS` envelope and must not be sent to JavaScript Yjs.
      supplies that schema.
    - Kotlin-only subdocument options and compact XML require explicit lossless
      APIs. Standard APIs never silently place private bytes on a Yjs channel.
-   - A rare `computeYChange` callback boundary can be coarser after packed
-     `ContentString` data has been normalized into YKS's store representation;
-     visible text and change attribution remain preserved.
+   - Text callbacks and attribution are evaluated on logical UTF-16 clocks even
+     when the underlying `ContentString` remains packed.
 
 5. Yrs-specific runtime extensions
    - Yrs defaults text indexes to UTF-8 byte offsets, while Yjs and YKS use
@@ -110,3 +113,7 @@ private `YKS` envelope and must not be sent to JavaScript Yjs.
 Applications that communicate with JavaScript Yjs should stay on the standard
 V1/V2 APIs and use explicit typed getters for remotely created roots. Kotlin-only
 peers may additionally opt into the lossless and extension APIs.
+
+`YDoc` and attached shared types are thread-confined mutable objects, matching
+the Yjs execution model. JVM applications must serialize cross-thread access and
+use encoded bytes or copied snapshots as hand-off values.

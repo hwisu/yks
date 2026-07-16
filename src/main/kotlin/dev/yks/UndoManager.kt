@@ -39,8 +39,12 @@ class StackItem internal constructor(
     val meta: MutableMap<Any?, Any?> = linkedMapOf()
     val inserts: IdSet get() = explicitInserts?.copy() ?: insertedItems.toIdSet()
     val deletes: IdSet get() = explicitDeletes?.copy() ?: deletedItems.map { it.item }.toIdSet()
-    val insertedCount: Int get() = explicitInserts?.rangeLengthAsInt() ?: insertedItems.size
-    val deletedCount: Int get() = explicitDeletes?.rangeLengthAsInt() ?: deletedItems.size
+    val insertedCount: Int get() = explicitInserts?.rangeLengthAsInt() ?: insertedItems
+        .sumOf { item -> item.length }
+        .toNonNegativeInt("undo insertion count")
+    val deletedCount: Int get() = explicitDeletes?.rangeLengthAsInt() ?: deletedItems
+        .sumOf { restore -> restore.item.length }
+        .toNonNegativeInt("undo deletion count")
     val isEmpty: Boolean
         get() {
             val insertsEmpty = explicitInserts?.isEmpty() ?: insertedItems.isEmpty()
@@ -317,7 +321,9 @@ class UndoManager private constructor(
     private fun applyStackItem(stackItem: StackItem): AppliedStackItem {
         captureDisabled = true
         try {
-            val insertedItemsToDelete = stackItem.insertedItems.filter { options.deleteFilter(it.toItemStruct(doc)) }
+            val insertedItemsToDelete = stackItem.insertedItems
+                .flatMap(StoreItem::logicalUnits)
+                .filter { options.deleteFilter(it.toItemStruct(doc)) }
             val insertedIdsToDelete = insertedItemsToDelete.map { item -> item.id }.toSet()
             val restoreCandidates = stackItem.deletedItems.filter { restore ->
                 val source = restore.item
@@ -348,7 +354,7 @@ class UndoManager private constructor(
             }
             try {
                 doc.transact(origin = this) {
-                    doc.deleteItemsByIds(insertedIdsToDelete)
+                    doc.deleteItemRanges(insertedItemsToDelete)
                     restoredItems = doc.restoreItems(deletedItemsToRestore)
                 }
             } finally {

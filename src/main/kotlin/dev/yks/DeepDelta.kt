@@ -194,6 +194,7 @@ private fun textFormatAttributionsByTarget(
                     item.content is ItemContent.TextEmbed ||
                     item.content is ItemContent.XmlType)
         }
+        .flatMap(StoreItem::logicalUnits)
     if (textItems.isEmpty()) return emptyMap()
     val attributionsByTarget = linkedMapOf<Id, Map<String, Any?>>()
 
@@ -222,7 +223,9 @@ private fun textFormatAttributionsByTarget(
         }
 
     val activeNativeAttributions = linkedMapOf<String, Map<String, Any?>>()
-    type.doc.sequence(type.name).forEach { item ->
+    type.doc.sequence(type.name)
+        .flatMap { item -> if (item.content is ItemContent.Text) item.logicalUnits() else listOf(item) }
+        .forEach { item ->
         if (item.content.kind != type.kind) return@forEach
         when (val content = item.content) {
             is ItemContent.NativeTextFormat -> {
@@ -249,7 +252,7 @@ private fun textFormatAttributionsByTarget(
             }
             else -> Unit
         }
-    }
+        }
     return attributionsByTarget
 }
 
@@ -539,6 +542,7 @@ private fun renderSequenceItems(
 ): List<RenderedSequenceItem> =
     type.doc.sequence(type.name)
         .filter { item -> item.content.kind == kind && item.countable }
+        .flatMap(StoreItem::logicalUnits)
         .flatMap { item ->
             item.readRenderedContents(type.doc, options).map { content ->
                 RenderedSequenceItem(item, content, content.renderedAction(options))

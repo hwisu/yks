@@ -266,7 +266,7 @@ class PublicApiParityTest {
             local = false,
         )
 
-        assertEquals(2, result)
+        assertEquals(1, result)
         assertEquals("hi", text.toString())
         assertEquals("callback", observed.meta["api"])
         assertFalse(observed.local)

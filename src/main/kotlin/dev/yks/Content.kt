@@ -644,6 +644,7 @@ private fun String.toJsonString(): String {
 
 private class JsonLiteralParser(private val source: String) {
     private var index = 0
+    private val decodeBudget = DecodeBudget()
 
     fun parse(): Any? {
         val value = parseValue()
@@ -653,6 +654,7 @@ private class JsonLiteralParser(private val source: String) {
     }
 
     private fun parseValue(): Any? {
+        decodeBudget.consumeNode()
         skipWhitespace()
         check(index < source.length) { "unexpected end of JSON input" }
         return when (source[index]) {
@@ -669,8 +671,8 @@ private class JsonLiteralParser(private val source: String) {
                 false
             }
             '"' -> parseString()
-            '[' -> parseArray()
-            '{' -> parseObject()
+            '[' -> decodeBudget.nested(::parseArray)
+            '{' -> decodeBudget.nested(::parseObject)
             else -> parseNumber()
         }
     }
@@ -683,7 +685,10 @@ private class JsonLiteralParser(private val source: String) {
             when (c) {
                 '"' -> return out.toString()
                 '\\' -> out.append(parseEscape())
-                else -> out.append(c)
+                else -> {
+                    check(c.code >= 0x20) { "unescaped control character in JSON string" }
+                    out.append(c)
+                }
             }
         }
         error("unterminated JSON string")
@@ -707,7 +712,9 @@ private class JsonLiteralParser(private val source: String) {
 
     private fun parseUnicodeEscape(): Char {
         check(index + 4 <= source.length) { "unterminated JSON unicode escape" }
-        val code = source.substring(index, index + 4).toInt(16)
+        val encoded = source.substring(index, index + 4)
+        check(encoded.all(Char::isJsonHexDigit)) { "invalid JSON unicode escape" }
+        val code = encoded.toInt(16)
         index += 4
         return code.toChar()
     }
@@ -751,7 +758,11 @@ private class JsonLiteralParser(private val source: String) {
     private fun parseNumber(): Number {
         val start = index
         consume('-')
-        readDigits()
+        when {
+            consume('0') -> Unit
+            index < source.length && source[index] in '1'..'9' -> readDigits()
+            else -> error("expected JSON digit")
+        }
         var isFloating = false
         if (consume('.')) {
             isFloating = true
@@ -765,17 +776,17 @@ private class JsonLiteralParser(private val source: String) {
         }
         check(index > start) { "expected JSON number" }
         val raw = source.substring(start, index)
-        return if (isFloating) raw.toDouble() else raw.toLong()
+        return if (isFloating) raw.toDouble() else raw.toLongOrNull() ?: raw.toDouble()
     }
 
     private fun readDigits() {
         val start = index
-        while (index < source.length && source[index].isDigit()) index++
+        while (index < source.length && source[index] in '0'..'9') index++
         check(index > start) { "expected JSON digit" }
     }
 
     private fun skipWhitespace() {
-        while (index < source.length && source[index].isWhitespace()) index++
+        while (index < source.length && source[index].isJsonWhitespace()) index++
     }
 
     private fun expect(token: String) {
@@ -794,6 +805,10 @@ private class JsonLiteralParser(private val source: String) {
         return true
     }
 }
+
+private fun Char.isJsonWhitespace(): Boolean = this == ' ' || this == '\t' || this == '\n' || this == '\r'
+
+private fun Char.isJsonHexDigit(): Boolean = this in '0'..'9' || this in 'a'..'f' || this in 'A'..'F'
 
 private fun Char.isHighSurrogate(): Boolean = code in 0xD800..0xDBFF
 

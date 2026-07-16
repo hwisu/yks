@@ -572,7 +572,7 @@ class YTextDeltaTest {
 
             right.applyUpdate(left.encodeStateAsUpdate())
 
-            assertEquals("\uD83Dhi!\uDC7E", text.toString())
+            assertEquals("\uFFFDhi!\uFFFD", text.toString())
             assertEquals(text.toString(), right.getText("body").toString())
         }
 
@@ -583,10 +583,9 @@ class YTextDeltaTest {
             text.insert(0, alien + alien)
             text.delete(1, 2)
 
-            assertFailsWith<UnsupportedYjsStandardUpdateException> { left.encodeStateAsUpdate() }
-            right.applyUpdate(left.encodeStateAsUpdateLossless())
+            right.applyUpdate(left.encodeStateAsUpdate())
 
-            assertEquals(alien, text.toString())
+            assertEquals("\uFFFD\uFFFD", text.toString())
             assertEquals(text.toString(), right.getText("body").toString())
         }
 
@@ -597,8 +596,7 @@ class YTextDeltaTest {
             text.insert(0, alien + alien)
             text.format(1, 2, mapOf("bold" to true))
 
-            assertFailsWith<UnsupportedYjsStandardUpdateException> { left.encodeStateAsUpdate() }
-            right.applyUpdate(left.encodeStateAsUpdateLossless())
+            right.applyUpdate(left.encodeStateAsUpdate())
 
             assertEquals(text.toString(), right.getText("body").toString())
             assertEquals(text.toDelta(), right.getText("body").toDelta())
@@ -941,7 +939,7 @@ class YTextDeltaTest {
     }
 
     private fun YText.liveFormatItemCountForTest(): Int =
-        getTypeChildren(this).count { child -> !child.deleted } - length
+        getTypeChildren(this).count { child -> !child.deleted && child.content is ContentFormat }
 
     private fun syncDocs(vararg docs: YDoc) {
         val updates = docs.map { doc -> doc.encodeStateAsUpdate() }

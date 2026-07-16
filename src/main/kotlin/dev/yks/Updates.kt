@@ -919,13 +919,11 @@ fun createContentIdsFromUpdateV2(update: ByteArray): ContentIds {
 fun intersectUpdateWithContentIds(update: ByteArray, contentIds: ContentIds): ByteArray {
     requireStandardYjsUpdateInput(update, "V1")
     val decoded = UpdateCodec.decode(update)
-    val filteredItems = decoded.items
-        .filter { contentIds.inserts.hasId(it.id) }
-        .map { item -> item.copy(requiresClockContinuity = false) }
+    val filteredItems = decoded.items.intersectClockRanges(contentIds.inserts, requiresClockContinuity = false)
     val filteredDeletes = decoded.deleteSet.toIdSet()
         .let { intersectSets(it, contentIds.deletes) }
         .toDeleteSet()
-    if (filteredItems.size == decoded.items.size && filteredDeletes.structurallyEquals(decoded.deleteSet)) {
+    if (filteredItems == decoded.items && filteredDeletes.structurallyEquals(decoded.deleteSet)) {
         return UpdateCodec.encode(decoded)
     }
     return UpdateCodec.encode(DocumentUpdate(filteredItems, filteredDeletes))
@@ -933,22 +931,20 @@ fun intersectUpdateWithContentIds(update: ByteArray, contentIds: ContentIds): By
 
 fun intersectUpdateWithContentIdsLossless(update: ByteArray, contentIds: ContentIds): ByteArray {
     val decoded = UpdateCodec.decode(update)
-    val filteredItems = decoded.items
-        .filter { contentIds.inserts.hasId(it.id) }
-        .map { item -> item.copy(requiresClockContinuity = false) }
+    val filteredItems = decoded.items.intersectClockRanges(contentIds.inserts, requiresClockContinuity = false)
     val filteredDeletes = decoded.deleteSet.toIdSet()
         .let { intersectSets(it, contentIds.deletes) }
         .toDeleteSet()
-    if (filteredItems.size == decoded.items.size && filteredDeletes.structurallyEquals(decoded.deleteSet)) return update
+    if (filteredItems == decoded.items && filteredDeletes.structurallyEquals(decoded.deleteSet)) return update
     return UpdateCodec.encodeLossless(DocumentUpdate(filteredItems, filteredDeletes))
 }
 
 fun intersectUpdateWithContentIdsV2(update: ByteArray, contentIds: ContentIds): ByteArray {
     requireStandardYjsUpdateInput(update, "V2")
     return UpdateCodec.decodeV2(update).let { decoded ->
-        val filteredItems = decoded.items.filter { contentIds.inserts.hasId(it.id) }
+        val filteredItems = decoded.items.intersectClockRanges(contentIds.inserts)
         val filteredDeletes = intersectSets(decoded.deleteSet.toIdSet(), contentIds.deletes).toDeleteSet()
-        if (filteredItems.size == decoded.items.size && filteredDeletes.structurallyEquals(decoded.deleteSet)) {
+        if (filteredItems == decoded.items && filteredDeletes.structurallyEquals(decoded.deleteSet)) {
             UpdateCodec.encodeV2(decoded)
         } else UpdateCodec.encodeV2(DocumentUpdate(filteredItems, filteredDeletes))
     }
@@ -956,11 +952,25 @@ fun intersectUpdateWithContentIdsV2(update: ByteArray, contentIds: ContentIds): 
 
 fun intersectUpdateWithContentIdsV2Lossless(update: ByteArray, contentIds: ContentIds): ByteArray =
     UpdateCodec.decodeV2(update).let { decoded ->
-        val filteredItems = decoded.items.filter { contentIds.inserts.hasId(it.id) }
+        val filteredItems = decoded.items.intersectClockRanges(contentIds.inserts)
         val filteredDeletes = intersectSets(decoded.deleteSet.toIdSet(), contentIds.deletes).toDeleteSet()
-        if (filteredItems.size == decoded.items.size && filteredDeletes.structurallyEquals(decoded.deleteSet)) update
+        if (filteredItems == decoded.items && filteredDeletes.structurallyEquals(decoded.deleteSet)) update
         else UpdateCodec.encodeV2Lossless(DocumentUpdate(filteredItems, filteredDeletes))
     }
+
+private fun List<StoreItem>.intersectClockRanges(
+    idSet: IdSet,
+    requiresClockContinuity: Boolean? = null,
+): List<StoreItem> = flatMap { item ->
+    idSet.slice(item.id.client, item.id.clock, item.length)
+        .filter { range -> range.exists && range.len > 0 }
+        .map { range ->
+            item.sliceClocks(range.clock, checkedClockAdd(range.clock, range.len, "intersected item end")).let { selected ->
+                if (requiresClockContinuity == null) selected
+                else selected.copy(requiresClockContinuity = requiresClockContinuity)
+            }
+        }
+}
 
 fun mergeUpdates(updates: List<ByteArray>): ByteArray {
     updates.forEach { update -> requireStandardYjsUpdateInput(update, "V1") }
@@ -1018,13 +1028,7 @@ private fun StoreItem.sliceFromClock(targetClock: Long): StoreItem? {
     val end = checkedClockAdd(id.clock, length)
     if (end <= targetClock) return null
     if (id.clock >= targetClock) return this
-    val deleted = content as? ItemContent.Deleted
-        ?: error("state vector splits unsupported update item at $id:$targetClock")
-    return copy(
-        id = Id(id.client, targetClock),
-        origin = if (isGc) null else Id(id.client, targetClock - 1),
-        content = deleted.copy(length = end - targetClock),
-    )
+    return sliceClocks(targetClock, end)
 }
 
 fun encodeStateVectorFromUpdate(update: ByteArray): ByteArray {
@@ -1399,22 +1403,25 @@ private fun DecodedUpdateStruct.toStoreItems(original: StoreItem? = null): List<
         )
     }
     val contents = content.toItemContents(kind, original?.content)
-    require(contents.size.toLong() == length) {
-        "local update content length ${contents.size} does not match struct length $length"
+    val contentLength = contents.sumOf { itemContent -> itemContent.clockLength }
+    require(contentLength == length) {
+        "local update content length $contentLength does not match struct length $length"
     }
     checkedClockAdd(id.clock, length, "expanded update end")
-    return contents.mapIndexed { index, itemContent ->
-        val clockOffset = index.toLong()
+    var clockOffset = 0L
+    return contents.map { itemContent ->
         val itemClock = checkedClockAdd(id.clock, clockOffset, "expanded update clock")
-        StoreItem(
+        val item = StoreItem(
             id = Id(id.client, itemClock),
-            origin = if (index == 0) origin else Id(id.client, itemClock - 1),
+            origin = if (clockOffset == 0L) origin else Id(id.client, itemClock - 1),
             rightOrigin = rightOrigin,
             parent = parent,
             parentSub = parentSub,
             content = itemContent,
             deleted = deleted,
         )
+        clockOffset = checkedClockAdd(clockOffset, item.length, "expanded update offset")
+        item
     }
 }
 
@@ -1448,7 +1455,7 @@ private fun AbstractContent.toTextItemContents(
     attributes: Map<String, YValue>,
     baseAttributes: Map<String, YValue>,
 ): List<ItemContent> = when (this) {
-    is ContentString -> str.map { char -> ItemContent.Text(char.toString(), attributes, baseAttributes, kind) }
+    is ContentString -> listOf(ItemContent.Text(str, attributes, baseAttributes, kind))
     is ContentEmbed -> listOf(ItemContent.TextEmbed(YValue.from(embed), attributes, baseAttributes, kind))
     is ContentType -> listOf(toContentTypeItem(kind, attributes, baseAttributes))
     is ContentTextFormatRange -> listOf(
@@ -1536,7 +1543,7 @@ private class UpdateObfuscator(
     fun obfuscate(content: ItemContent): ItemContent = when (content) {
         is ItemContent.Value -> ItemContent.Value(obfuscate(content.value))
         is ItemContent.Text -> content.copy(
-            value = "0",
+            value = content.value.obfuscatedString(),
             attributes = if (options.formatting) obfuscateFormatting(content.attributes) else content.attributes,
             baseAttributes = if (options.formatting) {
                 obfuscateFormatting(content.baseAttributes)

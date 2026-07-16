@@ -69,7 +69,7 @@ class SnapshotTest {
         val snap = createSnapshot(deleteSet, stateVector)
 
         deleteSet.add(Id(1, 2), 1)
-        deleteSet.clients.getOrPut(2L) { mutableListOf() }.add(DeleteRange(clock = 4, length = 2))
+        deleteSet.add(Id(2, 4), 2)
         stateVector[3L] = 5L
 
         assertSame(deleteSet, snap.ds)

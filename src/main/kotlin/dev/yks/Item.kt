@@ -22,7 +22,9 @@ internal data class StoreItem(
     /** Item.countable is structural metadata and survives replacing content during GC. */
     val countable: Boolean = content.isCountable(),
 ) {
-    val length: Long get() = (content as? ItemContent.Deleted)?.length ?: 1
+    val length: Long get() = content.clockLength
+
+    val lastId: Id get() = Id(id.client, checkedClockAdd(id.clock, length - 1, "item last clock"))
 }
 
 internal sealed class ItemContent {
@@ -39,7 +41,7 @@ internal sealed class ItemContent {
         override val kind: RootKind = RootKind.Text,
     ) : ItemContent() {
         init {
-            require(value.length == 1) { "text items store exactly one UTF-16 code unit" }
+            require(value.isNotEmpty()) { "text items must not be empty" }
             require(kind == RootKind.Text || kind == RootKind.XmlText) { "text content must belong to a text sequence" }
         }
     }
@@ -122,4 +124,52 @@ internal fun ItemContent.isCountable(): Boolean = when (this) {
     is ItemContent.NativeTextFormat,
     is ItemContent.Deleted -> false
     else -> true
+}
+
+internal val ItemContent.clockLength: Long
+    get() = when (this) {
+        is ItemContent.Text -> value.length.toLong()
+        is ItemContent.Deleted -> length
+        else -> 1
+    }
+
+internal fun StoreItem.logicalUnits(): List<StoreItem> {
+    val text = content as? ItemContent.Text ?: return listOf(this)
+    if (text.value.length == 1) return listOf(this)
+    return text.value.mapIndexed { offset, char ->
+        copy(
+            id = Id(id.client, checkedClockAdd(id.clock, offset.toLong(), "text unit clock")),
+            origin = if (offset == 0) {
+                origin
+            } else {
+                Id(id.client, checkedClockAdd(id.clock, offset.toLong() - 1, "text unit origin"))
+            },
+            content = text.copy(value = char.toString()),
+        )
+    }
+}
+
+internal fun StoreItem.sliceClocks(startClock: Long, endClock: Long): StoreItem {
+    val itemEnd = checkedClockAdd(id.clock, length, "item end")
+    require(startClock >= id.clock && startClock < itemEnd && endClock > startClock && endClock <= itemEnd) {
+        "clock slice must be contained in the item"
+    }
+    if (startClock == id.clock && endClock == itemEnd) return copy()
+    val offset = startClock - id.clock
+    val keepLength = endClock - startClock
+    val slicedContent = when (val current = content) {
+        is ItemContent.Deleted -> current.copy(length = keepLength)
+        is ItemContent.Text -> {
+            var value = ContentString(current.value)
+            if (offset > 0) value = value.splice(offset)
+            if (keepLength < value.getLength()) value.splice(keepLength)
+            current.copy(value = value.str)
+        }
+        else -> error("clock range splits unsupported store item at $id")
+    }
+    return copy(
+        id = Id(id.client, startClock),
+        origin = if (isGc || startClock == id.clock) origin else Id(id.client, startClock - 1),
+        content = slicedContent,
+    )
 }

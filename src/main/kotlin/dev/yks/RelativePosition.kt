@@ -95,16 +95,17 @@ fun createAbsolutePositionFromRelativePosition(
                 anchorId.clock < checkedClockAdd(candidate.id.clock, candidate.length, "relative position item end")
         }
         if (rawIndex < 0) return null
+        val anchorUnit = ordered[rawIndex]
         val visibleBefore = ordered.asSequence()
             .take(rawIndex)
             .fold(0L) { length, before ->
                 checkedClockAdd(length, rendererContentLength(renderer, before.toItemStruct(doc)), "relative position index")
             }
-        val includeAnchor = !item.deleted && (
+        val includeAnchor = !anchorUnit.deleted && (
             relativePosition.assoc < 0 ||
                 (!followUndoneDeletions && originalItem.deleted && anchorId != itemId)
             )
-        val anchorLength = if (includeAnchor) rendererContentLength(renderer, item.toItemStruct(doc)) else 0
+        val anchorLength = if (includeAnchor) rendererContentLength(renderer, anchorUnit.toItemStruct(doc)) else 0
         val absoluteIndex = checkedClockAdd(visibleBefore, anchorLength, "relative position index")
             .toNonNegativeInt("relative position index")
         return AbsolutePosition(type, absoluteIndex, relativePosition.assoc)
@@ -132,9 +133,11 @@ fun createAbsolutePositionFromRelativePosition(
 }
 
 private fun YDoc.relativePositionSequence(type: AbstractYType): List<StoreItem> =
-    sequence(type.name).filter { item ->
-        item.countable && (type is YUnopenedRoot || item.content.kind == type.kind)
-    }
+    sequence(type.name)
+        .filter { item ->
+            item.countable && (type is YUnopenedRoot || item.content.kind == type.kind)
+        }
+        .flatMap(StoreItem::logicalUnits)
 
 fun encodeRelativePosition(relativePosition: RelativePosition): ByteArray {
     val encoder = BinaryEncoder()

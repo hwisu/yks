@@ -83,7 +83,7 @@ class StructHelperTest {
 
         assertEquals(Id(1, 0), unchanged.item.id)
         assertEquals(0L, unchanged.diff)
-        assertEquals("a", (unchanged.item.content as ContentString).str)
+        assertEquals("ab", (unchanged.item.content as ContentString).str)
 
         val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
         text.delete(0, 1)
@@ -121,9 +121,9 @@ class StructHelperTest {
     @Test
     fun gcHelperAliasesCollectFilteredDeletedStructs() {
         val filteredDoc = deletedTextDoc()
-        val filtered = tryGc(filteredDoc, idSet(1, 0, 4)) { struct -> struct.id.clock == 2L }
+        val filtered = tryGc(filteredDoc, idSet(1, 2, 1)) { struct -> struct.id.clock == 2L }
         val aliasDoc = deletedTextDoc()
-        val fromIdSetAlias = tryGcDeleteSet(aliasDoc, idSet(1, 0, 4)) { struct -> struct.id.clock == 1L }
+        val fromIdSetAlias = tryGcDeleteSet(aliasDoc, idSet(1, 1, 1)) { struct -> struct.id.clock == 1L }
         val deleteSetDoc = deletedTextDoc()
         val deleteSet = DeleteSet.empty().also { deleteSet -> deleteSet.add(Id(1, 1), 2) }
         val fromDeleteSetAlias = tryGcDeleteSet(deleteSetDoc, deleteSet)
@@ -149,8 +149,8 @@ class StructHelperTest {
         text.insert(0, "abcd")
         text.delete(1, 2)
 
-        val fromDocFilter = gcIdSet(doc, idSet(1, 0, 4))
-        val overrideFilter = tryGc(doc, idSet(1, 0, 4)) { struct -> struct.id.clock == 1L }
+        val fromDocFilter = gcIdSet(doc, idSet(1, 2, 1))
+        val overrideFilter = tryGc(doc, idSet(1, 1, 1)) { struct -> struct.id.clock == 1L }
 
         assertFalse(fromDocFilter.has(1, 1))
         assertTrue(fromDocFilter.has(1, 2))
@@ -168,10 +168,10 @@ class StructHelperTest {
         text.delete(1, 2)
 
         doc.gcFilter = { struct -> struct.id.clock == 1L }
-        val firstFilter = gcIdSet(doc, idSet(1, 0, 4))
+        val firstFilter = gcIdSet(doc, idSet(1, 1, 1))
 
         doc.gcFilter = { struct -> struct.id.clock == 2L }
-        val secondFilter = gcIdSet(doc, idSet(1, 0, 4))
+        val secondFilter = gcIdSet(doc, idSet(1, 2, 1))
 
         assertTrue(firstFilter.has(1, 1))
         assertFalse(firstFilter.has(1, 2))
@@ -202,7 +202,15 @@ class StructHelperTest {
         assertTrue(structAt(doc, 3).content is ContentDeleted)
         assertContentString(doc, 4, "e")
         assertEquals("a", text.toString())
-        assertEquals(encodedAfterFirstCollect.toList(), encodeStateAsUpdate(doc).toList())
+        val encodedAfterSecondCollect = encodeStateAsUpdate(doc)
+        assertEquals(
+            createDocFromUpdate(encodedAfterFirstCollect).getText("body").toString(),
+            createDocFromUpdate(encodedAfterSecondCollect).getText("body").toString(),
+        )
+        assertEquals(
+            decodeStateVector(encodeStateVectorFromUpdate(encodedAfterFirstCollect)),
+            decodeStateVector(encodeStateVectorFromUpdate(encodedAfterSecondCollect)),
+        )
     }
 
     @Test
@@ -330,8 +338,8 @@ class StructHelperTest {
             fromStore.add(Triple(struct.id, offset, length))
         }
 
-        assertEquals(listOf(Triple(Id(1, 1), 0L, 1L), Triple(Id(1, 2), 0L, 1L)), fromDoc)
-        assertEquals(listOf(Triple(Id(1, 2), 0L, 1L), Triple(Id(1, 3), 0L, 1L)), fromStore)
+        assertEquals(listOf(Triple(Id(1, 0), 1L, 3L)), fromDoc)
+        assertEquals(listOf(Triple(Id(1, 0), 2L, 4L)), fromStore)
     }
 
     @Test

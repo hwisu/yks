@@ -106,24 +106,31 @@ private fun String.jsArrayIndex(): Long? {
     return value.takeIf { it in 0..0xffff_fffeL && it.toString() == this }
 }
 
-internal fun readLib0Any(decoder: BinaryDecoder): Any? = when (val tag = decoder.readByte()) {
-    LIB0_UNDEFINED -> Lib0Undefined
-    LIB0_NULL -> null
-    LIB0_INTEGER -> decoder.readLib0VarIntWithSign().let { (value, negative) ->
-        if (value == 0L && negative) -0.0 else value
-    }
-    LIB0_FLOAT32 -> decoder.readFloat32().toDouble()
-    LIB0_FLOAT64 -> decoder.readFloat64()
-    LIB0_BIGINT -> java.math.BigInteger.valueOf(decoder.readInt64())
-    LIB0_FALSE -> false
-    LIB0_TRUE -> true
-    LIB0_STRING -> decoder.readString()
-    LIB0_OBJECT -> buildMap {
-        repeat(decoder.readVarUInt().toDecodedCount()) {
-            put(decoder.readString(), readLib0Any(decoder))
+internal fun readLib0Any(decoder: BinaryDecoder): Any? {
+    decoder.decodeBudget.consumeNode()
+    return when (val tag = decoder.readByte()) {
+        LIB0_UNDEFINED -> Lib0Undefined
+        LIB0_NULL -> null
+        LIB0_INTEGER -> decoder.readLib0VarIntWithSign().let { (value, negative) ->
+            if (value == 0L && negative) -0.0 else value
         }
+        LIB0_FLOAT32 -> decoder.readFloat32().toDouble()
+        LIB0_FLOAT64 -> decoder.readFloat64()
+        LIB0_BIGINT -> java.math.BigInteger.valueOf(decoder.readInt64())
+        LIB0_FALSE -> false
+        LIB0_TRUE -> true
+        LIB0_STRING -> decoder.readString()
+        LIB0_OBJECT -> decoder.decodeBudget.nested {
+            buildMap {
+                repeat(decoder.readVarUInt().toDecodedCount()) {
+                    put(decoder.readString(), readLib0Any(decoder))
+                }
+            }
+        }
+        LIB0_ARRAY -> decoder.decodeBudget.nested {
+            List(decoder.readVarUInt().toDecodedCount()) { readLib0Any(decoder) }
+        }
+        LIB0_BINARY -> decoder.readBytes()
+        else -> error("unknown lib0 any tag: $tag")
     }
-    LIB0_ARRAY -> List(decoder.readVarUInt().toDecodedCount()) { readLib0Any(decoder) }
-    LIB0_BINARY -> decoder.readBytes()
-    else -> error("unknown lib0 any tag: $tag")
 }

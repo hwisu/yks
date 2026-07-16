@@ -30,6 +30,7 @@ internal object LegacyUpdateCodec {
             }
         }
         val version = when {
+            items.any { item -> item.content is ItemContent.Text && item.length > 1 } -> 5
             items.any { item ->
                 val content = item.content as? ItemContent.XmlType
                 content != null && (content.attributes.isNotEmpty() || content.baseAttributes.isNotEmpty())
@@ -55,7 +56,7 @@ internal object LegacyUpdateCodec {
             "unsupported update format"
         }
         val version = decoder.readByte()
-        check(version in 1..4) { "unsupported legacy update version: $version" }
+        check(version in 1..5) { "unsupported legacy update version: $version" }
         val itemCount = decoder.readVarUInt().toDecodedCount()
         val items = buildList {
             repeat(itemCount) {
@@ -99,13 +100,17 @@ internal object LegacyUpdateCodec {
                 writeYValue(encoder, content.value)
             }
             is ItemContent.Text -> {
-                if (content.kind == RootKind.Text) {
+                if (version >= 5) {
+                    encoder.writeByte(14)
+                    writeRootKind(encoder, content.kind)
+                    encoder.writeString(content.value)
+                } else if (content.kind == RootKind.Text) {
                     encoder.writeByte(1)
                 } else {
                     encoder.writeByte(9)
                     writeRootKind(encoder, content.kind)
                 }
-                encoder.writeVarUInt(content.value.single().code.toLong())
+                if (version < 5) encoder.writeVarUInt(content.value.single().code.toLong())
                 writeAttributes(encoder, content.attributes)
                 writeAttributes(encoder, content.baseAttributes)
             }
@@ -257,6 +262,13 @@ internal object LegacyUpdateCodec {
                 )
             }
             13 -> ItemContent.Deleted(readRootKind(decoder), decoder.readVarUInt())
+            14 -> {
+                check(version >= 5) { "packed text requires legacy update version 5" }
+                val kind = readRootKind(decoder)
+                val value = decoder.readString()
+                val attributes = readAttributes(decoder)
+                ItemContent.Text(value, attributes, readAttributes(decoder), kind)
+            }
             else -> error("unknown item content tag: $tag")
         }
         return StoreItem(
@@ -334,7 +346,7 @@ internal object LegacyUpdateCodec {
             repeat(rangeCount) {
                 val clock = decoder.readVarUInt()
                 val length = decoder.readVarUInt()
-                deleteSet.clients.getOrPut(client) { mutableListOf() }.add(DeleteRange(clock, length))
+                deleteSet.add(Id(client, clock), length)
             }
         }
         return deleteSet

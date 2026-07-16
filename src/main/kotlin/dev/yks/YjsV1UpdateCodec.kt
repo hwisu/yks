@@ -922,7 +922,7 @@ private sealed interface EncodedStruct {
         val second: StoreItem,
     ) : EncodedStruct {
         override val clock: Long get() = first.id.clock
-        override val length: Long = 2
+        override val length: Long get() = checkedClockAdd(first.length, second.length, "packed text length")
         val value: String get() = (first.content as ItemContent.Text).value + (second.content as ItemContent.Text).value
     }
 
@@ -987,23 +987,20 @@ private fun List<StoreItem>.withClockSkips(): List<EncodedStruct> {
 }
 
 private fun List<StoreItem>.hasValidTextSurrogatePairs(): Boolean {
-    var index = 0
-    while (index < size) {
-        val item = this[index]
-        val text = item.content as? ItemContent.Text
-        if (text == null) {
-            index++
-            continue
-        }
-        val char = text.value.single()
+    data class TextUnit(val itemIndex: Int, val char: Char)
+    val units = flatMapIndexed { itemIndex, item ->
+        (item.content as? ItemContent.Text)?.value?.map { char -> TextUnit(itemIndex, char) }.orEmpty()
+    }
+    units.forEachIndexed { index, unit ->
         when {
-            char.isHighSurrogate() -> {
-                val next = getOrNull(index + 1) ?: return false
-                if (!item.canPackTextWith(next)) return false
-                index += 2
+            unit.char.isHighSurrogate() -> {
+                val next = units.getOrNull(index + 1) ?: return false
+                if (!next.char.isLowSurrogate()) return false
+                if (unit.itemIndex != next.itemIndex && !this[unit.itemIndex].canPackTextWith(this[next.itemIndex])) {
+                    return false
+                }
             }
-            char.isLowSurrogate() -> return false
-            else -> index++
+            unit.char.isLowSurrogate() && units.getOrNull(index - 1)?.char?.isHighSurrogate() != true -> return false
         }
     }
     return true
@@ -1012,11 +1009,9 @@ private fun List<StoreItem>.hasValidTextSurrogatePairs(): Boolean {
 private fun StoreItem.canPackTextWith(right: StoreItem): Boolean {
     val leftContent = content as? ItemContent.Text ?: return false
     val rightContent = right.content as? ItemContent.Text ?: return false
-    return leftContent.value.single().isHighSurrogate() &&
-        rightContent.value.single().isLowSurrogate() &&
-        right.id.client == id.client &&
-        right.id.clock == checkedClockAdd(id.clock, 1) &&
-        right.origin == id &&
+    return right.id.client == id.client &&
+        right.id.clock == checkedClockAdd(id.clock, length, "packed text right clock") &&
+        right.origin == lastId &&
         right.rightOrigin == rightOrigin &&
         right.parent == parent &&
         right.parentSub == parentSub &&
@@ -1150,13 +1145,18 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
             )
         }
         val contents = item.content.toItemContents(kind)
-        contents.mapIndexed { index, content ->
-            StoreItem(
-                id = Id(item.id.client, checkedClockAdd(item.id.clock, index.toLong())),
-                origin = if (index == 0) {
+        val contentLength = contents.sumOf { content -> content.clockLength }
+        check(contentLength == item.content.length) {
+            "decoded content length $contentLength does not match ${item.content.length}"
+        }
+        var clockOffset = 0L
+        contents.map { content ->
+            val storeItem = StoreItem(
+                id = Id(item.id.client, checkedClockAdd(item.id.clock, clockOffset)),
+                origin = if (clockOffset == 0L) {
                     item.origin
                 } else {
-                    Id(item.id.client, checkedClockAdd(item.id.clock, index.toLong() - 1))
+                    Id(item.id.client, checkedClockAdd(item.id.clock, clockOffset - 1))
                 },
                 rightOrigin = item.rightOrigin,
                 parent = parent,
@@ -1167,6 +1167,8 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
                 isGc = isGc,
                 unresolvedParent = if (isGc) null else unresolvedParent(item),
             )
+            clockOffset = checkedClockAdd(clockOffset, storeItem.length, "decoded content offset")
+            storeItem
         }
     }
 }
@@ -1194,7 +1196,7 @@ private fun WireContent.toItemContents(kind: RootKind): List<ItemContent> = when
     is WireContent.Deleted -> listOf(ItemContent.Deleted(kind, length))
     is WireContent.StringContent -> {
         value.length.toLong().toDecodedCount("text UTF-16 length")
-        value.map { char -> ItemContent.Text(char.toString(), kind = kind) }
+        listOf(ItemContent.Text(value, kind = kind))
     }
     is WireContent.Embed -> listOf(ItemContent.TextEmbed(YValue.from(value), kind = kind))
     is WireContent.Format -> listOf(toItemContent(kind))
@@ -1304,4 +1306,4 @@ private fun gcParentName(client: Long): String = "__yjs_gc__:$client"
 
 private fun ByteArray.hasLegacyMagic(): Boolean =
     size >= 4 && this[0] == 'Y'.code.toByte() && this[1] == 'K'.code.toByte() &&
-        this[2] == 'S'.code.toByte() && this[3] in setOf(1.toByte(), 2.toByte(), 3.toByte(), 4.toByte())
+        this[2] == 'S'.code.toByte() && this[3] in setOf(1.toByte(), 2.toByte(), 3.toByte(), 4.toByte(), 5.toByte())

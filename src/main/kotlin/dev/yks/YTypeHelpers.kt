@@ -34,7 +34,7 @@ class ItemTextListPosition(
             ).toNonNegativeInt("text list position index")
         }
         left = item
-        right = getTypeStructs(type).nextAfter(item)
+        right = logicalTypeStructs(type).nextAfter(item)
         return this
     }
 
@@ -62,7 +62,7 @@ fun createItemTextListPosition(
     renderer: AbstractRenderer = baseRenderer,
 ): ItemTextListPosition {
     require(index >= 0) { "index must be non-negative" }
-    val visible = getTypeStructs(type).filter { item -> !item.deleted && item.countable }
+    val visible = logicalTypeStructs(type).filter { item -> !item.deleted && item.countable }
     require(index <= visible.size) { "index is out of bounds" }
     return ItemTextListPosition(
         left = visible.getOrNull(index - 1),
@@ -78,7 +78,7 @@ fun findMarker(type: AbstractYType, index: Int): ArraySearchMarker? {
     require(index >= 0) { "index must be non-negative" }
     if (index == 0) return null
 
-    val visible = getTypeStructs(type)
+    val visible = logicalTypeStructs(type)
         .filter { item -> !item.deleted && item.countable }
     if (visible.isEmpty()) return null
 
@@ -290,6 +290,7 @@ internal fun renderedSequenceIndexToVisibleIndex(
     var visible = 0
     type.doc.sequence(type.name)
         .filter { item -> item.content.kind == type.kind && item.countable }
+        .flatMap(StoreItem::logicalUnits)
         .forEach { item ->
             val renderedLength = rendererContentLength(renderer, item.toItemStruct(type.doc))
                 .toNonNegativeInt("rendered sequence length")
@@ -323,6 +324,7 @@ private fun collectRendererAttributedDeletedIds(
     var rendered = 0L
     type.doc.sequence(type.name)
         .filter { item -> item.content.kind == type.kind && item.countable }
+        .flatMap(StoreItem::logicalUnits)
         .forEach { item ->
             val struct = item.toItemStruct(type.doc)
             val renderedLength = rendererContentLength(renderer, struct)
@@ -509,6 +511,19 @@ private fun ItemTextListPosition.moveTo(parent: YText, index: Int, formats: Map<
 private fun List<Item>.nextAfter(item: Item): Item? {
     val index = indexOfFirst { candidate -> candidate.id == item.id }
     return if (index >= 0) getOrNull(index + 1) else null
+}
+
+private fun logicalTypeStructs(type: AbstractYType): List<Item> = getTypeStructs(type).flatMap { item ->
+    val text = item.content as? ContentString ?: return@flatMap listOf(item)
+    if (text.str.length == 1) return@flatMap listOf(item)
+    text.str.mapIndexed { offset, char ->
+        item.copy(
+            id = Id(item.id.client, checkedClockAdd(item.id.clock, offset.toLong(), "text unit clock")),
+            length = 1,
+            origin = if (offset == 0) item.origin else Id(item.id.client, item.id.clock + offset - 1),
+            content = ContentString(char.toString()),
+        )
+    }
 }
 
 private fun List<*>.textInsertLengthForPosition(): Int =

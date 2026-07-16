@@ -346,6 +346,7 @@ fun iterateStructsByIdSet(
     idSet: IdSet,
     action: (struct: ItemStruct, offset: Long, length: Long) -> Unit,
 ) {
+    doc.splitStoreAtIdSetBoundaries(idSet)
     doc.itemsForIdSet(idSet).forEach { item ->
         action(item.toItemStruct(doc), 0, item.length)
     }

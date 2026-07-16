@@ -18,6 +18,13 @@ private val docOnlyEventNames = setOf(
     "beforeAllTransactions",
 )
 
+/**
+ * Mutable Yjs-compatible document.
+ *
+ * Like an upstream Yjs document, a [YDoc] and its attached shared types are thread-confined.
+ * Callers must serialize access when using them from multiple JVM threads. Encoded updates,
+ * state vectors, and copied value snapshots are safe hand-off boundaries.
+ */
 class YDoc(
     clientId: Long = randomClientId(),
     var guid: String = randomGuid(),
@@ -711,7 +718,9 @@ class YDoc(
     internal fun nextId(): Id = Id(clientId, store.getClock(clientId))
 
     internal fun visibleSequence(parent: String): List<StoreItem> =
-        store.sequence(parent).filter { !it.deleted && it.countable }
+        store.sequence(parent)
+            .filter { !it.deleted && it.countable }
+            .flatMap(StoreItem::logicalUnits)
 
     internal fun sequence(parent: String): List<StoreItem> = store.sequence(parent)
 
@@ -765,7 +774,7 @@ class YDoc(
     }
 
     internal fun setPendingDeleteSetUpdate(update: ByteArray?) {
-        pendingDeletes.clients.clear()
+        pendingDeletes.clear()
         update?.let { pendingDeletes.addAll(UpdateCodec.decode(it).deleteSet) }
     }
 
@@ -787,33 +796,51 @@ class YDoc(
                     val itemEnd = checkedClockAdd(item.id.clock, item.length)
                     val start = maxOf(item.id.clock, range.clock)
                     val end = minOf(itemEnd, range.end)
-                    val selected = if (start == item.id.clock && end == itemEnd) {
-                        item.copy()
-                    } else {
-                        val deleted = item.content as? ItemContent.Deleted
-                            ?: error("id range splits unsupported store item at ${item.id}")
-                        item.copy(
-                            id = Id(client, start),
-                            origin = if (item.isGc || start == item.id.clock) item.origin else Id(client, start - 1),
-                            content = deleted.copy(length = end - start),
-                        )
-                    }
+                    val selected = item.sliceClocks(start, end)
                     items.add(if (deletedOverride == null) selected else selected.copy(deleted = deletedOverride))
                 }
         }
         return items
     }
 
+    internal fun splitStoreAtIdSetBoundaries(idSet: IdSet) {
+        store.splitAtDeleteSetBoundaries(idSet.toDeleteSet()) { right ->
+            currentTransaction?.mergeStructs?.add(right.id)
+        }
+    }
+
     internal fun followRedone(id: Id): Id {
         var current = id
         val seen = mutableSetOf<Id>()
         while (seen.add(current)) {
-            current = redoneByOriginal[current] ?: return current
+            val direct = redoneByOriginal[current]
+            val ranged = if (direct == null) {
+                redoneByOriginal.entries.firstNotNullOfOrNull { (originalStart, restoredStart) ->
+                    if (originalStart.client != current.client || current.clock < originalStart.clock) return@firstNotNullOfOrNull null
+                    val original = store.getStoreItem(originalStart) ?: return@firstNotNullOfOrNull null
+                    val offset = current.clock - originalStart.clock
+                    if (offset >= original.length) return@firstNotNullOfOrNull null
+                    Id(restoredStart.client, checkedClockAdd(restoredStart.clock, offset, "follow redone clock"))
+                }
+            } else {
+                null
+            }
+            current = direct ?: ranged ?: return current
         }
         return current
     }
 
-    internal fun redoneRangeEnd(id: Id): Id? = redoneRangeEndByOriginal[id]?.let(::followRedone)
+    internal fun redoneRangeEnd(id: Id): Id? {
+        val end = redoneRangeEndByOriginal[id]
+            ?: redoneRangeEndByOriginal.entries.firstNotNullOfOrNull { (originalStart, restoredEnd) ->
+                if (originalStart.client != id.client || id.clock < originalStart.clock) {
+                    return@firstNotNullOfOrNull null
+                }
+                val original = store.getStoreItem(originalStart) ?: return@firstNotNullOfOrNull null
+                restoredEnd.takeIf { id.clock - originalStart.clock < original.length }
+            }
+        return end?.let(::followRedone)
+    }
 
     internal fun setItemKeep(id: Id, keep: Boolean) {
         if (keep) {
@@ -982,14 +1009,39 @@ class YDoc(
 
     internal fun insertionAnchors(parent: String, kind: RootKind, index: Int): Pair<Id?, Id?> {
         if (kind == RootKind.Text || kind == RootKind.XmlText) {
-            val full = sequence(parent).filter { it.content.kind == kind }
+            var full = sequence(parent).filter { it.content.kind == kind }
             val visible = full.filter { !it.deleted && it.countable }
-            require(index <= visible.size) { "insert index is out of bounds" }
-            val right = visible.getOrNull(index)
+            val visibleLength = visible.sumOf { item -> item.length }
+            require(index.toLong() <= visibleLength) { "insert index is out of bounds" }
+            var offset = 0L
+            val containing = visible.firstOrNull { item ->
+                val next = checkedClockAdd(offset, item.length, "visible text length")
+                val contains = index.toLong() > offset && index.toLong() < next
+                offset = next
+                contains
+            }
+            if (containing != null) {
+                val splitClock = checkedClockAdd(
+                    containing.id.clock,
+                    index.toLong() - (offset - containing.length),
+                    "text insertion split clock",
+                )
+                store.getStoreItemCleanStart(Id(containing.id.client, splitClock)) { right ->
+                    currentTransaction?.mergeStructs?.add(right.id)
+                }
+                full = sequence(parent).filter { it.content.kind == kind }
+            }
+            var logicalIndex = 0L
+            val right = full.firstOrNull { item ->
+                if (item.deleted || !item.countable) return@firstOrNull false
+                val isRight = logicalIndex == index.toLong()
+                logicalIndex = checkedClockAdd(logicalIndex, item.length, "visible text index")
+                isRight
+            }
             val rightIndex = right?.let(full::indexOf) ?: full.size
             val left = full.getOrNull(rightIndex - 1)
             registerVirtualInsertionSplitCandidate(left, right)
-            return left?.id to right?.id
+            return left?.lastId to right?.id
         }
         val full = sequence(parent).filter { it.content.kind == kind && it.countable }
         val visible = full.filter { !it.deleted }
@@ -998,7 +1050,7 @@ class YDoc(
         val rightIndex = right?.let { full.indexOf(it) } ?: full.size
         val left = full.getOrNull(rightIndex - 1)
         registerVirtualInsertionSplitCandidate(left, right)
-        return left?.id to right?.id
+        return left?.lastId to right?.id
     }
 
     private fun registerVirtualInsertionSplitCandidate(left: StoreItem?, right: StoreItem?) {
@@ -1395,20 +1447,48 @@ class YDoc(
         origin: Any? = null,
         strictLength: Boolean = true,
     ) {
-        val visible = visibleSequence(parent)
         val start = index.coerceAtLeast(0)
         transact(origin = origin) {
             if (length <= 0) return@transact
-            val available = (visible.size - start).coerceAtLeast(0)
+            val totalLength = visibleSequence(parent).sumOf { item -> item.length }
+            val available = (totalLength - start.toLong()).coerceAtLeast(0).toNonNegativeInt("visible delete length")
             val deleteCount = minOf(length, available)
             if (deleteCount > 0) {
+                splitVisibleSequenceBoundary(parent, start.toLong())
+                splitVisibleSequenceBoundary(parent, checkedClockAdd(start.toLong(), deleteCount.toLong(), "delete end"))
                 val deleteSet = DeleteSet.empty()
-                visible.subList(start, start + deleteCount).forEach { deleteSet.add(it.id, it.length) }
+                var offset = 0L
+                val deleteStart = start.toLong()
+                val deleteEnd = checkedClockAdd(deleteStart, deleteCount.toLong(), "delete end")
+                visibleSequence(parent).forEach { item ->
+                    val itemStart = offset
+                    val itemEnd = checkedClockAdd(itemStart, item.length, "visible item end")
+                    if (itemStart >= deleteStart && itemEnd <= deleteEnd) deleteSet.add(item.id, item.length)
+                    offset = itemEnd
+                }
                 applyDeleteSet(deleteSet)
             }
             if (strictLength && length > available) {
                 throw IllegalArgumentException("delete range is out of bounds")
             }
+        }
+    }
+
+    private fun splitVisibleSequenceBoundary(parent: String, index: Long) {
+        var offset = 0L
+        val containing = visibleSequence(parent).firstOrNull { item ->
+            val next = checkedClockAdd(offset, item.length, "visible sequence length")
+            val contains = index > offset && index < next
+            offset = next
+            contains
+        } ?: return
+        val splitClock = checkedClockAdd(
+            containing.id.clock,
+            index - (offset - containing.length),
+            "visible sequence split clock",
+        )
+        store.getStoreItemCleanStart(Id(containing.id.client, splitClock)) { right ->
+            currentTransaction?.mergeStructs?.add(right.id)
         }
     }
 
@@ -1434,6 +1514,14 @@ class YDoc(
                     }
                 }
             }
+            applyDeleteSet(deleteSet)
+        }
+    }
+
+    internal fun deleteItemRanges(items: Iterable<StoreItem>) {
+        transact {
+            val deleteSet = DeleteSet.empty()
+            items.forEach { item -> deleteSet.add(item.id, item.length) }
             applyDeleteSet(deleteSet)
         }
     }
@@ -1538,6 +1626,9 @@ class YDoc(
         if (deleteSet.isEmpty) return
         val expandedDeleteSet = expandDeleteSetWithNestedTypeContent(deleteSet)
         registerVirtualSplitMergeCandidates(expandedDeleteSet)
+        store.splitAtDeleteSetBoundaries(expandedDeleteSet) { right ->
+            currentTransaction?.mergeStructs?.add(right.id)
+        }
         val newlyDeletedItems = store.itemsStartingIn(expandedDeleteSet).filterNot { it.deleted }
         val newlyDeleted = newlyDeletedItems.map { it.copy(deleted = false) }
         newlyDeleted.forEach { captureParentBefore(it.parent, it.content.kind) }
@@ -1563,11 +1654,7 @@ class YDoc(
         }
     }
 
-    /**
-     * StoreItem values are unit-sized even when upstream currently represents adjacent values as
-     * one packed Item. Record the right unit at every deletion boundary that would split such an
-     * Item, mirroring splitItem's transaction._mergeStructs entry.
-     */
+    /** Record deletion-boundary splits for transaction-cleanup merging, matching Yjs splitItem. */
     private fun registerVirtualSplitMergeCandidates(deleteSet: DeleteSet) {
         val transaction = currentTransaction ?: return
         val allItems = store.allItems()
@@ -1628,10 +1715,7 @@ class YDoc(
                 }
                 if (canIntegrate(item)) {
                     iterator.remove()
-                    val wasPendingDelete = pendingDeletes.contains(item.id)
-                    if (wasPendingDelete) {
-                        item.deleted = true
-                    }
+                    cleanRemoteOrigins(item)
                     captureParentBefore(item.parent, item.content.kind)
                     if (store.add(item)) {
                         rememberMapKey(item)
@@ -1641,10 +1725,6 @@ class YDoc(
                         rememberNestedRefs(item.content)
                         currentTransaction?.addedItems?.add(item)
                         currentTransaction?.markChanged(item.parent, item.parentSub)
-                        if (wasPendingDelete) {
-                            currentTransaction?.deleteSet?.add(item.id, item.length)
-                            currentTransaction?.deletedItems?.add(item.copy(deleted = false))
-                        }
                         deletePreviousMapCurrentIfSuperseded(
                             item,
                             item.parentSub?.let { key ->
@@ -1656,6 +1736,25 @@ class YDoc(
                 }
             }
         } while (madeProgress)
+        // Pending delete ranges may point inside a newly integrated packed item. Apply them only
+        // after struct integration, matching Yjs and allowing the normal boundary-split path to
+        // select the exact UTF-16 clock range.
+        applyDeleteSet(pendingDeletes.copy())
+    }
+
+    private fun cleanRemoteOrigins(item: StoreItem) {
+        item.origin?.let { origin ->
+            val anchor = store.getStoreItem(origin) ?: return@let
+            if (!anchor.isGc && origin.clock < anchor.lastId.clock) {
+                store.getStoreItemCleanEnd(origin) { right -> currentTransaction?.mergeStructs?.add(right.id) }
+            }
+        }
+        item.rightOrigin?.let { rightOrigin ->
+            val anchor = store.getStoreItem(rightOrigin) ?: return@let
+            if (!anchor.isGc && rightOrigin.clock > anchor.id.clock) {
+                store.getStoreItemCleanStart(rightOrigin) { right -> currentTransaction?.mergeStructs?.add(right.id) }
+            }
+        }
     }
 
     private fun resolveRemoteParentAlias(item: StoreItem): StoreItem {
@@ -1745,7 +1844,7 @@ class YDoc(
     private fun reapplyTextFormats(parent: String): List<StoreItem> {
         val changed = mutableListOf<StoreItem>()
         val activeNativeAttributes = linkedMapOf<String, YValue>()
-        sequence(parent).forEach { item ->
+        sequence(parent).toList().forEach { item ->
             if (item.deleted) return@forEach
             when (val content = item.content) {
                 is ItemContent.NativeTextFormat -> activeNativeAttributes[content.key] = content.value
@@ -1758,7 +1857,7 @@ class YDoc(
                 else -> Unit
             }
         }
-        sequence(parent)
+        sequence(parent).toList()
             .filter { item -> !item.deleted && item.content is ItemContent.TextFormat }
             .sortedWith(textFormatApplicationOrder)
             .forEach { formatItem -> changed.addAll(applySingleTextFormat(formatItem)) }
@@ -1864,9 +1963,8 @@ class YDoc(
         try {
             while (pendingTransactionEmits.isNotEmpty()) {
                 val batch = mutableListOf<YTransactionEvent>()
-                // Yjs physically merges adjacent Item structs during transaction cleanup. This
-                // store keeps one item per value/code unit, so retain the equivalent representative
-                // id for later events in the same cleanup batch.
+                // Retain the representative id of cleanup-merged fragments for later events in
+                // the same cleanup batch, matching Yjs transaction cleanup.
                 val mergedStructRepresentatives = linkedMapOf<Id, Id>()
                 while (pendingTransactionEmits.isNotEmpty()) {
                     val next = pendingTransactionEmits.removeFirst()
@@ -3220,7 +3318,7 @@ class YDoc(
 
             fun flushBlock() {
                 if (block.isEmpty()) return
-                val end = block.last().second.id
+                val end = block.last().second.lastId
                 block.forEach { (source, _) -> redoneRangeEndByOriginal[source.id] = end }
                 block.clear()
             }
@@ -3241,6 +3339,15 @@ class YDoc(
     private fun inferRightOrigin(source: StoreItem): Id? {
         source.rightOrigin?.let { return it }
         if (source.parentSub != null) return null
+        val sourceEnd = checkedClockAdd(source.id.clock, source.length, "restore source end")
+        val containing = store.getStoreItem(source.id)
+        if (
+            containing != null &&
+            containing.id.client == source.id.client &&
+            sourceEnd < checkedClockAdd(containing.id.clock, containing.length, "restore containing end")
+        ) {
+            return Id(source.id.client, sourceEnd)
+        }
         val sequence = sequence(source.parent)
         val index = sequence.indexOfFirst { it.id == source.id }
         if (index < 0) return null

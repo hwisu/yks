@@ -152,9 +152,9 @@ for example `encodeStateAsUpdateLossless`, `encodeStateAsUpdateV2Lossless`,
 `mergeUpdatesLossless`, `diffUpdateLossless`, or
 `convertUpdateFormatV1ToV2Lossless`. Lossless APIs still emit genuine standard
 wire whenever possible, and otherwise emit the private envelope beginning with
-`YKS`. The latest envelope is `YKS\x04`; the writer selects the oldest sufficient
-version from `YKS\x02` through `YKS\x04`, and readers retain compatibility with
-`YKS\x01` through `YKS\x04`. Upstream JavaScript Yjs cannot read this format.
+`YKS`. The latest envelope is `YKS\x05`; the writer selects the oldest sufficient
+version from `YKS\x02` through `YKS\x05`, and readers retain compatibility with
+`YKS\x01` through `YKS\x05`. Upstream JavaScript Yjs cannot read this format.
 The `V2Lossless` APIs emit genuine V2 when representable; their fallback is the
 versioned private YKS envelope, not a Yjs V2 frame.
 
@@ -182,6 +182,19 @@ Applications synchronizing directly with JavaScript Yjs should use only the
 standard APIs/channels. Pending and private internal relay state uses the
 lossless path so it is never discarded; exporting that state through a standard
 API fails explicitly until it becomes representable.
+
+## Concurrency and untrusted input
+
+`YDoc` and document-owned shared types are mutable and thread-confined, as they
+are in Yjs. Serialize access when multiple JVM threads can reach the same
+document. Encoded update/state-vector byte arrays and copied value snapshots are
+the supported hand-off boundaries between threads.
+
+Public `DeleteSet`, `IdSet`, and `IdMap` collection properties return defensive
+snapshots; use their mutation methods instead of editing returned collections.
+Binary decoders reject oversized collections, individual payloads, excessive
+aggregate payload, excessive value-node counts, and nesting deeper than 256.
+Malformed UTF-8 and legacy JSON are rejected rather than repaired silently.
 
 ## Known limitations
 

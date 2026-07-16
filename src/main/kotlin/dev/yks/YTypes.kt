@@ -912,7 +912,10 @@ open class YText internal constructor(
     val length: Int
         get() {
             if (warnIfPreliminary()) return 0
-            return doc.visibleSequence(name).count { it.content.kind == kind }
+            return doc.visibleSequence(name)
+                .filter { it.content.kind == kind }
+                .sumOf { item -> item.length }
+                .toNonNegativeInt("text length")
         }
 
     val attrSize: Int get() = getAttrs().size
@@ -930,7 +933,7 @@ open class YText internal constructor(
             val baseAttributes = normalized.orEmpty()
             insertAttributedTextEntries(
                 start,
-                text.map { ItemContent.Text(it.toString(), baseAttributes, kind = kind) },
+                listOf(ItemContent.Text(text, baseAttributes, kind = kind)),
                 normalized,
             )
         }
@@ -954,7 +957,7 @@ open class YText internal constructor(
             val baseAttributes = normalized.orEmpty()
             insertAttributedTextEntries(
                 start,
-                text.map { ItemContent.Text(it.toString(), baseAttributes, kind = kind) },
+                listOf(ItemContent.Text(text, baseAttributes, kind = kind)),
                 normalized,
             )
         }
@@ -982,7 +985,9 @@ open class YText internal constructor(
             val baseAttributes = normalized.orEmpty()
             val entries = values.flatMap { value ->
                 when (value) {
-                    is String -> value.map { ItemContent.Text(it.toString(), baseAttributes, kind = kind) }
+                    is String -> value.takeIf(String::isNotEmpty)
+                        ?.let { text -> listOf(ItemContent.Text(text, baseAttributes, kind = kind)) }
+                        .orEmpty()
                     is Char -> listOf(ItemContent.Text(value.toString(), baseAttributes, kind = kind))
                     null -> error("text embeds must not be null")
                     is AbstractYType -> listOf(
@@ -1623,7 +1628,7 @@ open class YText internal constructor(
                 content = content,
             )
             doc.integrateLocal(item)
-            origin = item.id
+            origin = item.lastId
         }
     }
 
@@ -1656,7 +1661,8 @@ open class YText internal constructor(
             originOverride = markerOrigin ?: anchors.first,
             rightOriginOverride = anchors.second,
         )
-        insertNativeFormatMarkers(index + entries.size, restore)
+        val insertedLength = entries.sumOf { entry -> entry.clockLength }.toNonNegativeInt("inserted text length")
+        insertNativeFormatMarkers(index + insertedLength, restore)
     }
 
     private fun formatNativeRange(start: Int, length: Int, attributes: Map<String, YValue>) {

@@ -8,6 +8,21 @@ import kotlin.test.assertTrue
 
 class GarbageCollectionDeleteSetTest {
     @Test
+    fun deleteSetConstructorInputsAndPublicViewsCannotCorruptNormalizedState() {
+        val sourceRanges = mutableListOf(DeleteRange(5, 1), DeleteRange(0, 2))
+        val source = mutableMapOf<Long, List<DeleteRange>>(1L to sourceRanges)
+        val deleteSet = DeleteSet(source)
+
+        sourceRanges.clear()
+        source.clear()
+        @Suppress("UNCHECKED_CAST")
+        (deleteSet.clients as MutableMap<Long, List<DeleteRange>>).clear()
+
+        assertEquals(listOf(DeleteRange(0, 2), DeleteRange(5, 1)), deleteSet.rangesFor(1))
+        assertTrue(deleteSet.contains(Id(1, 5)))
+    }
+
+    @Test
     fun automaticGcRunsAfterTransactionObserversAndBeforeCleanupObservers() {
         val doc = YDoc(clientId = 1, gc = true)
         val text = doc.getText("body")
@@ -131,7 +146,7 @@ class GarbageCollectionDeleteSetTest {
             iterateDeletedStructs(transaction, fromStore) { struct -> visited.add(struct.id) }
         })
 
-        assertEquals(listOf(Id(7, 1), Id(7, 2)), visited)
+        assertEquals(listOf(Id(7, 1)), visited)
         assertTrue(equalDeleteSets(doc.deleteSet(), fromStore))
     }
 }
