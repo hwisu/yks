@@ -31,6 +31,32 @@ class YDocTest {
     }
 
     @Test
+    fun rootEmptinessMatchesYjsStructuralStartAndMapSemantics() {
+        val document = YDoc(clientId = 1)
+        assertTrue(document.isRootEmpty("missing"))
+        assertTrue(document.isRootEmpty("body"))
+
+        val body = document.getText("body")
+        body.insert(0, "x")
+        assertFalse(document.isRootEmpty("body"))
+        body.delete(0, 1)
+        assertFalse(document.isRootEmpty("body"))
+
+        val metadata = document.getMap("metadata")
+        assertTrue(document.isRootEmpty("metadata"))
+        metadata.set("ready", true)
+        assertFalse(document.isRootEmpty("metadata"))
+        metadata.delete("ready")
+        assertFalse(document.isRootEmpty("metadata"))
+
+        val remote = YDoc(clientId = 2)
+        remote.getText("remote").insert(0, "content")
+        val unopened = createDocFromUpdate(remote.encodeStateAsUpdate())
+        assertIs<YUnopenedRoot>(unopened.getOrNull("remote"))
+        assertFalse(unopened.isRootEmpty("remote"))
+    }
+
+    @Test
     fun arrayChangesConvergeThroughUpdates() {
         val left = YDoc(clientId = 1)
         val right = YDoc(clientId = 2)

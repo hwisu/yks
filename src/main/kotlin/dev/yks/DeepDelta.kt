@@ -555,10 +555,10 @@ private fun renderSequenceItems(
     )
     return buildList {
         ClockRangeCursor(items).forEachRange(
-            boundaries = { item ->
+            boundariesForClient = { client ->
                 buildList {
                     boundarySets.forEach { ids ->
-                        ids.ranges(item.id.client).forEach { range ->
+                        ids.ranges(client).forEach { range ->
                             add(range.clock)
                             add(range.end)
                         }

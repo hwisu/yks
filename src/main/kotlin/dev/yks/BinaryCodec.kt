@@ -227,13 +227,24 @@ class BinaryDecoder(
         val length = readVarUInt().toDecodedCount("string byte length", minOf(MAX_DECODED_BINARY_SIZE, bytes.size - offset))
         check(length <= bytes.size - offset) { "invalid string length: $length" }
         decodeBudget.consumePayloadBytes(length)
-        val decoder = Charsets.UTF_8.newDecoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT)
-        val value = try {
-            decoder.decode(ByteBuffer.wrap(bytes, offset, length)).toString()
-        } catch (error: java.nio.charset.CharacterCodingException) {
-            throw IllegalStateException("invalid UTF-8 string", error)
+        var ascii = true
+        for (index in offset until offset + length) {
+            if (bytes[index] < 0) {
+                ascii = false
+                break
+            }
+        }
+        val value = if (ascii) {
+            String(bytes, offset, length, Charsets.US_ASCII)
+        } else {
+            val decoder = Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+            try {
+                decoder.decode(ByteBuffer.wrap(bytes, offset, length)).toString()
+            } catch (error: java.nio.charset.CharacterCodingException) {
+                throw IllegalStateException("invalid UTF-8 string", error)
+            }
         }
         offset += length
         return value

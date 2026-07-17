@@ -189,27 +189,71 @@ internal class ClockRangeCursor(private val items: Iterable<StoreItem>) {
     }
 
     fun forEachRange(
-        boundaries: (StoreItem) -> Iterable<Long>,
+        boundariesForClient: (Long) -> Iterable<Long>,
         action: (item: StoreItem, startClock: Long, endClock: Long) -> Boolean,
     ) {
+        val boundariesByClient = mutableMapOf<Long, ClientClockBoundaries>()
+        val emptyBoundaryCursor = ClientClockBoundaries(LongArray(0))
         items.forEach { item ->
             val itemStart = item.id.clock
             val itemEnd = item.clockEnd()
-            val cuts = boundaries(item)
-                .asSequence()
-                .filter { clock -> clock > itemStart && clock < itemEnd }
-                .distinct()
-                .sorted()
-                .toList()
+            val boundaryCursor = if (item.isGc) {
+                emptyBoundaryCursor
+            } else {
+                boundariesByClient.getOrPut(item.id.client) {
+                    ClientClockBoundaries(
+                        boundariesForClient(item.id.client)
+                            .asSequence()
+                            .distinct()
+                            .sorted()
+                            .toList()
+                            .toLongArray(),
+                    )
+                }
+            }
             var start = itemStart
-            cuts.forEach { end ->
+            var boundaryIndex = boundaryCursor.firstIndexAfter(itemStart)
+            while (
+                boundaryIndex < boundaryCursor.clocks.size &&
+                boundaryCursor.clocks[boundaryIndex] < itemEnd
+            ) {
+                val end = boundaryCursor.clocks[boundaryIndex++]
                 if (!action(item, start, end)) return
                 start = end
             }
+            boundaryCursor.commit(itemStart, boundaryIndex)
             if (!action(item, start, itemEnd)) return
         }
     }
+}
 
+private class ClientClockBoundaries(
+    val clocks: LongArray,
+) {
+    private var nextIndex: Int = 0
+    private var previousItemStart: Long = -1
+
+    fun firstIndexAfter(clock: Long): Int {
+        if (clock < previousItemStart) return clocks.firstIndexAfter(clock)
+        var index = nextIndex
+        while (index < clocks.size && clocks[index] <= clock) index++
+        return index
+    }
+
+    fun commit(itemStart: Long, boundaryIndex: Int) {
+        previousItemStart = itemStart
+        nextIndex = boundaryIndex
+    }
+}
+
+private fun LongArray.firstIndexAfter(clock: Long): Int {
+    var low = 0
+    var high = size
+    while (low < high) {
+        val middle = (low + high) ushr 1
+        if (this[middle] <= clock) low = middle + 1 else high = middle
+    }
+    return low
 }
 
 internal fun StoreItem.clockRangeView(startClock: Long, endClock: Long): StoreItem =

@@ -884,7 +884,7 @@ class YTextDeltaTest {
     }
 
     @Test
-    fun overwrittenNativeFormattingStaysCanonicalWithoutCleanup() {
+    fun overwrittenNativeFormattingRetainsUpstreamRestoreMarkersWithoutCleanup() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("body")
         text.insert(0, "abc")
@@ -892,12 +892,13 @@ class YTextDeltaTest {
         text.format(0, 3, mapOf("bold" to false))
         val before = text.toDelta()
 
-        assertEquals(2, text.liveFormatItemCountForTest())
+        // Yjs keeps the new value, the previous-value restore, and the original null restore.
+        assertEquals(3, text.liveFormatItemCountForTest())
         assertEquals(0, cleanupYTextFormatting(text))
 
         assertEquals(before, text.toDelta())
         assertEquals(YTextDelta().insert("abc", mapOf("bold" to false)), text.toDelta())
-        assertEquals(2, text.liveFormatItemCountForTest())
+        assertEquals(3, text.liveFormatItemCountForTest())
     }
 
     @Test

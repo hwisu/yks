@@ -101,7 +101,7 @@ fun callTypeObservers(type: AbstractYType, event: YEvent) {
 
 fun callTypeObservers(type: AbstractYType, transaction: YTransactionEvent?, event: YEvent) {
     require(event.target.doc === type.doc) { "event target must belong to the same document" }
-    val directEvent = event.copy(
+    val directEvent = event.copyForDeep(
         target = type,
         currentTarget = type,
         changedTarget = type,
@@ -285,7 +285,7 @@ internal fun renderedSequenceIndexToVisibleIndex(
     var visible = 0
     var resolved: Int? = null
     ClockRangeCursor(type.doc.sequence(type.name)).forEachRange(
-        boundaries = { item -> renderer.clockBoundaries(item) },
+        boundariesForClient = { client -> renderer.clockBoundaries(client) },
     ) { source, startClock, endClock ->
         val item = source.clockRangeView(startClock, endClock)
         if (item.content.kind != type.kind || !item.countable) return@forEachRange true
@@ -323,7 +323,7 @@ private fun collectRendererAttributedDeletedIds(
     val deleteIds = createIdSet()
     var rendered = 0L
     ClockRangeCursor(type.doc.sequence(type.name)).forEachRange(
-        boundaries = { item -> renderer.clockBoundaries(item) },
+        boundariesForClient = { client -> renderer.clockBoundaries(client) },
     ) { source, startClock, endClock ->
             val item = source.clockRangeView(startClock, endClock)
             if (item.content.kind != type.kind || !item.countable) return@forEachRange true
@@ -368,8 +368,8 @@ private fun collectRendererAttributedDeletedIds(
     return deleteIds
 }
 
-private fun AbstractRenderer.clockBoundaries(item: StoreItem): List<Long> = buildList {
-    attributed.ranges(item.id.client).forEach { range ->
+private fun AbstractRenderer.clockBoundaries(client: Long): List<Long> = buildList {
+    attributed.ranges(client).forEach { range ->
         add(range.clock)
         add(range.end)
     }
@@ -566,7 +566,7 @@ private fun List<*>.textInsertLengthForPosition(): Int =
 private fun emitDeepTypeObserverEvents(type: AbstractYType, directEvent: YEvent) {
     if (type.hasDeepObservers) {
         type.emitDeep(
-            directEvent.copy(
+            directEvent.copyForDeep(
                 currentTarget = type,
                 changedTarget = type,
                 path = emptyList(),
@@ -579,7 +579,7 @@ private fun emitDeepTypeObserverEvents(type: AbstractYType, directEvent: YEvent)
     while (ancestor != null) {
         ancestor.clearCache()
         val path = type.doc.pathBetween(ancestor.name, type.name).orEmpty()
-        val nestedEvent = directEvent.copy(
+        val nestedEvent = directEvent.copyForDeep(
             currentTarget = ancestor,
             changedTarget = type,
             path = path,

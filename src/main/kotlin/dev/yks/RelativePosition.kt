@@ -155,9 +155,9 @@ private fun YDoc.relativePositionSequence(
         .filter { item -> item.countable && (type is YUnopenedRoot || item.content.kind == type.kind) }
     return buildList {
         ClockRangeCursor(items).forEachRange(
-            boundaries = { item ->
+            boundariesForClient = { client ->
                 buildList {
-                    renderer.attributed.ranges(item.id.client).forEach { range ->
+                    renderer.attributed.ranges(client).forEach { range ->
                         add(range.clock)
                         add(range.end)
                     }

@@ -193,6 +193,7 @@ tasks.register<JavaExec>("performanceBenchmark") {
             providers.gradleProperty("performanceWarmup").getOrElse("8"),
             providers.gradleProperty("performanceSamples").getOrElse("15"),
             providers.gradleProperty("performanceScenarios").getOrElse("all"),
+            providers.gradleProperty("performanceRepeatCounts").getOrElse(""),
         )
         providers.gradleProperty("performanceJfr").orNull?.let { recording ->
             jvmArgs("-XX:StartFlightRecording=filename=$recording,settings=profile,dumponexit=true")
@@ -225,6 +226,7 @@ tasks.register<JavaExec>("jmh") {
             "-i", providers.gradleProperty("jmhMeasurementIterations").getOrElse("5"),
             "-r", providers.gradleProperty("jmhMeasurementTime").getOrElse("500ms"),
             "-f", providers.gradleProperty("jmhForks").getOrElse("1"),
+            "-foe", "true",
             "-prof", providers.gradleProperty("jmhProfiler").getOrElse("gc"),
             "-rf", "json",
             "-rff", report.absolutePath,

@@ -109,6 +109,42 @@ class StructStoreTest {
     }
 
     @Test
+    fun sequentialRemoteUpdatesMergeWithoutLeavingOneStructPerMessage() {
+        assertTimeoutPreemptively(Duration.ofSeconds(2)) {
+            val source = YDoc(clientId = 1, gc = false)
+            val sourceText = source.getText("body")
+            val updates = ArrayList<ByteArray>(1_000)
+            source.observeUpdates { update, _ -> updates.add(update.copyOf()) }
+            repeat(1_000) { sourceText.insert(sourceText.length, "x") }
+
+            val target = YDoc(clientId = 2, gc = false)
+            updates.forEach(target::applyUpdate)
+
+            assertEquals(1_000, updates.size)
+            assertEquals("x".repeat(1_000), target.getText("body").toString())
+            assertEquals(1, target.store.clients.getValue(1).size)
+            assertEquals(1_000L, target.store.clients.getValue(1).single().length)
+        }
+    }
+
+    @Test
+    fun unchangedStateVectorReusesAnImmutableVersionedSnapshot() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        text.insert(0, "a")
+
+        val first = doc.store.stateVector()
+        assertTrue(first === doc.store.stateVector())
+        runCatching { (first as MutableMap<Long, Long>)[1] = 99 }
+        assertEquals(1L, doc.store.stateVector()[1])
+
+        text.insert(1, "b")
+        val changed = doc.store.stateVector()
+        assertFalse(first === changed)
+        assertEquals(2L, changed[1])
+    }
+
+    @Test
     fun repeatedMapHistoryStaysPackedLikeYjs() {
         assertTimeoutPreemptively(Duration.ofSeconds(2)) {
             val doc = YDoc(clientId = 1, gc = false)
@@ -417,6 +453,39 @@ class StructStoreTest {
         val packedMiddle = DeleteSet.empty().also { it.add(Id(3, 500)) }
         assertTrue(store.itemsStartingIn(packedMiddle).isEmpty())
         assertEquals(listOf(Id(3, 0)), store.itemsOverlapping(packedMiddle).map { item -> item.id })
+    }
+
+    @Test
+    fun clockRangeCursorNormalizesBoundariesOncePerClientAndHandlesReverseSequenceOrder() {
+        val items = listOf(
+            storeItem(1, 10, "abcdefghij"),
+            storeItem(1, 0, "abcdefghij"),
+        )
+        var boundaryReads = 0
+        val ranges = mutableListOf<LongRange>()
+
+        ClockRangeCursor(items).forEachRange(
+            boundariesForClient = { client ->
+                assertEquals(1, client)
+                boundaryReads++
+                listOf(15, 5, 12, 15)
+            },
+        ) { _, start, end ->
+            ranges.add(start until end)
+            true
+        }
+
+        assertEquals(1, boundaryReads)
+        assertEquals(
+            listOf(
+                10L until 12L,
+                12L until 15L,
+                15L until 20L,
+                0L until 5L,
+                5L until 10L,
+            ),
+            ranges,
+        )
     }
 
     private fun storeItem(client: Long, clock: Long, text: String): StoreItem =

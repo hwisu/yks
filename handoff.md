@@ -1015,8 +1015,9 @@ Eight adversarial scenarios were added to both the cross-runtime parity gate and
 formatted 5,004-struct apply, 3,000 nested deletes, 5,000 map entries, a packed
 5,000-replacement single-key map history, 10,000 roots,
 100,000 array index reads, 500 observed fragmented edits, and packed clock-range snapshot delta.
-The gate now has 17 scenarios, 50 warmups, 30 samples, a strict 1.5x ratio above the documented
-6 ms microbenchmark budget, and a JVM warmup quiescence window outside the measured interval.
+The gate at this stage had 17 scenarios, 50 warmups, 30 samples, and a JVM warmup quiescence
+window outside the measured interval. Its earlier microbenchmark escape hatch is superseded by
+the mandatory-ratio gate documented in the final section below.
 
 Three consecutive full runs passed. The final run included:
 
@@ -1086,8 +1087,8 @@ default run also passed 28/28. The third consecutive run included:
 | 1,000 edits with 10,000 materialized roots | 6.150 ms | 4.733 ms |
 | observed 5,000-key map edit | 0.066 ms | 0.392 ms |
 
-Sub-millisecond ratios remain governed by the documented 6 ms process-level budget. All workloads
-passed that budget; non-micro workloads passed the strict 1.5x ratio. Selected allocation-guided
+This intermediate run still allowed a 6 ms process-level fallback for sub-millisecond ratios. The
+final gate below removes that fallback and requires both ratio and latency conditions. Selected allocation-guided
 JMH results include packed array apply at 0.052 ms/op and 288,297 B/op, packed map-history apply at
 0.060 ms/op and 302,753 B/op, 1,000 concurrent inserts into an open root at 0.616 ms/op and
 2,208,775 B/op, and an observed 5,000-key map edit at 0.008 ms/op and 31,890 B/op. The latter
@@ -1106,3 +1107,113 @@ No known standard Yjs workload retains the original whole-document/whole-sequenc
 as its primary path. YKS still intentionally differs in JVM API shape, private lossless metadata,
 browser-only APIs, and implementation language/runtime; those are compatibility adaptations, not
 known performance-parity blockers.
+
+## 2026-07-17 adversarial snapshot, formatting, and observer follow-up
+
+A second exhaustive pass found four amplified paths that the 28-scenario suite did not isolate:
+many snapshot delete boundaries, formatting the front of a highly fragmented text, an unrelated
+type observer, and a deep observer above a very wide container.
+
+Implemented changes:
+
+- `ClockRangeCursor` normalizes each client's boundaries once and advances a client-local cursor
+  for monotonic clocks, retaining binary-search fallback for non-monotonic sequence order;
+- native `YText.format` now walks linked items from the requested position and inserts/restores
+  format markers using the upstream Yjs algorithm instead of rendering and canonicalizing the
+  complete text;
+- `cleanupYTextFormatting` now performs a linear formatting-gap pass instead of trying each marker
+  deletion followed by a full-document render;
+- snapshot-interested types are indexed by parent name, deep paths walk the maintained owner index
+  upward, and edits outside every observed subtree use the unobserved transaction cleanup path;
+- event-update parent metadata is restricted to the parents touched by the transaction;
+- the performance runner prepares destructive fixtures immediately before each invocation, outside
+  the measured interval. It no longer retains 80 large documents and distort later scenarios with
+  heap pressure.
+
+The official cross-runtime suite now contains 33 scenarios and reports ratio and latency
+independently. Every workload must satisfy `YKS/Yjs <= 1.5x`; operations whose Yjs median is at
+most 6 ms must also satisfy `YKS <= 6 ms`. A latency pass can no longer hide a ratio failure.
+Warmups execute the same amplified repeat count as measured samples, which is required for fair
+JVM C2/V8 steady-state comparison. The final default 50-warmup-batch/30-sample run passed 33/33:
+
+| Added scenario | Yjs | YKS | YKS/Yjs |
+|---|---:|---:|---|
+| 1,000 sequential standard updates | 2.201 ms | 1.097 ms | 0.50x |
+| 1,000 alternating snapshot delete ranges | 0.627 ms | 0.383 ms | 0.61x |
+| format first char of 50,000 fragments | 0.227 ms | 0.004 ms | 0.02x |
+| edit 50,000-fragment root with unrelated observer | 0.004 ms | 0.003 ms | 0.78x |
+| 10 first-child edits under 10,000-child deep root | 0.676 ms | 0.024 ms | 0.04x |
+
+The first default run exposed a benchmark-isolation bug: preallocating 80 destructive fixtures
+inflated the last two readings to 240 ms and 118 ms. Moving fixture construction to the
+per-invocation preparation hook reduced them to the stable values above; a reduced 10/7 run and the
+default 50/30 run both passed afterward.
+
+The Hocuspocus TODO's incremental cleanup P1 is now covered directly. Unobserved cleanup keeps the
+client-store list once, passes a contiguous index range to `StructStore`, and avoids allocating a
+`mergeIds` list plus duplicate ID/item projections for every small update. Applying 1,000
+sequential one-character V1 updates leaves one physical text struct. JMH measured 0.999 ms/op and
+7,983,958 B/op for the complete 1,000-update workload. A follow-up JFR identified repeated
+`stateVector()` map construction as the new top allocation site. Versioned, unmodifiable
+state-vector snapshots and allocation-free reverse split loops reduced the same JMH workload to
+0.954 ms/op and 7,583,892 B/op.
+
+The requested three-repetition Hocuspocus WebSocket A/B was also rerun against the final local
+composite YKS source. Throughput ratios were 0.842x, 1.131x, and 0.977x JVM/Node, but workload-CPU
+ratios remained 11.33x, 5.82x, and 6.75x. The direct CRDT workload is faster than Yjs while the complete
+Ktor process still uses more CPU, so the remaining server CPU gap is not established as a YKS
+algorithmic blocker by this evidence. The generated report is
+`../hocuspocus/jvm/hocuspocus-benchmark/build/reports/ab/latest.json`.
+
+The separate Hocuspocus type-neutral unopened-root emptiness P1 and the publish/release P0 remain
+outside this performance slice.
+
+Validation:
+
+- `./gradlew clean check consumerSmokeTest interopTest jmhClasses --no-daemon`: passed, including
+  691 unit tests, 86 JVM interop tests, and the
+  standalone consumer;
+- `npm run test:interop`: Yjs 107/107 and Yrs 4/4 passed;
+- `npm run interop:check-clean`: passed;
+- `npm run benchmark:performance:check`: 33/33 passed with mandatory ratio and independent latency
+  status visible;
+- `git diff --check`: passed.
+
+## 2026-07-17 mandatory-ratio parity completion
+
+The final detailed implementation pass removed the remaining runtime and structural differences
+found when the 33-scenario gate was made strict:
+
+- V1 single-client dense updates resolve backward parent anchors in one forward pass, use strict
+  ASCII decoding without relaxing malformed UTF-8 rejection, and lazily materialize nested types;
+- parent membership uses an append-only array until a split/remove actually needs an ID index, and
+  the common single-owner nested-type index no longer allocates a map per child;
+- `YArray`/`YText` maintain scalar lengths after the first read, `YArray.get(0)` caches the first
+  visible item with mutation invalidation, and preflighted primitive array batches avoid per-value
+  validation stacks;
+- native format traversal uses the order-statistic tree's undeleted subtree count to jump across
+  historical marker runs instead of scanning deleted prefixes/gaps;
+- type observers and event insert/delete/map details are lazy, while primitive map replacement
+  deletes the already-known current item without rebuilding key history;
+- large remote batches discard an existing positional cache and rebuild it once lazily instead of
+  balancing the sequence tree once per incoming struct.
+
+Final cross-runtime highlights:
+
+| Scenario | Yjs | YKS | YKS/Yjs |
+|---|---:|---:|---:|
+| apply 5,000 structs | 1.177 ms | 1.557 ms | 1.32x |
+| apply 5,000 structs into open roots | 1.141 ms | 1.441 ms | 1.26x |
+| apply 3,000 nested types | 0.591 ms | 0.781 ms | 1.32x |
+| apply 5,000 map entries | 3.316 ms | 3.157 ms | 0.95x |
+| insert 5,000 array values | 0.185 ms | 0.126 ms | 0.68x |
+| read array length/index 100,000 times | 0.465 ms | 0.523 ms | 1.13x |
+| edit observed 5,000-key map | 0.002 ms | 0.002 ms | 1.16x |
+| format first char with long marker history | 0.227 ms | 0.004 ms | 0.02x |
+
+Allocation-profiled JMH confirmed 1.415 ms/op for 5,000-struct apply, 1.460 ms/op
+for the open-root form, 0.742 ms/op for 3,000 nested types, 0.087 ms/op for a
+5,000-value array insert, 0.392 ms/op for 100,000 array length/index reads, and
+0.004 ms/op for front formatting with accumulated marker history. The JMH task
+now enables fail-on-error so a missing fixture or benchmark setup failure cannot
+be reported as a successful Gradle verification.

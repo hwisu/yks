@@ -290,17 +290,22 @@ insert, middle edit, standard update apply/encode, standard-listener
 transactions, adversarial pre-decode rejection, formatted/nested/map updates,
 packed array updates/inserts, same-key map history, root and indexed-array
 access, already-open fragmented/concurrent roots, observed fragmented/map
-edits, packed undo, and snapshot clock ranges. Results are written to
+edits, packed undo, snapshot clock ranges, alternating delete-set snapshots,
+fragmented-prefix formatting, observer-isolation edits, and sequential
+incremental standard-update application. Results are written to
 `build/reports/jmh/results.json`.
 
-The cross-runtime gate uses 50 warmups and 30 samples for 28 workloads. A YKS
-median must remain within 1.5x of pinned Yjs 13.6.31 when that threshold exceeds
-the explicit 6 ms process-level microbenchmark budget; shorter operations must
-remain within 6 ms. The JVM runner waits outside the measured interval after
-each warmup so queued tiered compilation from an earlier workload cannot
-contaminate the next one. Release JARs disable file timestamps, use
-reproducible entry order, embed the exact `YKS-Revision`, and are built twice
-and byte-compared before publication.
+The cross-runtime gate uses 50 warmup batches and 30 measured batches for 33
+workloads. Every workload must satisfy strict ratio parity
+(`YKS/Yjs <= 1.5x`), and micro workloads must independently remain within the
+process-level latency budget (`YKS <= 6 ms`). Neither condition is a fallback
+for the other. Each warmup uses the same explicit repeat count as a measured
+sample, so the JVM is not measured in interpreted/C1 code while V8 is already
+optimized. Destructive fixtures are prepared before each invocation, outside
+the measured interval, and the JVM runner waits outside measurement after each
+workload warmup so queued tiered compilation cannot contaminate the next one.
+Release JARs disable file timestamps, use reproducible entry order, embed the
+exact `YKS-Revision`, and are built twice and byte-compared before publication.
 
 Pushing a tag such as `v0.1.1` runs the same gates, publishes that immutable
 version to GitHub Packages, and verifies it again from a clean remote consumer.

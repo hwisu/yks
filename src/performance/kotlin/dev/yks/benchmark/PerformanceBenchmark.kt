@@ -4,8 +4,12 @@ import dev.yks.YDoc
 import dev.yks.snapshot
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Base64
 
 private data class BenchmarkResult(
+    val repeatCount: Int,
+    val batchMedianMs: Double,
+    val batchP95Ms: Double,
     val medianMs: Double,
     val p95Ms: Double,
 )
@@ -18,29 +22,56 @@ private object BenchmarkSink {
 private fun benchmark(
     warmupIterations: Int,
     sampleIterations: Int,
+    repeatCount: Int,
+    prepare: (() -> Unit)?,
     operation: () -> Long,
 ): BenchmarkResult {
-    repeat(warmupIterations) { BenchmarkSink.value = operation() }
+    repeat(warmupIterations) {
+        repeat(repeatCount) {
+            prepare?.invoke()
+            BenchmarkSink.value = operation()
+        }
+    }
     // Whole-suite runs can leave C1/C2 compilation queued behind a completed workload. Give the
     // tiered compiler a short quiescence window so the measured samples represent warmed code
     // instead of compiler-thread contention from an earlier scenario.
     Thread.sleep(250)
     val samples = DoubleArray(sampleIterations) {
         System.gc()
-        val started = System.nanoTime()
-        BenchmarkSink.value = operation()
-        (System.nanoTime() - started) / 1_000_000.0
+        if (prepare == null) {
+            val started = System.nanoTime()
+            repeat(repeatCount) {
+                BenchmarkSink.value = operation()
+            }
+            (System.nanoTime() - started) / 1_000_000.0
+        } else {
+            var elapsedNanos = 0L
+            repeat(repeatCount) {
+                prepare()
+                val started = System.nanoTime()
+                BenchmarkSink.value = operation()
+                elapsedNanos += System.nanoTime() - started
+            }
+            elapsedNanos / 1_000_000.0
+        }
     }.sortedArray()
+    val batchMedianMs = samples[samples.size / 2]
+    val batchP95Ms = samples[((samples.size - 1) * 0.95).toInt()]
     return BenchmarkResult(
-        medianMs = samples[samples.size / 2],
-        p95Ms = samples[((samples.size - 1) * 0.95).toInt()],
+        repeatCount = repeatCount,
+        batchMedianMs = batchMedianMs,
+        batchP95Ms = batchP95Ms,
+        medianMs = batchMedianMs / repeatCount,
+        p95Ms = batchP95Ms / repeatCount,
     )
 }
 
 private fun Double.jsonNumber(): String = "%.6f".format(java.util.Locale.ROOT, this)
 
 fun main(args: Array<String>) {
-    require(args.size == 4) { "expected fixture path, warmup count, sample count, and scenarios" }
+    require(args.size == 5) {
+        "expected fixture path, warmup count, sample count, scenarios, and repeat counts"
+    }
     val fixture = Files.readAllBytes(Path.of(args[0]))
     val fixtureDirectory = Path.of(args[0]).parent
     fun fixture(name: String): ByteArray = Files.readAllBytes(fixtureDirectory.resolve(name))
@@ -51,12 +82,23 @@ fun main(args: Array<String>) {
     val arrayFixture = fixture("array-5000-v1.bin")
     val fragmentedFixture = fixture("fragmented-text-5000-v1.bin")
     val concurrentFixture = fixture("concurrent-text-1000-v1.bin")
+    val incrementalFixtures = Files.readAllLines(fixtureDirectory.resolve("incremental-text-1000-v1.txt"))
+        .filter(String::isNotBlank)
+        .map(Base64.getDecoder()::decode)
     val warmupIterations = args[1].toInt()
     val sampleIterations = args[2].toInt()
     val selectedScenarios = args[3]
         .takeUnless { value -> value == "all" }
         ?.split(',')
         ?.toSet()
+    val repeatCounts = args[4]
+        .takeUnless(String::isBlank)
+        ?.split(',')
+        ?.associate { encoded ->
+            val (name, count) = encoded.split('=', limit = 2)
+            name to count.toInt()
+        }
+        .orEmpty()
 
     val lengthDoc = YDoc(clientId = 10)
     val lengthText = lengthDoc.getText("body")
@@ -84,20 +126,54 @@ fun main(args: Array<String>) {
     clockRangeText.insert(10_000, "y")
     val clockRangeAfter = snapshot(clockRangeDoc)
 
-    val invocationCount = warmupIterations + sampleIterations
-    val nestedDeleteDocs = List(invocationCount) {
-        YDoc(clientId = 31, gc = false).also { doc -> doc.applyUpdate(nestedFixture) }
+    val alternatingSnapshotDoc = YDoc(clientId = 16, gc = false)
+    val alternatingSnapshotText = alternatingSnapshotDoc.getText("body")
+    alternatingSnapshotText.insert(0, "x".repeat(2_000))
+    val alternatingSnapshotBefore = snapshot(alternatingSnapshotDoc)
+    for (index in 999 downTo 0) alternatingSnapshotText.delete(index * 2, 1)
+    val alternatingSnapshotAfter = snapshot(alternatingSnapshotDoc)
+
+    val localFormatDoc = YDoc(clientId = 17, gc = false)
+    val localFormatText = localFormatDoc.getText("body")
+    repeat(50_000) { localFormatText.insert(0, "x") }
+    var localFormatValue = 0
+
+    val unrelatedObserverDoc = YDoc(clientId = 18, gc = false)
+    val unrelatedObservedText = unrelatedObserverDoc.getText("observed")
+    val unrelatedTargetText = unrelatedObserverDoc.getText("target")
+    repeat(50_000) { unrelatedTargetText.insert(0, "x") }
+    var unrelatedObserverEvents = 0L
+    unrelatedObservedText.observe { unrelatedObserverEvents++ }
+
+    val wideDeepDoc = YDoc(clientId = 19, gc = false)
+    val wideDeepRoot = wideDeepDoc.getArray("root")
+    val wideDeepChildren = ArrayList<dev.yks.YMap>(10_000)
+    wideDeepDoc.transact {
+        repeat(10_000) {
+            val child = wideDeepDoc.createMap()
+            wideDeepRoot.push(child)
+            wideDeepChildren.add(child)
+        }
     }
-    var nestedDeleteIndex = 0
+    var wideDeepEvents = 0L
+    wideDeepRoot.observeDeep { wideDeepEvents++ }
+    var wideDeepValue = 0
+
+    var nestedDeleteDoc: YDoc? = null
     data class ObservedFragmentedState(val text: dev.yks.YText, val observed: () -> Long)
-    val observedFragmentedDocs = List(invocationCount) {
-        val doc = YDoc(clientId = 34, gc = false)
-        doc.applyUpdate(fragmentedFixture)
-        var observed = 0L
-        doc.observeAfterTransactions { observed++ }
-        ObservedFragmentedState(doc.getText("body")) { observed }
-    }
-    var observedFragmentedIndex = 0
+    var observedFragmentedState: ObservedFragmentedState? = null
+    val scenarioPreparations = mapOf<String, () -> Unit>(
+        "nested_delete_3000" to {
+            nestedDeleteDoc = YDoc(clientId = 31, gc = false).also { doc -> doc.applyUpdate(nestedFixture) }
+        },
+        "observed_fragmented_edit_500" to {
+            val doc = YDoc(clientId = 34, gc = false)
+            doc.applyUpdate(fragmentedFixture)
+            var observed = 0L
+            doc.observeAfterTransactions { observed++ }
+            observedFragmentedState = ObservedFragmentedState(doc.getText("body")) { observed }
+        },
+    )
     val observedMapDoc = YDoc(clientId = 42, gc = false)
     observedMapDoc.applyUpdate(mapFixture)
     var observedMapEvents = 0L
@@ -182,7 +258,7 @@ fun main(args: Array<String>) {
             (doc.getText("left").length + doc.getText("right").length).toLong()
         },
         "nested_delete_3000" to {
-            val doc = nestedDeleteDocs[nestedDeleteIndex++]
+            val doc = checkNotNull(nestedDeleteDoc)
             val root = doc.getArray("root")
             root.delete(0, root.length)
             root.length.toLong()
@@ -243,6 +319,11 @@ fun main(args: Array<String>) {
             doc.applyUpdate(concurrentFixture)
             doc.getText("body").length.toLong()
         },
+        "incremental_apply_1000" to {
+            val doc = YDoc(clientId = 47, gc = false)
+            incrementalFixtures.forEach(doc::applyUpdate)
+            doc.getText("body").length.toLong()
+        },
         "roots_create_read_10000" to {
             val doc = YDoc(clientId = 33)
             repeat(10_000) { index -> doc.getText("root-$index") }
@@ -269,7 +350,7 @@ fun main(args: Array<String>) {
             sum
         },
         "observed_fragmented_edit_500" to {
-            val state = observedFragmentedDocs[observedFragmentedIndex++]
+            val state = checkNotNull(observedFragmentedState)
             val text = state.text
             text.doc.transact {
                 repeat(500) {
@@ -289,15 +370,50 @@ fun main(args: Array<String>) {
         "clock_range_snapshot_delta" to {
             clockRangeText.toDelta(clockRangeAfter, clockRangeBefore).ops.size.toLong()
         },
+        "alternating_delete_snapshot_delta_1000" to {
+            alternatingSnapshotText.toDelta(alternatingSnapshotAfter, alternatingSnapshotBefore).ops.size.toLong()
+        },
+        "local_format_first_char_on_50000" to {
+            localFormatValue++
+            localFormatText.format(0, 1, mapOf("audit" to localFormatValue))
+            localFormatText.length.toLong()
+        },
+        "unrelated_observer_edit_on_50000" to {
+            val middle = unrelatedTargetText.length / 2
+            unrelatedTargetText.insert(middle, "y")
+            unrelatedTargetText.delete(middle, 1)
+            unrelatedObserverEvents + unrelatedTargetText.length
+        },
+        "deep_first_child_edit_10_on_10000" to {
+            repeat(10) {
+                wideDeepValue++
+                wideDeepChildren[0].set("value", wideDeepValue)
+            }
+            wideDeepEvents + wideDeepValue
+        },
     )
 
     val results = scenarios
         .filterKeys { name -> selectedScenarios == null || name in selectedScenarios }
-        .mapValues { (_, operation) ->
-        benchmark(warmupIterations, sampleIterations, operation)
-    }
+        .mapValues { (name, operation) ->
+            benchmark(
+                warmupIterations,
+                sampleIterations,
+                requireNotNull(repeatCounts[name]) {
+                    "missing noise-amplifying repeat count for performance scenario $name"
+                },
+                scenarioPreparations[name],
+                operation,
+            )
+        }
     val encodedResults = results.entries.joinToString(",") { (name, result) ->
-        "\"$name\":{\"medianMs\":${result.medianMs.jsonNumber()},\"p95Ms\":${result.p95Ms.jsonNumber()}}"
+        "\"$name\":{" +
+            "\"repeatCount\":${result.repeatCount}," +
+            "\"batchMedianMs\":${result.batchMedianMs.jsonNumber()}," +
+            "\"batchP95Ms\":${result.batchP95Ms.jsonNumber()}," +
+            "\"medianMs\":${result.medianMs.jsonNumber()}," +
+            "\"p95Ms\":${result.p95Ms.jsonNumber()}" +
+            "}"
     }
     println("YKS_BENCHMARK_JSON={$encodedResults}")
 }

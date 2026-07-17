@@ -10,6 +10,36 @@ data class PendingStructs(
     val update: ByteArray,
 )
 
+/**
+ * Mutation-aware linked sequence cursor.
+ *
+ * The closures intentionally hide [IndexedSequence]'s private node type while retaining a direct
+ * node pointer between advances. A seek is needed only after inserting a new item; ordinary scans
+ * follow right links without repeated ID hash lookups.
+ */
+internal class SequenceCursor internal constructor(
+    private val currentProvider: () -> StoreItem?,
+    private val previousProvider: () -> StoreItem?,
+    private val advanceAction: () -> Unit,
+    private val advanceToNextUndeletedAction: () -> Unit,
+    private val seekAction: (StoreItem) -> Unit,
+) {
+    val current: StoreItem? get() = currentProvider()
+    val previous: StoreItem? get() = previousProvider()
+
+    fun advance() {
+        advanceAction()
+    }
+
+    fun advanceToNextUndeleted() {
+        advanceToNextUndeletedAction()
+    }
+
+    fun seek(item: StoreItem) {
+        seekAction(item)
+    }
+}
+
 internal data class StructStoreSnapshot(
     val originalClientItems: MutableMap<Long, List<StoreItem>> = linkedMapOf(),
     val originalDeletedStates: MutableMap<StoreItem, Boolean> = java.util.IdentityHashMap(),
@@ -18,17 +48,109 @@ internal data class StructStoreSnapshot(
     val sequenceBuildCount: Int,
 )
 
+/**
+ * Parent-local structural membership with a zero-node append path.
+ *
+ * Remote Yjs updates are normally append-only here and already have authoritative ID lookup in the
+ * client store. A LinkedHashMap duplicated one hash entry per struct. Build the positional ID map
+ * only when a split/merge actually needs removal, and use tombstones so subsequent edits stay O(1).
+ */
+private class ParentItemIndex {
+    private val items = arrayListOf<StoreItem?>()
+    private var positions: MutableMap<Id, Int>? = null
+    private var liveSize = 0
+    private var tombstones = 0
+
+    val isNotEmpty: Boolean get() = liveSize != 0
+
+    fun add(item: StoreItem) {
+        val indexed = positions
+        if (indexed != null) {
+            indexed[item.id]?.let { index ->
+                if (items[index] == null) {
+                    liveSize++
+                    tombstones--
+                }
+                items[index] = item
+                return
+            }
+        }
+        items.add(item)
+        indexed?.set(item.id, items.lastIndex)
+        liveSize++
+    }
+
+    fun remove(id: Id) {
+        val indexed = positions ?: buildPositions().also { positions = it }
+        val index = indexed.remove(id) ?: return
+        if (items[index] != null) {
+            items[index] = null
+            liveSize--
+            tombstones++
+        }
+        compactIfSparse()
+    }
+
+    fun replaceAll(replacements: Map<Id, StoreItem>) {
+        if (replacements.isEmpty()) return
+        val indexed = positions
+        if (indexed == null) {
+            items.indices.forEach { index ->
+                val item = items[index] ?: return@forEach
+                replacements[item.id]?.let { replacement -> items[index] = replacement }
+            }
+        } else {
+            replacements.forEach { (id, replacement) ->
+                indexed[id]?.let { index -> items[index] = replacement }
+            }
+        }
+    }
+
+    fun toList(): List<StoreItem> = items.filterNotNull()
+
+    fun visibleSequenceItems(): List<StoreItem> =
+        items.mapNotNull { item ->
+            item?.takeIf { candidate ->
+                candidate.parentSub == null && !candidate.deleted && candidate.countable
+            }
+        }
+
+    fun first(sequenceOnly: Boolean): StoreItem? =
+        items.firstNotNullOfOrNull { item ->
+            item?.takeIf { candidate -> !sequenceOnly || candidate.parentSub == null }
+        }
+
+    private fun buildPositions(): MutableMap<Id, Int> = HashMap<Id, Int>(items.size * 4 / 3 + 1).also { result ->
+        items.forEachIndexed { index, item -> item?.let { result[it.id] = index } }
+    }
+
+    private fun compactIfSparse() {
+        if (tombstones < 64 || tombstones * 2 < items.size) return
+        val compacted = items.filterNotNull()
+        items.clear()
+        items.addAll(compacted)
+        tombstones = 0
+        positions = buildPositions()
+    }
+}
+
 class StructStore(private val owner: YDoc? = null) {
     private val clientItems: MutableMap<Long, MutableList<StoreItem>> = linkedMapOf()
     private val structViewOwner: YDoc by lazy(LazyThreadSafetyMode.NONE) { owner ?: YDoc() }
     private var allItemsCache: List<StoreItem>? = null
     private var deleteSetCache: DeleteSet? = null
     private var parentItemIdsCache: Map<String, Id>? = null
-    private val itemsByParent: MutableMap<String, LinkedHashMap<Id, StoreItem>> = mutableMapOf()
+    private val itemsByParent: MutableMap<String, ParentItemIndex> = mutableMapOf()
     private val mapItemsByParentKey:
         MutableMap<Pair<String, String>, LinkedHashMap<Id, StoreItem>> = mutableMapOf()
     private val mapKeysByParent: MutableMap<String, LinkedHashSet<String>> = mutableMapOf()
-    private val nestedOwnersByName: MutableMap<String, LinkedHashMap<Id, StoreItem>> = mutableMapOf()
+    // Standard Yjs ContentType names are derived from the owner ID and therefore have exactly one
+    // owner. Keep that overwhelmingly common case as one map entry instead of allocating a
+    // LinkedHashMap plus entry per nested type. The secondary table preserves deterministic
+    // behavior for private lossless inputs that happen to contain duplicate owner names.
+    private val nestedOwnerByName: MutableMap<String, StoreItem> = mutableMapOf()
+    private val additionalNestedOwnersByName:
+        MutableMap<String, MutableMap<Id, StoreItem>> = mutableMapOf()
     private val sequenceCache: MutableMap<String, IndexedSequence> = mutableMapOf()
     private val mapEntriesCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
     private val mapOrderCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
@@ -42,6 +164,8 @@ class StructStore(private val owner: YDoc? = null) {
     private var lookupHintClient: Long = -1
     private var lookupHintIndex: Int = -1
     private var activeSnapshot: StructStoreSnapshot? = null
+    private var stateVectorCacheVersion: Long = Long.MIN_VALUE
+    private var stateVectorCache: StateVector = emptyMap()
 
     internal val ownerDoc: YDoc? get() = owner
     internal var version: Long = 0
@@ -118,7 +242,8 @@ class StructStore(private val owner: YDoc? = null) {
         itemsByParent.clear()
         mapItemsByParentKey.clear()
         mapKeysByParent.clear()
-        nestedOwnersByName.clear()
+        nestedOwnerByName.clear()
+        additionalNestedOwnersByName.clear()
         sequenceCache.clear()
         mapEntriesCache.clear()
         mapOrderCache.clear()
@@ -345,8 +470,9 @@ class StructStore(private val owner: YDoc? = null) {
     /** Re-merge temporary transaction splits in reverse split order, as upstream Yjs does. */
     internal fun mergeSplitCandidates(candidates: List<Id>): Int {
         var merged = 0
-        candidates.asReversed().forEach { candidate ->
-            val structs = clientItems[candidate.client] ?: return@forEach
+        for (candidateIndex in candidates.lastIndex downTo 0) {
+            val candidate = candidates[candidateIndex]
+            val structs = clientItems[candidate.client] ?: continue
             val index = structs.findStartIndex(candidate.clock)
             if (index > 0 && mergeDeletedItemWithLeft(structs, index)) {
                 merged++
@@ -366,6 +492,17 @@ class StructStore(private val owner: YDoc? = null) {
         val rightContent = right.content as? ItemContent.Deleted ?: return false
         val logicallyAdjacent = if (left.parentSub == null) {
             areSequenceAdjacent(left, right)
+        } else if (
+            left.id.client == right.id.client &&
+            left.endClock() == right.id.clock &&
+            right.origin == left.lastId &&
+            left.parent == right.parent &&
+            left.parentSub == right.parentSub
+        ) {
+            // A same-client origin chain has an unambiguous map order. Avoid rebuilding the full
+            // history for the key on every local replacement; concurrent chains retain the
+            // general CRDT order check below.
+            true
         } else {
             val logicalOrder = owner?.mapItemOrder(left.parent, left.parentSub) ?: return false
             val logicalLeftIndex = cachedMapItemIndex(
@@ -465,7 +602,7 @@ class StructStore(private val owner: YDoc? = null) {
         allItemsCache = null
         version++
         affectedParents.forEach { parent ->
-            itemsByParent[parent]?.replaceAll { id, item -> updatedItems[id] ?: item }
+            itemsByParent[parent]?.replaceAll(updatedItems)
             sequenceCache[parent]?.replaceItems(updatedItems)
             RootKind.entries.forEach { kind -> visibleTextCache.remove(parent to kind) }
         }
@@ -487,7 +624,8 @@ class StructStore(private val owner: YDoc? = null) {
 
     fun stateVector(): StateVector {
         owner?.ensureThreadAccess()
-        val state = linkedMapOf<Long, Long>()
+        if (skips.isEmpty() && stateVectorCacheVersion == version) return stateVectorCache
+        val state = java.util.TreeMap<Long, Long>()
         clientItems.forEach { (client, structs) ->
             val clock = structs.lastOrNull()?.endClock() ?: 0
             if (clock > 0) state[client] = clock
@@ -495,7 +633,12 @@ class StructStore(private val owner: YDoc? = null) {
         skips.clients.forEach { (client, ranges) ->
             ranges.minOfOrNull { range -> range.clock }?.let { clock -> state[client] = clock }
         }
-        return state.toSortedMap()
+        val snapshot = java.util.Collections.unmodifiableMap(state)
+        if (skips.isEmpty()) {
+            stateVectorCacheVersion = version
+            stateVectorCache = snapshot
+        }
+        return snapshot
     }
 
     fun integrityCheck() {
@@ -523,24 +666,31 @@ class StructStore(private val owner: YDoc? = null) {
     internal fun itemsForClient(client: Long): List<StoreItem> = clientItems[client].orEmpty()
 
     internal fun itemsForParent(parent: String): List<StoreItem> =
-        itemsByParent[parent]?.values?.toList().orEmpty()
+        itemsByParent[parent]?.toList().orEmpty()
 
-    internal fun hasParent(parent: String): Boolean = itemsByParent[parent]?.isNotEmpty() == true
+    internal fun visibleSequenceItemsForParent(parent: String): List<StoreItem> =
+        itemsByParent[parent]?.visibleSequenceItems().orEmpty()
+
+    internal fun hasParent(parent: String): Boolean = itemsByParent[parent]?.isNotEmpty == true
 
     internal fun parentNames(): Set<String> = itemsByParent.keys
 
     internal fun firstItemForParent(parent: String, sequenceOnly: Boolean = false): StoreItem? {
-        val items = itemsByParent[parent]?.values ?: return null
-        return if (sequenceOnly) items.firstOrNull { item -> item.parentSub == null } else items.firstOrNull()
+        return itemsByParent[parent]?.first(sequenceOnly)
     }
 
     internal fun mapKeysForParent(parent: String): Set<String> =
         mapKeysByParent[parent].orEmpty()
 
-    internal fun firstOwnerForNested(name: String): StoreItem? =
-        nestedOwnersByName[name]?.values?.minByOrNull { item -> item.id }
+    internal fun firstOwnerForNested(name: String): StoreItem? {
+        return nestedOwnerByName[name]
+    }
 
-    internal fun hasNestedOwner(name: String): Boolean = nestedOwnersByName[name]?.isNotEmpty() == true
+    internal fun hasNestedOwner(name: String): Boolean = name in nestedOwnerByName
+
+    internal fun nestedOwnerKinds(): Map<String, RootKind> = nestedOwnerByName.mapNotNull { (name, owner) ->
+        owner.content.directTypeRef()?.kind?.let { kind -> name to kind }
+    }.toMap()
 
     internal fun firstItemEndingAfter(client: Long, clock: Long): Int =
         clientItems[client]?.findFirstEndingAfter(clock) ?: 0
@@ -656,10 +806,21 @@ class StructStore(private val owner: YDoc? = null) {
     internal fun markDeleted(items: Iterable<StoreItem>): Boolean {
         var changed = false
         val changedSequenceIds = linkedMapOf<String, MutableList<Id>>()
+        val removedVisibleLengths = linkedMapOf<String, LongArray>()
         items.forEach { item ->
             if (!item.deleted) {
                 captureDeletedBeforeMutation(item)
-                removeDerivedState(item)
+                if (item.parentSub == null && item.countable) {
+                    val lengths = removedVisibleLengths.getOrPut(item.parent) {
+                        LongArray(RootKind.entries.size)
+                    }
+                    lengths[item.content.kind.ordinal] = checkedClockAdd(
+                        lengths[item.content.kind.ordinal],
+                        item.length,
+                        "removed visible length",
+                    )
+                }
+                removeDerivedState(item, notifyOwner = false)
                 item.deleted = true
                 if (item.parentSub == null && sequenceCache[item.parent] != null) {
                     changedSequenceIds.getOrPut(item.parent) { mutableListOf() }.add(item.id)
@@ -667,6 +828,13 @@ class StructStore(private val owner: YDoc? = null) {
                 deleteSetCache = null
                 version++
                 changed = true
+            }
+        }
+        removedVisibleLengths.forEach { (parent, lengths) ->
+            lengths.forEachIndexed { kindIndex, length ->
+                if (length > 0) {
+                    owner?.adjustOpenedTypeLength(parent, RootKind.entries[kindIndex], -length)
+                }
             }
         }
         changedSequenceIds.forEach { (parent, ids) -> sequenceCache[parent]?.refreshAll(ids) }
@@ -686,6 +854,27 @@ class StructStore(private val owner: YDoc? = null) {
     internal fun sequence(parent: String): List<StoreItem> {
         owner?.ensureThreadAccess()
         return sequenceIndex(parent).snapshot()
+    }
+
+    /**
+     * A large remote batch is cheaper to index once after integration than to rebalance the
+     * existing treap for every struct. Visible lengths remain incremental; positional and
+     * rendered caches rebuild lazily on their next read.
+     */
+    internal fun prepareBulkSequenceIntegration(items: List<StoreItem>, threshold: Int = 32) {
+        if (sequenceCache.isEmpty()) return
+        val counts = mutableMapOf<String, Int>()
+        items.forEach { item ->
+            if (item.parentSub == null) {
+                counts[item.parent] = (counts[item.parent] ?: 0) + 1
+            }
+        }
+        counts.forEach { (parent, count) ->
+            if (count < threshold) return@forEach
+            sequenceCache.remove(parent)
+            renderedTextAttributes.remove(parent)
+            RootKind.entries.forEach { kind -> visibleTextCache.remove(parent to kind) }
+        }
     }
 
     internal fun visibleLength(parent: String, kind: RootKind): Long {
@@ -769,6 +958,16 @@ class StructStore(private val owner: YDoc? = null) {
 
     internal fun sequenceNeighbors(item: StoreItem): Pair<StoreItem?, StoreItem?> =
         if (item.parentSub == null) sequenceIndex(item.parent).neighbors(item.id) else null to null
+
+    internal fun firstSequenceItem(parent: String): StoreItem? = sequenceIndex(parent).first()
+
+    internal fun firstVisibleSequenceItem(parent: String, kind: RootKind): StoreItem? =
+        sequenceIndex(parent).firstVisible(kind)
+
+    internal fun sequenceCursor(parent: String): SequenceCursor = sequenceIndex(parent).cursor()
+
+    internal fun sequenceCursorAtFirstUndeleted(parent: String): SequenceCursor =
+        sequenceIndex(parent).cursorAtFirstUndeleted()
 
     private fun sequenceIndex(parent: String): IndexedSequence =
         sequenceCache.getOrPut(parent) {
@@ -1000,9 +1199,21 @@ class StructStore(private val owner: YDoc? = null) {
     }
 
     private fun addStructuralIndex(item: StoreItem) {
-        itemsByParent.getOrPut(item.parent) { linkedMapOf() }[item.id] = item
+        itemsByParent.getOrPut(item.parent, ::ParentItemIndex).add(item)
         item.content.directTypeRef()?.name?.let { name ->
-            nestedOwnersByName.getOrPut(name) { linkedMapOf() }[item.id] = item
+            val existing = nestedOwnerByName[name]
+            if (existing == null) {
+                nestedOwnerByName[name] = item
+            } else if (existing.id != item.id) {
+                val owners = additionalNestedOwnersByName.getOrPut(name) {
+                    hashMapOf(existing.id to existing)
+                }
+                owners[item.id] = item
+                if (item.id < existing.id) nestedOwnerByName[name] = item
+            } else {
+                nestedOwnerByName[name] = item
+                additionalNestedOwnersByName[name]?.set(item.id, item)
+            }
         }
         item.parentSub?.let { key ->
             mapItemsByParentKey.getOrPut(item.parent to key) {
@@ -1015,12 +1226,25 @@ class StructStore(private val owner: YDoc? = null) {
     private fun removeStructuralIndex(item: StoreItem) {
         itemsByParent[item.parent]?.let { items ->
             items.remove(item.id)
-            if (items.isEmpty()) itemsByParent.remove(item.parent)
+            if (!items.isNotEmpty) itemsByParent.remove(item.parent)
         }
         item.content.directTypeRef()?.name?.let { name ->
-            nestedOwnersByName[name]?.let { owners ->
+            val owners = additionalNestedOwnersByName[name]
+            if (owners != null) {
                 owners.remove(item.id)
-                if (owners.isEmpty()) nestedOwnersByName.remove(name)
+                when (owners.size) {
+                    0 -> {
+                        additionalNestedOwnersByName.remove(name)
+                        nestedOwnerByName.remove(name)
+                    }
+                    1 -> {
+                        additionalNestedOwnersByName.remove(name)
+                        nestedOwnerByName[name] = owners.values.first()
+                    }
+                    else -> nestedOwnerByName[name] = owners.values.minBy { owner -> owner.id }
+                }
+            } else if (nestedOwnerByName[name]?.id == item.id) {
+                nestedOwnerByName.remove(name)
             }
         }
         item.parentSub?.let { key ->
@@ -1040,14 +1264,15 @@ class StructStore(private val owner: YDoc? = null) {
 
     private fun addDerivedState(item: StoreItem) {
         if (item.parentSub == null) {
-            visibleTextCache.remove(item.parent to item.content.kind)
-            renderedTextAttributes.remove(item.parent)
+            if (visibleTextCache.isNotEmpty()) visibleTextCache.remove(item.parent to item.content.kind)
+            if (renderedTextAttributes.isNotEmpty()) renderedTextAttributes.remove(item.parent)
         }
         if (item.parentSub != null || item.deleted) return
         if (item.countable) {
             val lengths = visibleLengths.getOrPut(item.parent) { LongArray(RootKind.entries.size) }
             val kindIndex = item.content.kind.ordinal
             lengths[kindIndex] = checkedClockAdd(lengths[kindIndex], item.length, "visible sequence length")
+            owner?.adjustOpenedTypeLength(item.parent, item.content.kind, item.length)
         }
         if (item.content is ItemContent.NativeTextFormat) {
             visibleNativeTextFormats.getOrPut(item.parent) { linkedSetOf() }.add(item.id)
@@ -1057,10 +1282,10 @@ class StructStore(private val owner: YDoc? = null) {
         }
     }
 
-    private fun removeDerivedState(item: StoreItem) {
+    private fun removeDerivedState(item: StoreItem, notifyOwner: Boolean = true) {
         if (item.parentSub == null) {
-            visibleTextCache.remove(item.parent to item.content.kind)
-            renderedTextAttributes.remove(item.parent)
+            if (visibleTextCache.isNotEmpty()) visibleTextCache.remove(item.parent to item.content.kind)
+            if (renderedTextAttributes.isNotEmpty()) renderedTextAttributes.remove(item.parent)
         }
         if (item.parentSub != null || item.deleted) return
         if (item.countable) {
@@ -1069,6 +1294,7 @@ class StructStore(private val owner: YDoc? = null) {
             val next = lengths[kindIndex] - item.length
             check(next >= 0) { "visible sequence length underflow for ${item.parent}:${item.content.kind}" }
             lengths[kindIndex] = next
+            if (notifyOwner) owner?.adjustOpenedTypeLength(item.parent, item.content.kind, -item.length)
             if (lengths.all { length -> length == 0L }) visibleLengths.remove(item.parent)
         }
         if (item.content is ItemContent.NativeTextFormat) {
@@ -1124,9 +1350,25 @@ class StructStore(private val owner: YDoc? = null) {
         val structs = clientItems[ids.first().client] ?: return null
         val firstIndex = structs.findStartIndex(ids.first().clock)
         if (firstIndex < 0 || firstIndex + ids.size > structs.size) return null
-        val items = structs.subList(firstIndex, firstIndex + ids.size).toList()
-        if (items.map(StoreItem::id) != ids) return null
-        val firstItem = items.first()
+        ids.forEachIndexed { offset, id ->
+            if (structs[firstIndex + offset].id != id) return null
+        }
+        return mergeCompatibleItemsAt(ids.first().client, firstIndex, ids.size)
+    }
+
+    /**
+     * Merges a known contiguous client-store range without materializing an ID list.
+     *
+     * Transaction cleanup already located and validated logical adjacency. Keeping the physical
+     * range as indices removes the dominant per-update `mergeIds`, `subList().toList()`, and
+     * `items.map(::id)` allocations from the unobserved standard-update path.
+     */
+    internal fun mergeCompatibleItemsAt(client: Long, firstIndex: Int, itemCount: Int): StoreItem? {
+        if (itemCount < 2) return null
+        val structs = clientItems[client] ?: return null
+        if (firstIndex < 0 || firstIndex >= structs.size || itemCount > structs.size - firstIndex) return null
+        val endIndex = firstIndex + itemCount
+        val firstItem = structs[firstIndex]
         val firstContent = firstItem.content
         if (
             firstContent !is ItemContent.Text &&
@@ -1135,9 +1377,9 @@ class StructStore(private val owner: YDoc? = null) {
             firstContent !is ItemContent.MapEntry &&
             firstContent !is ItemContent.MapEntries
         ) return null
-        for (index in 1 until items.size) {
-            val left = items[index - 1]
-            val right = items[index]
+        for (index in firstIndex + 1 until endIndex) {
+            val left = structs[index - 1]
+            val right = structs[index]
             if (
                 left.endClock() != right.id.clock ||
                 right.origin != left.lastId ||
@@ -1177,19 +1419,29 @@ class StructStore(private val owner: YDoc? = null) {
         clearLookupHint(firstItem.id.client)
         val mergedContent = when (firstContent) {
             is ItemContent.Text -> {
-                val mergedValueLength = items.sumOf(StoreItem::length).toNonNegativeInt("merged text length")
+                var mergedValueLength = 0L
+                for (index in firstIndex until endIndex) {
+                    mergedValueLength = checkedClockAdd(
+                        mergedValueLength,
+                        structs[index].length,
+                        "merged text length",
+                    )
+                }
                 firstContent.copy(
-                    value = buildString(mergedValueLength) {
-                        items.forEach { item -> append((item.content as ItemContent.Text).value) }
+                    value = buildString(mergedValueLength.toNonNegativeInt("merged text length")) {
+                        for (index in firstIndex until endIndex) {
+                            append((structs[index].content as ItemContent.Text).value)
+                        }
                     },
                 )
             }
             is ItemContent.MapEntry,
             is ItemContent.MapEntries -> {
-                val values = items.flatMap { item ->
-                    when (val content = item.content) {
-                        is ItemContent.MapEntry -> listOf(content.value)
-                        is ItemContent.MapEntries -> content.values
+                val values = ArrayList<YValue>()
+                for (index in firstIndex until endIndex) {
+                    when (val content = structs[index].content) {
+                        is ItemContent.MapEntry -> values.add(content.value)
+                        is ItemContent.MapEntries -> values.addAll(content.values)
                         else -> error("incompatible packed map content")
                     }
                 }
@@ -1197,10 +1449,11 @@ class StructStore(private val owner: YDoc? = null) {
             }
             is ItemContent.Value,
             is ItemContent.ArrayValues -> {
-                val values = items.flatMap { item ->
-                    when (val content = item.content) {
-                        is ItemContent.Value -> listOf(content.value)
-                        is ItemContent.ArrayValues -> content.values
+                val values = ArrayList<YValue>()
+                for (index in firstIndex until endIndex) {
+                    when (val content = structs[index].content) {
+                        is ItemContent.Value -> values.add(content.value)
+                        is ItemContent.ArrayValues -> values.addAll(content.values)
                         else -> error("incompatible packed array content")
                     }
                 }
@@ -1208,10 +1461,17 @@ class StructStore(private val owner: YDoc? = null) {
             }
             else -> return null
         }
+        val removed = if (itemCount == 2) {
+            listOf(structs[firstIndex + 1])
+        } else {
+            ArrayList<StoreItem>(itemCount - 1).also { items ->
+                for (index in firstIndex + 1 until endIndex) items.add(structs[index])
+            }
+        }
         val merged = firstItem.copy(content = mergedContent)
         structs[firstIndex] = merged
-        structs.subList(firstIndex + 1, firstIndex + items.size).clear()
-        recordReplacement(firstItem, listOf(merged), additionallyRemoved = items.drop(1))
+        structs.subList(firstIndex + 1, endIndex).clear()
+        recordReplacement(firstItem, listOf(merged), additionallyRemoved = removed)
         return merged
     }
 
@@ -1237,6 +1497,7 @@ private class IndexedSequence(
         var treeRight: Node? = null
         var treeParent: Node? = null
         var treeSize: Int = 1
+        var treeUndeletedCount: Int = 0
         val treeVisibleLengths: LongArray = LongArray(RootKind.entries.size)
     }
 
@@ -1270,6 +1531,89 @@ private class IndexedSequence(
             current = current.right
         }
     }.also { materialized = it }
+
+    fun first(): StoreItem? = first?.item
+
+    fun firstVisible(kind: RootKind): StoreItem? {
+        val kindIndex = kind.ordinal
+        if (!firstVisibleComputed[kindIndex]) {
+            var candidate = first
+            while (candidate != null && candidate.item.visibleLength(kind) == 0L) {
+                candidate = candidate.right
+            }
+            firstVisibleByKind[kindIndex] = candidate
+            firstVisibleComputed[kindIndex] = true
+        }
+        return firstVisibleByKind[kindIndex]?.item
+    }
+
+    fun cursor(): SequenceCursor {
+        var current = first
+        return SequenceCursor(
+            currentProvider = { current?.item },
+            previousProvider = { current?.left?.item ?: if (current == null) last?.item else null },
+            advanceAction = { current = current?.right },
+            advanceToNextUndeletedAction = {
+                current = current?.let(::nextUndeletedNode)
+            },
+            seekAction = { item -> current = nodesByStart[item.id] },
+        )
+    }
+
+    /**
+     * Starts after the deleted structural prefix in O(log n).
+     *
+     * Native text formatting ignores deleted markers but still needs the immediate predecessor as
+     * its insertion origin. Keeping an undeleted subtree count mirrors the linked Yjs traversal
+     * without rescanning tens of thousands of historical format markers on every edit.
+     */
+    fun cursorAtFirstUndeleted(): SequenceCursor {
+        var current = firstUndeletedNode()
+        return SequenceCursor(
+            currentProvider = { current?.item },
+            previousProvider = { current?.left?.item ?: if (current == null) last?.item else null },
+            advanceAction = { current = current?.right },
+            advanceToNextUndeletedAction = {
+                current = current?.let(::nextUndeletedNode)
+            },
+            seekAction = { item -> current = nodesByStart[item.id] },
+        )
+    }
+
+    private fun firstUndeletedNode(): Node? {
+        return firstUndeletedNode(treeRoot)
+    }
+
+    private fun firstUndeletedNode(start: Node?): Node? {
+        var current = start
+        while (current != null) {
+            when {
+                (current.treeLeft?.treeUndeletedCount ?: 0) > 0 -> current = current.treeLeft
+                !current.item.deleted -> return current
+                else -> current = current.treeRight
+            }
+        }
+        return null
+    }
+
+    private fun nextUndeletedNode(node: Node): Node? {
+        if ((node.treeRight?.treeUndeletedCount ?: 0) > 0) {
+            return firstUndeletedNode(node.treeRight)
+        }
+        var child = node
+        var parent = child.treeParent
+        while (parent != null) {
+            if (child === parent.treeLeft) {
+                if (!parent.item.deleted) return parent
+                if ((parent.treeRight?.treeUndeletedCount ?: 0) > 0) {
+                    return firstUndeletedNode(parent.treeRight)
+                }
+            }
+            child = parent
+            parent = parent.treeParent
+        }
+        return null
+    }
 
     fun last(predicate: (StoreItem) -> Boolean): StoreItem? {
         var current = last
@@ -1556,16 +1900,7 @@ private class IndexedSequence(
             return positionHintNode?.item?.let { item -> item to positionHintItemStart }
         }
         if (index == 0L && kind != null) {
-            val kindIndex = kind.ordinal
-            if (!firstVisibleComputed[kindIndex]) {
-                var candidate = first
-                while (candidate != null && candidate.item.visibleLength(kind) == 0L) {
-                    candidate = candidate.right
-                }
-                firstVisibleByKind[kindIndex] = candidate
-                firstVisibleComputed[kindIndex] = true
-            }
-            return firstVisibleByKind[kindIndex]?.item?.let { item -> item to 0L }
+            return firstVisible(kind)?.let { item -> item to 0L }
         }
         var current = treeRoot
         var precedingLength = 0L
@@ -1630,6 +1965,10 @@ private class IndexedSequence(
 
     private fun recalculate(node: Node) {
         node.treeSize = 1 + (node.treeLeft?.treeSize ?: 0) + (node.treeRight?.treeSize ?: 0)
+        node.treeUndeletedCount =
+            (node.treeLeft?.treeUndeletedCount ?: 0) +
+            (if (node.item.deleted) 0 else 1) +
+            (node.treeRight?.treeUndeletedCount ?: 0)
         var remainingKinds = usedKindMask
         while (remainingKinds != 0) {
             val kindIndex = Integer.numberOfTrailingZeros(remainingKinds)

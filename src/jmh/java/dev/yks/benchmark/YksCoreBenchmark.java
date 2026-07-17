@@ -12,6 +12,8 @@ import dev.yks.Snapshot;
 import dev.yks.SnapshotKt;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import kotlin.Unit;
@@ -48,10 +50,51 @@ public class YksCoreBenchmark {
     private byte[] nestedUpdate;
     private byte[] fragmentedUpdate;
     private byte[] concurrentUpdate;
+    private List<byte[]> incrementalUpdates;
     private dev.yks.YArray arrayRead;
     private YText clockRangeText;
     private Snapshot clockRangeBefore;
     private Snapshot clockRangeAfter;
+    private YText alternatingClockRangeText;
+    private Snapshot alternatingClockRangeBefore;
+    private Snapshot alternatingClockRangeAfter;
+
+    @State(Scope.Thread)
+    public static class LocalFormatState {
+        private YText text;
+        private int value;
+
+        @Setup(Level.Trial)
+        public void prepareDocument() {
+            YDoc document = new YDoc();
+            document.setGc(false);
+            text = document.getText("body");
+            for (int index = 0; index < 50_000; index++) {
+                text.insert(0, "x", Map.of());
+            }
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class UnrelatedObserverState {
+        private YText target;
+        private long observed;
+
+        @Setup(Level.Trial)
+        public void prepareDocument() {
+            YDoc document = new YDoc();
+            document.setGc(false);
+            YText observedText = document.getText("observed");
+            target = document.getText("target");
+            for (int index = 0; index < 50_000; index++) {
+                target.insert(0, "x", Map.of());
+            }
+            observedText.observe(event -> {
+                observed++;
+                return Unit.INSTANCE;
+            });
+        }
+    }
 
     @State(Scope.Thread)
     public static class NestedDeleteState {
@@ -232,6 +275,11 @@ public class YksCoreBenchmark {
             nestedUpdate = Files.readAllBytes(Path.of("build/performance/nested-array-3000-v1.bin"));
             fragmentedUpdate = Files.readAllBytes(Path.of("build/performance/fragmented-text-5000-v1.bin"));
             concurrentUpdate = Files.readAllBytes(Path.of("build/performance/concurrent-text-1000-v1.bin"));
+            incrementalUpdates = Files.readAllLines(Path.of("build/performance/incremental-text-1000-v1.txt"))
+                .stream()
+                .filter(line -> !line.isBlank())
+                .map(Base64.getDecoder()::decode)
+                .toList();
             arrayUpdate = Files.readAllBytes(Path.of("build/performance/array-5000-v1.bin"));
             YDoc arrayDocument = new YDoc();
             arrayDocument.applyUpdate(arrayUpdate, null);
@@ -246,6 +294,16 @@ public class YksCoreBenchmark {
         clockRangeBefore = SnapshotKt.snapshot(clockRangeDocument);
         clockRangeText.insert(10_000, "y", Map.of());
         clockRangeAfter = SnapshotKt.snapshot(clockRangeDocument);
+
+        YDoc alternatingClockRangeDocument = new YDoc();
+        alternatingClockRangeDocument.setGc(false);
+        alternatingClockRangeText = alternatingClockRangeDocument.getText("body");
+        alternatingClockRangeText.insert(0, "x".repeat(2_000), Map.of());
+        alternatingClockRangeBefore = SnapshotKt.snapshot(alternatingClockRangeDocument);
+        for (int index = 999; index >= 0; index--) {
+            alternatingClockRangeText.delete(index * 2, 1);
+        }
+        alternatingClockRangeAfter = SnapshotKt.snapshot(alternatingClockRangeDocument);
     }
 
     @Benchmark
@@ -283,6 +341,16 @@ public class YksCoreBenchmark {
         doc.getText("right").toString();
         doc.applyUpdate(standardUpdate, null);
         return doc.getText("left").getLength() + doc.getText("right").getLength();
+    }
+
+    @Benchmark
+    public int applyOneThousandIncrementalUpdates() {
+        YDoc doc = new YDoc();
+        doc.setGc(false);
+        for (byte[] update : incrementalUpdates) {
+            doc.applyUpdate(update, null);
+        }
+        return doc.getText("body").getLength();
     }
 
     @Benchmark
@@ -498,5 +566,26 @@ public class YksCoreBenchmark {
     @Benchmark
     public int readClockRangeSnapshotDelta() {
         return clockRangeText.toDelta(clockRangeAfter, clockRangeBefore, null).getOps().size();
+    }
+
+    @Benchmark
+    public int readAlternatingClockRangeSnapshotDelta() {
+        return alternatingClockRangeText
+            .toDelta(alternatingClockRangeAfter, alternatingClockRangeBefore, null)
+            .getOps()
+            .size();
+    }
+
+    @Benchmark
+    public int formatFirstCharacterOfFragmentedText(LocalFormatState state) {
+        state.text.format(0, 1, Map.of("bold", (++state.value & 1) == 0));
+        return state.text.getLength() + state.value;
+    }
+
+    @Benchmark
+    public long editWithUnrelatedObserver(UnrelatedObserverState state) {
+        state.target.insert(0, "y", Map.of());
+        state.target.delete(0, 1);
+        return state.target.getLength() + state.observed;
     }
 }

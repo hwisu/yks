@@ -87,10 +87,20 @@ sealed class AbstractYType protected constructor(
         internal set
     internal var binding: YTypeBinding = YTypeBinding.Root(doc, name)
         private set
-    internal val preliminaryList = mutableListOf<Any?>()
-    internal val preliminaryMap = linkedMapOf<String, Any?>()
-    internal val preliminaryOperations = mutableListOf<() -> Unit>()
-    internal val preliminaryOperationValues = mutableListOf<Any?>()
+    private var preliminaryListValue: MutableList<Any?>? = null
+    private var preliminaryMapValue: MutableMap<String, Any?>? = null
+    private var preliminaryOperationsValue: MutableList<() -> Unit>? = null
+    private var preliminaryOperationValuesValue: MutableList<Any?>? = null
+    internal val preliminaryList: MutableList<Any?>
+        get() = preliminaryListValue ?: mutableListOf<Any?>().also { preliminaryListValue = it }
+    internal val preliminaryMap: MutableMap<String, Any?>
+        get() = preliminaryMapValue ?: linkedMapOf<String, Any?>().also { preliminaryMapValue = it }
+    internal val preliminaryOperations: MutableList<() -> Unit>
+        get() = preliminaryOperationsValue
+            ?: mutableListOf<() -> Unit>().also { preliminaryOperationsValue = it }
+    internal val preliminaryOperationValues: MutableList<Any?>
+        get() = preliminaryOperationValuesValue
+            ?: mutableListOf<Any?>().also { preliminaryOperationValuesValue = it }
 
     internal val isPreliminary: Boolean
         get() = binding is YTypeBinding.Detached || binding is YTypeBinding.Reserved
@@ -263,12 +273,12 @@ sealed class AbstractYType protected constructor(
             YXmlFragment.from(delta, doc, name)
     }
 
-    private val observers = mutableListOf<(YEvent) -> Unit>()
-    private val transactionObservers = mutableListOf<(YEvent, YTransactionEvent?) -> Unit>()
-    private val deepObservers = mutableListOf<(YEvent) -> Unit>()
-    private val deepTransactionObservers = mutableListOf<(YEvent, YTransactionEvent?) -> Unit>()
-    private val deepEventListObservers = mutableListOf<(List<YEvent>, YTransactionEvent?) -> Unit>()
-    private val eventListeners = linkedMapOf<String, MutableList<(YTypeEvent) -> Unit>>()
+    private var observers: MutableList<(YEvent) -> Unit>? = null
+    private var transactionObservers: MutableList<(YEvent, YTransactionEvent?) -> Unit>? = null
+    private var deepObservers: MutableList<(YEvent) -> Unit>? = null
+    private var deepTransactionObservers: MutableList<(YEvent, YTransactionEvent?) -> Unit>? = null
+    private var deepEventListObservers: MutableList<(List<YEvent>, YTransactionEvent?) -> Unit>? = null
+    private var eventListeners: MutableMap<String, MutableList<(YTypeEvent) -> Unit>>? = null
     private var deltaCache: YDeepDelta? = null
     private var rendererChangeSubscription: Subscription? = null
     internal var activeRenderer: AbstractRenderer = baseRenderer
@@ -277,37 +287,43 @@ sealed class AbstractYType protected constructor(
         private set
 
     fun observe(listener: (YEvent) -> Unit): Subscription {
-        observers.add(listener)
+        (observers ?: mutableListOf<(YEvent) -> Unit>().also { observers = it }).add(listener)
         doc.refreshTypeSnapshotInterest(this)
         return Subscription {
-            observers.remove(listener)
+            observers?.remove(listener)
             doc.refreshTypeSnapshotInterest(this)
         }
     }
 
     fun observe(listener: (YEvent, YTransactionEvent?) -> Unit): Subscription {
-        transactionObservers.add(listener)
+        (
+            transactionObservers
+                ?: mutableListOf<(YEvent, YTransactionEvent?) -> Unit>().also { transactionObservers = it }
+        ).add(listener)
         doc.refreshTypeSnapshotInterest(this)
         return Subscription {
-            transactionObservers.remove(listener)
+            transactionObservers?.remove(listener)
             doc.refreshTypeSnapshotInterest(this)
         }
     }
 
     fun observeDeep(listener: (YEvent) -> Unit): Subscription {
-        deepObservers.add(listener)
+        (deepObservers ?: mutableListOf<(YEvent) -> Unit>().also { deepObservers = it }).add(listener)
         doc.refreshTypeSnapshotInterest(this)
         return Subscription {
-            deepObservers.remove(listener)
+            deepObservers?.remove(listener)
             doc.refreshTypeSnapshotInterest(this)
         }
     }
 
     fun observeDeep(listener: (YEvent, YTransactionEvent?) -> Unit): Subscription {
-        deepTransactionObservers.add(listener)
+        (
+            deepTransactionObservers
+                ?: mutableListOf<(YEvent, YTransactionEvent?) -> Unit>().also { deepTransactionObservers = it }
+        ).add(listener)
         doc.refreshTypeSnapshotInterest(this)
         return Subscription {
-            deepTransactionObservers.remove(listener)
+            deepTransactionObservers?.remove(listener)
             doc.refreshTypeSnapshotInterest(this)
         }
     }
@@ -319,41 +335,45 @@ sealed class AbstractYType protected constructor(
      * opt-in form exposes the Yjs callback shape without changing existing Kotlin callers.
      */
     fun observeDeepEvents(listener: (List<YEvent>, YTransactionEvent?) -> Unit): Subscription {
-        deepEventListObservers.add(listener)
+        (
+            deepEventListObservers
+                ?: mutableListOf<(List<YEvent>, YTransactionEvent?) -> Unit>()
+                    .also { deepEventListObservers = it }
+        ).add(listener)
         doc.refreshTypeSnapshotInterest(this)
         return Subscription {
-            deepEventListObservers.remove(listener)
+            deepEventListObservers?.remove(listener)
             doc.refreshTypeSnapshotInterest(this)
         }
     }
 
     fun unobserve(listener: (YEvent) -> Unit) {
-        observers.remove(listener)
+        observers?.remove(listener)
         doc.refreshTypeSnapshotInterest(this)
     }
 
     fun unobserve(listener: (YEvent, YTransactionEvent?) -> Unit) {
-        transactionObservers.remove(listener)
+        transactionObservers?.remove(listener)
         doc.refreshTypeSnapshotInterest(this)
     }
 
     fun unobserveDeep(listener: (YEvent) -> Unit) {
-        deepObservers.remove(listener)
+        deepObservers?.remove(listener)
         doc.refreshTypeSnapshotInterest(this)
     }
 
     fun unobserveDeep(listener: (YEvent, YTransactionEvent?) -> Unit) {
-        deepTransactionObservers.remove(listener)
+        deepTransactionObservers?.remove(listener)
         doc.refreshTypeSnapshotInterest(this)
     }
 
     fun unobserveDeepEvents(listener: (List<YEvent>, YTransactionEvent?) -> Unit) {
-        deepEventListObservers.remove(listener)
+        deepEventListObservers?.remove(listener)
         doc.refreshTypeSnapshotInterest(this)
     }
 
     fun on(eventName: String, listener: (YTypeEvent) -> Unit): Subscription {
-        val listeners = eventListeners.getOrPut(eventName) { mutableListOf() }
+        val listeners = eventListeners.getOrCreateMap().getOrPut(eventName) { mutableListOf() }
         listeners.add(listener)
         doc.refreshTypeSnapshotInterest(this)
         return Subscription { off(eventName, listener) }
@@ -370,10 +390,10 @@ sealed class AbstractYType protected constructor(
     }
 
     fun off(eventName: String, listener: (YTypeEvent) -> Unit) {
-        val listeners = eventListeners[eventName] ?: return
+        val listeners = eventListeners?.get(eventName) ?: return
         listeners.remove(listener)
         if (listeners.isEmpty()) {
-            eventListeners.remove(eventName)
+            eventListeners?.remove(eventName)
         }
         doc.refreshTypeSnapshotInterest(this)
     }
@@ -394,42 +414,49 @@ sealed class AbstractYType protected constructor(
         activeRenderer = baseRenderer
         clearCache()
         emitTypeEvent(YTypeEvent(name = "destroy", target = this))
-        eventListeners.clear()
+        eventListeners?.clear()
         doc.removeTypeSnapshotInterest(this)
     }
 
     internal fun emit(event: YEvent) {
         clearCache()
-        val callbacks = observers.toList().map { listener -> { listener(event) } }.toMutableList()
-        callbacks.addAll(transactionObservers.toList().map { listener -> { listener(event, event.transaction) } })
+        val callbacks = observers.orEmpty().toList().map { listener -> { listener(event) } }.toMutableList()
+        callbacks.addAll(transactionObservers.orEmpty().toList().map { listener -> { listener(event, event.transaction) } })
         callbacks.addAll(deltaEventCallbacks(event))
         callAllYksCallbacks(callbacks)
     }
 
     internal val hasDeepObservers: Boolean
-        get() = deepObservers.isNotEmpty() ||
-            deepTransactionObservers.isNotEmpty() ||
-            deepEventListObservers.isNotEmpty()
+        get() = !deepObservers.isNullOrEmpty() ||
+            !deepTransactionObservers.isNullOrEmpty() ||
+            !deepEventListObservers.isNullOrEmpty()
 
-    internal val needsTransactionSnapshot: Boolean
-        get() = observers.isNotEmpty() ||
-            transactionObservers.isNotEmpty() ||
-            hasDeepObservers ||
+    internal val hasDirectEventInterest: Boolean
+        get() = !observers.isNullOrEmpty() ||
+            !transactionObservers.isNullOrEmpty() ||
             hasDeltaListeners ||
             hasDeltaCache
 
-    internal val hasDeltaListeners: Boolean get() = eventListeners["delta"]?.isNotEmpty() == true
+    internal val hasDeepEventInterest: Boolean
+        get() = hasDeepObservers ||
+            hasDeltaListeners ||
+            hasDeltaCache
+
+    internal val needsTransactionSnapshot: Boolean
+        get() = hasDirectEventInterest || hasDeepObservers
+
+    internal val hasDeltaListeners: Boolean get() = eventListeners?.get("delta")?.isNotEmpty() == true
 
     internal val hasDeltaCache: Boolean get() = deltaCache != null
 
     internal fun emitDeep(event: YEvent) {
-        val callbacks = deepObservers.toList().map { listener -> { listener(event) } }.toMutableList()
-        callbacks.addAll(deepTransactionObservers.toList().map { listener -> { listener(event, event.transaction) } })
+        val callbacks = deepObservers.orEmpty().toList().map { listener -> { listener(event) } }.toMutableList()
+        callbacks.addAll(deepTransactionObservers.orEmpty().toList().map { listener -> { listener(event, event.transaction) } })
         val upstreamEvents = event.deepEvents
             .ifEmpty { listOf(event) }
             .sortedBy { childEvent -> childEvent.path.size }
         callbacks.addAll(
-            deepEventListObservers.toList().map { listener ->
+            deepEventListObservers.orEmpty().toList().map { listener ->
                 { listener(upstreamEvents, event.transaction) }
             },
         )
@@ -441,7 +468,7 @@ sealed class AbstractYType protected constructor(
     }
 
     private fun deltaEventCallbacks(event: YEvent): List<() -> Unit> {
-        return eventListeners["delta"].orEmpty().toList().map { listener ->
+        return eventListeners?.get("delta").orEmpty().toList().map { listener ->
             {
                 listener(
                     YTypeEvent(
@@ -458,8 +485,12 @@ sealed class AbstractYType protected constructor(
     }
 
     private fun emitTypeEvent(event: YTypeEvent) {
-        callAllYksCallbacks(eventListeners[event.name].orEmpty().toList()) { listener -> listener(event) }
+        callAllYksCallbacks(eventListeners?.get(event.name).orEmpty().toList()) { listener -> listener(event) }
     }
+
+    private fun MutableMap<String, MutableList<(YTypeEvent) -> Unit>>?.getOrCreateMap():
+        MutableMap<String, MutableList<(YTypeEvent) -> Unit>> =
+        this ?: linkedMapOf<String, MutableList<(YTypeEvent) -> Unit>>().also { eventListeners = it }
 
     fun getPathTo(child: AbstractYType, renderer: AbstractRenderer = baseRenderer): List<Any> {
         require(child.doc === doc) { "child must belong to the same document" }
@@ -480,6 +511,8 @@ sealed class AbstractYType protected constructor(
         deltaCache = null
         doc.refreshTypeSnapshotInterest(this)
     }
+
+    internal open fun adjustVisibleLength(changedKind: RootKind, delta: Long) = Unit
 
     fun useRenderer(renderer: AbstractRenderer): AbstractYType {
         if (activeRenderer === renderer && renderer === baseRenderer) {
@@ -612,13 +645,36 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
 
     constructor(vararg values: Any?) : this(values.toList())
 
+    private var maintainedLengthInitialized = false
+    private var maintainedLength = 0
+    private var firstVisibleItemCached = false
+    private var firstVisibleItem: StoreItem? = null
+
     val size: Int
         get() {
             if (warnIfPreliminary()) return 0
-            return doc.visibleLength(name, RootKind.Array).toNonNegativeInt("array length")
+            doc.ensureThreadAccess()
+            if (!maintainedLengthInitialized) {
+                maintainedLength = doc.visibleLength(name, RootKind.Array).toNonNegativeInt("array length")
+                maintainedLengthInitialized = true
+                doc.registerMaintainedLength(name)
+            }
+            return maintainedLength
         }
 
     val length: Int get() = size
+
+    internal override fun adjustVisibleLength(changedKind: RootKind, delta: Long) {
+        if (changedKind != RootKind.Array) return
+        firstVisibleItemCached = false
+        firstVisibleItem = null
+        if (!maintainedLengthInitialized) return
+        maintainedLength = try {
+            Math.addExact(maintainedLength.toLong(), delta)
+        } catch (_: ArithmeticException) {
+            error("maintained array length overflow")
+        }.toNonNegativeInt("maintained array length")
+    }
 
     val attrSize: Int get() = getAttrs().size
 
@@ -653,7 +709,7 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
                     packed.clear()
                 }
                 values.forEach { raw ->
-                    val stored = doc.storeValue(raw, parent = name)
+                    val stored = doc.storePreflightedScalar(raw, parent = name)
                     when {
                         raw is AbstractYType -> {
                             flushPacked()
@@ -829,6 +885,20 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
 
     fun get(index: Int): Any? {
         if (index < 0) return null
+        if (index == 0) {
+            doc.ensureThreadAccess()
+            if (!firstVisibleItemCached) {
+                firstVisibleItem = doc.firstVisibleSequenceItem(name, RootKind.Array)
+                firstVisibleItemCached = true
+            }
+            val item = firstVisibleItem ?: return null
+            return when (val content = item.content) {
+                is ItemContent.Value -> doc.valueToAny(content.value)
+                is ItemContent.ArrayValues -> doc.valueToAny(content.values.first())
+                is ItemContent.XmlType -> doc.typeFromXmlType(content)
+                else -> null
+            }
+        }
         val (item, offset) = doc.visibleSequencePositionAt(name, RootKind.Array, index) ?: return null
         return when (val content = item.content) {
             is ItemContent.Value -> doc.valueToAny(content.value)
@@ -1018,7 +1088,7 @@ open class YText internal constructor(
         require(kind == RootKind.Text || kind == RootKind.XmlText) { "YText kind must be a text sequence" }
     }
 
-    private var cachedLengthVersion: Long = Long.MIN_VALUE
+    private var cachedLengthInitialized = false
     private var cachedLength: Int = 0
     private var cachedStringVersion: Long = Long.MIN_VALUE
     private var cachedString: String = ""
@@ -1027,13 +1097,22 @@ open class YText internal constructor(
         get() {
             if (warnIfPreliminary()) return 0
             doc.ensureThreadAccess()
-            val version = doc.store.version
-            if (cachedLengthVersion != version) {
+            if (!cachedLengthInitialized) {
                 cachedLength = doc.visibleLength(name, kind).toNonNegativeInt("text length")
-                cachedLengthVersion = version
+                cachedLengthInitialized = true
+                doc.registerMaintainedLength(name)
             }
             return cachedLength
         }
+
+    internal override fun adjustVisibleLength(changedKind: RootKind, delta: Long) {
+        if (!cachedLengthInitialized || changedKind != kind) return
+        cachedLength = try {
+            Math.addExact(cachedLength.toLong(), delta)
+        } catch (_: ArithmeticException) {
+            error("maintained text length overflow")
+        }.toNonNegativeInt("maintained text length")
+    }
 
     val attrSize: Int get() = getAttrs().size
 
@@ -1573,10 +1652,10 @@ open class YText internal constructor(
             yChangeEndClock = null
         }
 
-        fun snapshotBoundaries(item: StoreItem): Iterable<Long> = buildList {
+        fun snapshotBoundaries(client: Long): Iterable<Long> = buildList {
             listOfNotNull(snapshot, prevSnapshot).forEach { target ->
-                target.sv[item.id.client]?.let(::add)
-                target.ds.rangesFor(item.id.client).forEach { range ->
+                target.sv[client]?.let(::add)
+                target.ds.rangesFor(client).forEach { range ->
                     add(range.clock)
                     add(range.end)
                 }
@@ -1767,15 +1846,16 @@ open class YText internal constructor(
         entries: List<ItemContent>,
         originOverride: Id? = null,
         rightOriginOverride: Id? = null,
-    ) {
+    ): StoreItem? {
         val visibleLength = doc.visibleLength(name, kind)
         require(index.toLong() <= visibleLength) {
             "insert index $index exceeds visible text length $visibleLength"
         }
-        if (entries.isEmpty()) return
+        if (entries.isEmpty()) return null
         val anchors = doc.insertionAnchors(name, kind, index)
         var origin = originOverride ?: anchors.first
         val rightOrigin = rightOriginOverride ?: anchors.second
+        var lastInserted: StoreItem? = null
         entries.forEach { content ->
             require(content.kind == kind) { "YText entries must use matching text content" }
             val item = StoreItem(
@@ -1788,7 +1868,9 @@ open class YText internal constructor(
             )
             doc.integrateLocal(item)
             origin = item.lastId
+            lastInserted = item
         }
+        return lastInserted
     }
 
     private fun insertAttributedTextEntries(
@@ -1800,81 +1882,190 @@ open class YText internal constructor(
             insertTextEntries(index, entries)
             return
         }
-        val ambient = attributesAt(index)
-        val keys = (ambient.keys + attributes.keys).toSortedSet()
-        val desired = keys.associateWith { key -> attributes[key] ?: YValue.Null }
-        val restore = keys.associateWith { key -> ambient[key] ?: YValue.Null }
-        val anchors = doc.insertionAnchors(name, kind, index)
-        val markerOrigin = insertNativeFormatMarkers(index, desired)
-        insertTextEntries(
+        doc.insertionAnchors(name, kind, index)
+        val cursor = findNativeTextPosition(index)
+        val desired = attributes.toMutableMap()
+        cursor.currentAttributes.keys.forEach { key ->
+            if (key !in desired) desired[key] = YValue.Null
+        }
+        minimizeNativeAttributeChanges(cursor, desired)
+        val negatedAttributes = insertNativeAttributes(cursor, desired)
+        val inserted = insertTextEntries(
             index,
             entries.map { entry -> entry.withoutTextAttributes() },
-            originOverride = markerOrigin ?: anchors.first,
-            rightOriginOverride = anchors.second,
+            originOverride = cursor.left?.lastId,
+            rightOriginOverride = cursor.right?.id,
         )
-        val insertedLength = entries.sumOf { entry -> entry.clockLength }.toNonNegativeInt("inserted text length")
-        insertNativeFormatMarkers(index + insertedLength, restore)
+        if (inserted != null) {
+            cursor.sequence.seek(inserted)
+            cursor.sequence.advance()
+            cursor.left = inserted
+        }
+        insertNegatedNativeAttributes(cursor, negatedAttributes)
     }
 
     private fun formatNativeRange(start: Int, length: Int, attributes: Map<String, YValue>) {
         if (length <= 0) return
-        // Split only the two range boundaries. The remaining pass is per physical CRDT struct,
-        // not per UTF-16 unit, so a packed 20k string stays O(number of format runs).
-        doc.insertionAnchors(name, kind, start)
+        // Yjs formats from a linked ItemTextListPosition. Split only the two requested boundaries,
+        // then walk to the start and touch format markers/content inside the requested range.
+        // Zero is already a structural boundary. Avoid replacing the indexed-sequence position
+        // hint for the end boundary; repeated small formats can then resolve the unchanged end in
+        // O(1), matching Yjs' linked-position behavior.
+        if (start > 0) doc.insertionAnchors(name, kind, start)
         doc.insertionAnchors(name, kind, start + length)
-        val visible = doc.visibleSequence(name).filter { item -> item.content.kind == kind }
-        var position = 0
-        val desired = visible.map { item ->
-            val current = doc.renderedTextAttributes(item).toMutableMap()
-            val itemEnd = checkedClockAdd(position.toLong(), item.length, "text format item end")
-                .toNonNegativeInt("text format item end")
-            if (position >= start && itemEnd <= start + length) {
-                current.applyTextFormatAttributes(attributes)
+        val cursor = findNativeTextPosition(start)
+        minimizeNativeAttributeChanges(cursor, attributes)
+        val negatedAttributes = insertNativeAttributes(cursor, attributes)
+        var remaining = length.toLong()
+        while (true) {
+            val right = cursor.right ?: break
+            val marker = if (right.deleted) null else right.nativeTextFormat()
+            if (
+                remaining <= 0L &&
+                (negatedAttributes.isEmpty() || !right.deleted && marker == null)
+            ) {
+                break
             }
-            position = itemEnd
-            current
-        }
-        canonicalizeNativeFormatting(visible, desired)
-    }
-
-    private fun canonicalizeNativeFormatting(
-        visible: List<StoreItem>,
-        desired: List<Map<String, YValue>>,
-    ) {
-        require(desired.size == visible.size) { "text formatting state must cover every visible item" }
-        val nativeMarkers = doc.sequence(name)
-            .filter { item ->
-                !item.deleted && item.content.kind == kind && item.content is ItemContent.NativeTextFormat
-            }
-        doc.deleteItemsByIds(nativeMarkers.map { item -> item.id })
-
-        val active = linkedMapOf<String, YValue>()
-        var position = 0
-        visible.forEachIndexed { index, item ->
-            val base = item.content.baseTextAttributes()
-            val target = desired[index]
-            val effective = base.toMutableMap().also { attrs -> attrs.applyTextFormatAttributes(active) }
-            val keys = (effective.keys + target.keys + active.keys).toSortedSet()
-            val changes = linkedMapOf<String, YValue>()
-            keys.forEach { key ->
-                val current = effective[key]
-                val next = target[key]
-                if (current != next) {
-                    val markerValue = next ?: YValue.Null
-                    changes[key] = markerValue
-                    active[key] = markerValue
+            if (!right.deleted) {
+                if (marker != null) {
+                    if (attributes.containsKey(marker.key)) {
+                        val desired = attributes.getValue(marker.key)
+                        if (desired == marker.value) {
+                            negatedAttributes.remove(marker.key)
+                        } else {
+                            if (remaining <= 0L) break
+                            negatedAttributes[marker.key] = marker.value
+                        }
+                        doc.deleteItemsByIds(listOf(right.id))
+                    } else {
+                        cursor.currentAttributes.applyTextFormatAttributes(mapOf(marker.key to marker.value))
+                    }
+                } else if (right.countable && right.content.kind == kind) {
+                    check(remaining >= right.length) { "text format boundary must split packed content" }
+                    remaining -= right.length
                 }
             }
-            insertNativeFormatMarkers(position, changes)
-            position = checkedClockAdd(position.toLong(), item.length, "text format position")
-                .toNonNegativeInt("text format position")
+            forwardNativeTextCursor(cursor)
         }
-        val terminalChanges = active
-            .filterValues { value -> value != YValue.Null }
-            .keys
-            .associateWith { YValue.Null }
-        insertNativeFormatMarkers(position, terminalChanges)
+        insertNegatedNativeAttributes(cursor, negatedAttributes)
     }
+
+    private class NativeTextCursor(
+        var left: StoreItem?,
+        val sequence: SequenceCursor,
+        val currentAttributes: MutableMap<String, YValue>,
+    ) {
+        val right: StoreItem? get() = sequence.current
+    }
+
+    private fun findNativeTextPosition(index: Int): NativeTextCursor {
+        var remaining = index.toLong()
+        val sequence = doc.sequenceCursorAtFirstUndeleted(name)
+        val cursor = NativeTextCursor(
+            left = sequence.previous,
+            sequence = sequence,
+            currentAttributes = linkedMapOf(),
+        )
+        while (cursor.right != null && remaining > 0L) {
+            val right = cursor.right!!
+            if (!right.deleted) {
+                val marker = right.nativeTextFormat()
+                if (marker != null) {
+                    cursor.currentAttributes.applyTextFormatAttributes(mapOf(marker.key to marker.value))
+                } else if (right.countable && right.content.kind == kind) {
+                    check(remaining >= right.length) { "text format start must split packed content" }
+                    remaining -= right.length
+                }
+            }
+            forwardNativeTextCursor(cursor, updateAttributes = false)
+        }
+        require(remaining == 0L) { "text format index is out of bounds" }
+        return cursor
+    }
+
+    private fun forwardNativeTextCursor(cursor: NativeTextCursor, updateAttributes: Boolean = true) {
+        val right = cursor.right ?: return
+        if (updateAttributes && !right.deleted) {
+            right.nativeTextFormat()?.let { marker ->
+                cursor.currentAttributes.applyTextFormatAttributes(mapOf(marker.key to marker.value))
+            }
+        }
+        cursor.sequence.advanceToNextUndeleted()
+        cursor.left = cursor.sequence.previous
+    }
+
+    private fun minimizeNativeAttributeChanges(
+        cursor: NativeTextCursor,
+        attributes: Map<String, YValue>,
+    ) {
+        while (true) {
+            val right = cursor.right ?: return
+            val marker = if (right.deleted) null else right.nativeTextFormat()
+            if (
+                !right.deleted &&
+                (marker == null || (attributes[marker.key] ?: YValue.Null) != marker.value)
+            ) {
+                return
+            }
+            forwardNativeTextCursor(cursor)
+        }
+    }
+
+    private fun insertNativeAttributes(
+        cursor: NativeTextCursor,
+        attributes: Map<String, YValue>,
+    ): MutableMap<String, YValue> {
+        val negated = linkedMapOf<String, YValue>()
+        attributes.forEach { (key, value) ->
+            val current = cursor.currentAttributes[key] ?: YValue.Null
+            if (current != value) {
+                negated[key] = current
+                insertNativeFormatMarker(cursor, key, value)
+            }
+        }
+        return negated
+    }
+
+    private fun insertNegatedNativeAttributes(
+        cursor: NativeTextCursor,
+        negatedAttributes: MutableMap<String, YValue>,
+    ) {
+        while (true) {
+            val right = cursor.right ?: break
+            val marker = if (right.deleted) null else right.nativeTextFormat()
+            val matchesNegated = marker != null &&
+                negatedAttributes[marker.key] == marker.value
+            if (!right.deleted && !matchesNegated) break
+            if (!right.deleted && marker != null) {
+                negatedAttributes.remove(marker.key)
+            }
+            forwardNativeTextCursor(cursor)
+        }
+        negatedAttributes.forEach { (key, value) ->
+            insertNativeFormatMarker(cursor, key, value)
+        }
+    }
+
+    private fun insertNativeFormatMarker(
+        cursor: NativeTextCursor,
+        key: String,
+        value: YValue,
+    ) {
+        val item = StoreItem(
+            id = doc.nextId(),
+            origin = cursor.left?.lastId,
+            rightOrigin = cursor.right?.id,
+            parent = name,
+            parentSub = null,
+            content = ItemContent.NativeTextFormat(key, value, kind),
+        )
+        doc.integrateLocal(item)
+        cursor.sequence.seek(item)
+        forwardNativeTextCursor(cursor)
+    }
+
+    private fun StoreItem.nativeTextFormat(): ItemContent.NativeTextFormat? =
+        (content as? ItemContent.NativeTextFormat)?.takeIf { marker -> marker.kind == kind }
 
     private fun insertTransientFormatMarkers(index: Int, attributes: Map<String, YValue>) {
         if (attributes.isEmpty()) return
@@ -1973,24 +2164,6 @@ private fun ItemContent.withoutTextAttributes(): ItemContent = when (this) {
 
 private fun normalizeTextFormatAttributes(attributes: Map<String, Any?>): Map<String, YValue> =
     attributes.mapValues { (_, value) -> value?.let(YValue::from) ?: YValue.Null }.toSortedMap()
-
-private fun textFormatAfterAttributes(
-    visible: List<StoreItem>,
-    endIndex: Int,
-    keys: Set<String>,
-): Map<String, YValue> {
-    val afterAttributes = visible.getOrNull(endIndex)?.content?.textAttributes().orEmpty()
-    return keys.associateWith { key -> afterAttributes[key] ?: YValue.Null }.toSortedMap()
-}
-
-private fun textFormatBeforeAttributes(
-    items: List<StoreItem>,
-    keys: Set<String>,
-): List<Map<String, YValue>> =
-    items.map { item ->
-        val attributes = item.content.textAttributes()
-        keys.associateWith { key -> attributes[key] ?: YValue.Null }.toSortedMap()
-    }
 
 internal fun YTextDelta.cloneInto(targetDoc: YDoc): YTextDelta {
     val cloned = YTextDelta()

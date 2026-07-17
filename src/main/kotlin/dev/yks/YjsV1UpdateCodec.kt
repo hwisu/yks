@@ -1225,8 +1225,24 @@ private fun StoreItem.canPackTextWith(right: StoreItem): Boolean {
 }
 
 private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
+    val firstClient = firstOrNull()?.id?.client
+    var isSingleSortedClient = firstClient != null
+    var singleIndex = 0
+    while (isSingleSortedClient && singleIndex < size) {
+        val item = this[singleIndex]
+        if (
+            item.id.client != firstClient ||
+            (singleIndex > 0 && this[singleIndex - 1].id.clock > item.id.clock)
+        ) {
+            isSingleSortedClient = false
+        }
+        singleIndex++
+    }
+    val singleClientItems = takeIf { isSingleSortedClient }
     val itemsByClient = linkedMapOf<Long, MutableList<DecodedWireItem>>()
-    for (item in this) itemsByClient.getOrPut(item.id.client) { mutableListOf() }.add(item)
+    if (singleClientItems == null) {
+        for (item in this) itemsByClient.getOrPut(item.id.client) { mutableListOf() }.add(item)
+    }
     itemsByClient.values.forEach { items ->
         var sorted = true
         var index = 1
@@ -1239,23 +1255,56 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
         }
         if (!sorted) items.sortBy { item -> item.id.clock }
     }
-    val denseUnitClockStarts = itemsByClient.mapValues { (_, items) ->
-        val firstClock = items.firstOrNull()?.id?.clock ?: return@mapValues null
+    fun denseUnitClockStart(items: List<DecodedWireItem>): Long? {
+        val firstClock = items.firstOrNull()?.id?.clock ?: return null
         var index = 0
         while (index < items.size) {
             val item = items[index]
             if (item.content.length != 1L || item.id.clock != checkedClockAdd(firstClock, index.toLong())) {
-                return@mapValues null
+                return null
             }
             index++
         }
-        firstClock
+        return firstClock
+    }
+    val singleDenseUnitClockStart = singleClientItems?.let(::denseUnitClockStart)
+    val denseUnitClockStarts = itemsByClient.mapValues { (_, items) ->
+        denseUnitClockStart(items)
+    }
+    if (singleClientItems != null && singleDenseUnitClockStart != null) {
+        singleClientItems.toDenseStoreItems(singleDenseUnitClockStart)?.let { return it }
     }
 
     var cachedClient = -1L
     var cachedClientItems: List<DecodedWireItem> = emptyList()
     var cachedDenseUnitClockStart: Long? = null
     fun containing(id: Id): DecodedWireItem? {
+        if (singleClientItems != null) {
+            if (id.client != firstClient) return null
+            singleDenseUnitClockStart?.let { firstClock ->
+                val index = id.clock - firstClock
+                if (index >= 0 && index < singleClientItems.size.toLong()) {
+                    return singleClientItems[index.toInt()]
+                }
+                return null
+            }
+            var low = 0
+            var high = singleClientItems.lastIndex
+            var candidate: DecodedWireItem? = null
+            while (low <= high) {
+                val middle = (low + high) ushr 1
+                val item = singleClientItems[middle]
+                if (item.id.clock <= id.clock) {
+                    candidate = item
+                    low = middle + 1
+                } else {
+                    high = middle - 1
+                }
+            }
+            return candidate?.takeIf { item ->
+                id.clock < checkedClockAdd(item.id.clock, item.content.length)
+            }
+        }
         if (cachedClient != id.client) {
             cachedClient = id.client
             cachedClientItems = itemsByClient[id.client] ?: emptyList()
@@ -1536,6 +1585,82 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
             clockOffset = checkedClockAdd(clockOffset, storeItem.length, "decoded content offset")
             result.add(storeItem)
         }
+    }
+    return result
+}
+
+/**
+ * Resolves the common single-client, unit-clock, backward-anchor update in one forward pass.
+ *
+ * Future anchors, GC structs, and packed content deliberately fall back to the general resolver.
+ */
+private fun List<DecodedWireItem>.toDenseStoreItems(firstClock: Long): List<StoreItem>? {
+    val client = firstOrNull()?.id?.client ?: return emptyList()
+    val parents = arrayOfNulls<String>(size)
+    val parentSubs = arrayOfNulls<String>(size)
+    val kinds = arrayOfNulls<RootKind>(size)
+    val result = ArrayList<StoreItem>(size)
+
+    fun anchorIndex(id: Id): Int? {
+        if (id.client != client) return null
+        val index = id.clock - firstClock
+        return index.toInt().takeIf { index >= 0 && index < size && index.toLong() == id.clock - firstClock }
+    }
+
+    for (index in indices) {
+        val item = this[index]
+        if (item.isGc || item.content is WireContent.Deleted || item.content.length != 1L) return null
+        val inheritedIndex = when (val reference = item.parent) {
+            is ParentReference.Inherit -> anchorIndex(reference.id)?.takeIf { anchor -> anchor < index }
+                ?: return null
+            else -> null
+        }
+        val parent = when (val reference = item.parent) {
+            is ParentReference.Root -> reference.name
+            is ParentReference.Nested -> {
+                val ownerIndex = anchorIndex(reference.id)?.takeIf { owner -> owner < index } ?: return null
+                (this[ownerIndex].content as? WireContent.Type)?.name ?: return null
+            }
+            is ParentReference.Inherit -> parents[checkNotNull(inheritedIndex)] ?: return null
+        }
+        val parentSub = when (item.parent) {
+            is ParentReference.Root,
+            is ParentReference.Nested -> item.parentSub
+            is ParentReference.Inherit -> parentSubs[checkNotNull(inheritedIndex)]
+        }
+        val ownerKind = when (val reference = item.parent) {
+            is ParentReference.Nested -> {
+                val ownerIndex = anchorIndex(reference.id)?.takeIf { owner -> owner < index } ?: return null
+                (this[ownerIndex].content as? WireContent.Type)?.kind
+            }
+            is ParentReference.Inherit -> kinds[checkNotNull(inheritedIndex)]
+            is ParentReference.Root -> null
+        }
+        val kind = if (parentSub != null) {
+            ownerKind?.takeIf { it == RootKind.XmlHook } ?: RootKind.Map
+        } else {
+            item.content.definitiveSequenceKindOrNull()
+                ?: ownerKind
+                ?: item.content.inferRootKind(parentSub)
+        }
+        val content = item.content.toSingleItemContentOrNull(kind) ?: return null
+        parents[index] = parent
+        parentSubs[index] = parentSub
+        kinds[index] = kind
+        result.add(
+            StoreItem(
+                id = item.id,
+                origin = item.origin,
+                rightOrigin = item.rightOrigin,
+                parent = parent,
+                parentSub = parentSub,
+                content = content,
+                deleted = false,
+                requiresClockContinuity = true,
+                isGc = false,
+                unresolvedParent = null,
+            ),
+        )
     }
     return result
 }
