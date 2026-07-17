@@ -1,6 +1,9 @@
 package dev.yks.benchmark
 
 import dev.yks.YDoc
+import dev.yks.YDocOptions
+import dev.yks.YDocRuntimeOptions
+import dev.yks.YThreadAccessPolicy
 import dev.yks.snapshot
 import java.nio.file.Files
 import java.nio.file.Path
@@ -100,7 +103,13 @@ fun main(args: Array<String>) {
         }
         .orEmpty()
 
-    val lengthDoc = YDoc(clientId = 10)
+    // Yjs has no thread-confinement check on scalar reads. Isolate the
+    // maintained-length implementation from YKS's optional safety policy so
+    // this ratio compares equivalent semantics; safety is covered separately.
+    val lengthDoc = YDoc(
+        YDocOptions(clientId = 10),
+        YDocRuntimeOptions(threadAccessPolicy = YThreadAccessPolicy.UNCHECKED),
+    )
     val lengthText = lengthDoc.getText("body")
     lengthText.insert(0, "x".repeat(5_000))
 
@@ -115,7 +124,10 @@ fun main(args: Array<String>) {
     standardTransactionDoc.applyUpdate(fixture)
     standardTransactionDoc.observeUpdates { _, _ -> Unit }
 
-    val arrayReadDoc = YDoc(clientId = 14)
+    val arrayReadDoc = YDoc(
+        YDocOptions(clientId = 14),
+        YDocRuntimeOptions(threadAccessPolicy = YThreadAccessPolicy.UNCHECKED),
+    )
     arrayReadDoc.applyUpdate(arrayFixture)
     val arrayRead = arrayReadDoc.getArray("array")
 

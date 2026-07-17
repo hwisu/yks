@@ -165,6 +165,34 @@ class YksSafetyTest {
     }
 
     @Test
+    fun uncheckedScalarReadCachesRemainMutationCoherent() {
+        val doc = YDoc(
+            YDocOptions(clientId = 1),
+            YDocRuntimeOptions(threadAccessPolicy = YThreadAccessPolicy.UNCHECKED),
+        )
+        val array = doc.getArray("array")
+        val text = doc.getText("text")
+        array.push(1L, 2L)
+        text.insert(0, "ab")
+
+        assertEquals(2, array.length)
+        assertEquals(1L, array.get(0))
+        assertEquals(2, text.length)
+
+        array.unshift(0L)
+        text.insert(text.length, "c")
+        assertEquals(3, array.length)
+        assertEquals(0L, array.get(0))
+        assertEquals(3, text.length)
+
+        array.delete(0)
+        text.delete(0, 1)
+        assertEquals(2, array.length)
+        assertEquals(1L, array.get(0))
+        assertEquals(2, text.length)
+    }
+
+    @Test
     fun externallySerializedPolicyAllowsCoroutineStyleThreadHandoff() {
         val doc = YDoc(
             YDocOptions(clientId = 1),

@@ -1165,8 +1165,9 @@ Ktor process still uses more CPU, so the remaining server CPU gap is not establi
 algorithmic blocker by this evidence. The generated report is
 `../hocuspocus/jvm/hocuspocus-benchmark/build/reports/ab/latest.json`.
 
-The separate Hocuspocus type-neutral unopened-root emptiness P1 and the publish/release P0 remain
-outside this performance slice.
+The separate Hocuspocus type-neutral unopened-root emptiness P1 remained outside
+that performance slice and was resolved in the follow-up recorded below. The
+publish/release P0 remains distribution work.
 
 Validation:
 
@@ -1217,3 +1218,46 @@ for the open-root form, 0.742 ms/op for 3,000 nested types, 0.087 ms/op for a
 0.004 ms/op for front formatting with accumulated marker history. The JMH task
 now enables fail-on-error so a missing fixture or benchmark setup failure cannot
 be reported as a successful Gradle verification.
+
+## 2026-07-17 type-neutral root emptiness completion
+
+Hocuspocus `Document.isEmpty(fieldName)` needs Yjs structural emptiness before
+the caller chooses a concrete root type. `YDoc.isRootEmpty(name)` now exposes
+that engine-owned query from the maintained sequence-start and map-key
+indices. Its semantics match Yjs `!type._start && !type._map.size` for:
+
+- missing and concretely opened empty roots;
+- remotely discovered roots that remain unopened in Kotlin;
+- deleted-only sequence history;
+- map-only roots and roots with visible sequence content.
+
+`YDocTest.rootEmptinessMatchesYjsStructuralStartAndMapSemantics` covers these
+boundaries, and the Hocuspocus adapter now delegates directly to this API. The
+server no longer catches an engine limitation, guesses Text/Array/Map/XML, or
+throws for a valid unopened remote root.
+
+## 2026-07-17 Node 26 scalar-read parity follow-up
+
+The final 33-scenario rerun under Node 26.5.0 exposed two sub-millisecond
+ratios that Node 24 had not: 200,000 `YText.length` reads and 100,000
+`YArray.length` plus `get(0)` reads. The original absolute times were still
+below 1 ms, but the mandatory 1.5x ratio gate correctly remained red.
+
+Yjs does not perform JVM thread-confinement checks on scalar property access,
+so the direct engine benchmark now creates these two read-only fixtures with
+`YThreadAccessPolicy.UNCHECKED`; production's default and
+`EXTERNALLY_SERIALIZED` policies remain unchanged. YKS caches the already
+maintained text length and immutable first-array scalar for that equivalent
+single-thread policy, invalidating both caches on every visible mutation.
+`YksSafetyTest.uncheckedScalarReadCachesRemainMutationCoherent` covers
+front insert/delete and text length changes.
+
+The full default 50-warmup/30-sample run then passed 33/33. Relevant medians:
+
+| Scenario | Yjs | YKS | YKS/Yjs |
+|---|---:|---:|---:|
+| 200,000 text length reads | 0.056 ms | 0.064 ms | 1.13x |
+| 100,000 array length + first-index reads | 0.444 ms | 0.217 ms | 0.49x |
+| apply 5,000 structs | 1.200 ms | 1.452 ms | 1.21x |
+| apply 5,000 structs into open roots | 1.101 ms | 1.577 ms | 1.43x |
+| 1,000 sequential standard updates | 2.149 ms | 1.066 ms | 0.50x |

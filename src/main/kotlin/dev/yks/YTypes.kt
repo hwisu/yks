@@ -647,15 +647,20 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
 
     private var maintainedLengthInitialized = false
     private var maintainedLength = 0
+    private var cachedAccessUnchecked = false
     private var firstVisibleItemCached = false
     private var firstVisibleItem: StoreItem? = null
+    private var firstVisibleScalarCached = false
+    private var firstVisibleScalar: Any? = null
 
     val size: Int
         get() {
+            if (maintainedLengthInitialized && cachedAccessUnchecked) return maintainedLength
             if (warnIfPreliminary()) return 0
             doc.ensureThreadAccess()
             if (!maintainedLengthInitialized) {
                 maintainedLength = doc.visibleLength(name, RootKind.Array).toNonNegativeInt("array length")
+                cachedAccessUnchecked = doc.threadAccessPolicy == YThreadAccessPolicy.UNCHECKED
                 maintainedLengthInitialized = true
                 doc.registerMaintainedLength(name)
             }
@@ -668,6 +673,8 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         if (changedKind != RootKind.Array) return
         firstVisibleItemCached = false
         firstVisibleItem = null
+        firstVisibleScalarCached = false
+        firstVisibleScalar = null
         if (!maintainedLengthInitialized) return
         maintainedLength = try {
             Math.addExact(maintainedLength.toLong(), delta)
@@ -886,15 +893,30 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
     fun get(index: Int): Any? {
         if (index < 0) return null
         if (index == 0) {
-            doc.ensureThreadAccess()
+            if (firstVisibleScalarCached && cachedAccessUnchecked) return firstVisibleScalar
+            if (!firstVisibleItemCached || !cachedAccessUnchecked) {
+                doc.ensureThreadAccess()
+            }
             if (!firstVisibleItemCached) {
                 firstVisibleItem = doc.firstVisibleSequenceItem(name, RootKind.Array)
+                cachedAccessUnchecked = doc.threadAccessPolicy == YThreadAccessPolicy.UNCHECKED
                 firstVisibleItemCached = true
             }
             val item = firstVisibleItem ?: return null
+            val scalar = when (val content = item.content) {
+                is ItemContent.Value -> content.value
+                is ItemContent.ArrayValues -> content.values.first()
+                else -> null
+            }
+            if (scalar != null) {
+                return doc.valueToAny(scalar).also { value ->
+                    if (cachedAccessUnchecked && scalar.isStablePublicScalar()) {
+                        firstVisibleScalar = value
+                        firstVisibleScalarCached = true
+                    }
+                }
+            }
             return when (val content = item.content) {
-                is ItemContent.Value -> doc.valueToAny(content.value)
-                is ItemContent.ArrayValues -> doc.valueToAny(content.values.first())
                 is ItemContent.XmlType -> doc.typeFromXmlType(content)
                 else -> null
             }
@@ -1069,6 +1091,23 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         val normalized = if (index < 0) size + index else index
         return normalized.coerceIn(0, size)
     }
+
+    private fun YValue.isStablePublicScalar(): Boolean = when (this) {
+        YValue.Null,
+        YValue.Undefined,
+        is YValue.Bool,
+        is YValue.LongNumber,
+        is YValue.DoubleNumber,
+        is YValue.BigIntNumber,
+        is YValue.StringValue,
+        -> true
+        is YValue.BinaryValue,
+        is YValue.ListValue,
+        is YValue.MapValue,
+        is YValue.SubdocRef,
+        is YValue.TypeRef,
+        -> false
+    }
 }
 
 open class YText internal constructor(
@@ -1090,15 +1129,18 @@ open class YText internal constructor(
 
     private var cachedLengthInitialized = false
     private var cachedLength: Int = 0
+    private var cachedLengthUnchecked = false
     private var cachedStringVersion: Long = Long.MIN_VALUE
     private var cachedString: String = ""
 
     val length: Int
         get() {
+            if (cachedLengthInitialized && cachedLengthUnchecked) return cachedLength
             if (warnIfPreliminary()) return 0
             doc.ensureThreadAccess()
             if (!cachedLengthInitialized) {
                 cachedLength = doc.visibleLength(name, kind).toNonNegativeInt("text length")
+                cachedLengthUnchecked = doc.threadAccessPolicy == YThreadAccessPolicy.UNCHECKED
                 cachedLengthInitialized = true
                 doc.registerMaintainedLength(name)
             }
