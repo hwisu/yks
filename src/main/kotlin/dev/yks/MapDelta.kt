@@ -1,41 +1,41 @@
 package dev.yks
 
-enum class YMapDeltaAction {
+public enum class YMapDeltaAction {
     Set,
     Delete,
 }
 
-data class YMapDeltaOp(
+public data class YMapDeltaOp(
     val action: YMapDeltaAction,
     val value: Any? = null,
     val previousValue: Any? = null,
 )
 
-class YMapDelta(ops: Map<String, YMapDeltaOp> = emptyMap()) {
+public class YMapDelta(ops: Map<String, YMapDeltaOp> = emptyMap()) {
     private val mutableOps = linkedMapOf<String, YMapDeltaOp>()
 
     init {
         ops.forEach { (key, op) -> mutableOps[key] = op }
     }
 
-    val ops: Map<String, YMapDeltaOp> get() = mutableOps.toMap()
+    public val ops: Map<String, YMapDeltaOp> get() = mutableOps.toMap()
 
-    fun setAttr(key: String, value: Any?, previousValue: Any? = null): YMapDelta {
+    public fun setAttr(key: String, value: Any?, previousValue: Any? = null): YMapDelta {
         mutableOps[key] = YMapDeltaOp(YMapDeltaAction.Set, value, previousValue)
         return this
     }
 
-    fun setAttrs(values: Map<String, Any?>, previousValues: Map<String, Any?> = emptyMap()): YMapDelta {
+    public fun setAttrs(values: Map<String, Any?>, previousValues: Map<String, Any?> = emptyMap()): YMapDelta {
         values.forEach { (key, value) -> setAttr(key, value, previousValues[key]) }
         return this
     }
 
-    fun deleteAttr(key: String, previousValue: Any? = null): YMapDelta {
+    public fun deleteAttr(key: String, previousValue: Any? = null): YMapDelta {
         mutableOps[key] = YMapDeltaOp(YMapDeltaAction.Delete, previousValue = previousValue)
         return this
     }
 
-    fun isEmpty(): Boolean = mutableOps.isEmpty()
+    public fun isEmpty(): Boolean = mutableOps.isEmpty()
 
     override fun equals(other: Any?): Boolean = other is YMapDelta && ops == other.ops
 
@@ -44,4 +44,4 @@ class YMapDelta(ops: Map<String, YMapDeltaOp> = emptyMap()) {
     override fun toString(): String = "YMapDelta($ops)"
 }
 
-fun yMapDelta(): YMapDelta = YMapDelta()
+public fun yMapDelta(): YMapDelta = YMapDelta()

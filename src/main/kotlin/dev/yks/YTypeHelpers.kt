@@ -2,27 +2,27 @@ package dev.yks
 
 private var globalSearchMarkerTimestamp = 0L
 
-data class ArraySearchMarker(
+public data class ArraySearchMarker(
     var p: Item,
     var index: Int,
 ) {
     var timestamp: Long = nextSearchMarkerTimestamp()
 }
 
-class ItemTextListPosition(
-    var left: Item?,
-    var right: Item?,
-    var index: Int,
-    val currentFormats: MutableMap<String, Any?> = linkedMapOf(),
-    val renderer: AbstractRenderer = baseRenderer,
-    val type: AbstractYType? = null,
+public class ItemTextListPosition(
+    public var left: Item?,
+    public var right: Item?,
+    public var index: Int,
+    public val currentFormats: MutableMap<String, Any?> = linkedMapOf(),
+    public val renderer: AbstractRenderer = baseRenderer,
+    public val type: AbstractYType? = null,
 ) {
-    fun forward(): ItemTextListPosition {
+    public fun forward(): ItemTextListPosition {
         val owner = type ?: error("type is required to move an ItemTextListPosition")
         return forward(owner)
     }
 
-    fun forward(type: AbstractYType): ItemTextListPosition {
+    public fun forward(type: AbstractYType): ItemTextListPosition {
         val item = right ?: error("right item is required to move an ItemTextListPosition")
         if (!item.deleted && item.content is ContentFormat) {
             updateCurrentFormats(currentFormats, item.content)
@@ -38,7 +38,7 @@ class ItemTextListPosition(
         return this
     }
 
-    fun formatText(parent: YText, length: Int, formats: Map<String, Any?>, origin: Any? = null): ItemTextListPosition {
+    public fun formatText(parent: YText, length: Int, formats: Map<String, Any?>, origin: Any? = null): ItemTextListPosition {
         parent.formatText(index, length, formats, origin)
         formats.forEach { (key, value) ->
             if (value == null) {
@@ -53,9 +53,9 @@ class ItemTextListPosition(
 
 private fun nextSearchMarkerTimestamp(): Long = globalSearchMarkerTimestamp++
 
-fun equalFormats(left: Any?, right: Any?): Boolean = yTypeHelperValuesEqual(left, right)
+public fun equalFormats(left: Any?, right: Any?): Boolean = yTypeHelperValuesEqual(left, right)
 
-fun createItemTextListPosition(
+public fun createItemTextListPosition(
     type: AbstractYType,
     index: Int,
     currentFormats: MutableMap<String, Any?> = linkedMapOf(),
@@ -74,7 +74,7 @@ fun createItemTextListPosition(
     )
 }
 
-fun findMarker(type: AbstractYType, index: Int): ArraySearchMarker? {
+public fun findMarker(type: AbstractYType, index: Int): ArraySearchMarker? {
     require(index >= 0) { "index must be non-negative" }
     if (index == 0) return null
 
@@ -86,7 +86,7 @@ fun findMarker(type: AbstractYType, index: Int): ArraySearchMarker? {
     return ArraySearchMarker(visible[markerIndex], markerIndex)
 }
 
-fun updateMarkerChanges(searchMarker: MutableList<ArraySearchMarker>, index: Int, len: Int) {
+public fun updateMarkerChanges(searchMarker: MutableList<ArraySearchMarker>, index: Int, len: Int) {
     require(index >= 0) { "index must be non-negative" }
     searchMarker.forEach { marker ->
         if (index < marker.index || (len > 0 && index == marker.index)) {
@@ -95,11 +95,11 @@ fun updateMarkerChanges(searchMarker: MutableList<ArraySearchMarker>, index: Int
     }
 }
 
-fun callTypeObservers(type: AbstractYType, event: YEvent) {
+public fun callTypeObservers(type: AbstractYType, event: YEvent) {
     callTypeObservers(type, event.transaction, event)
 }
 
-fun callTypeObservers(type: AbstractYType, transaction: YTransactionEvent?, event: YEvent) {
+public fun callTypeObservers(type: AbstractYType, transaction: YTransactionEvent?, event: YEvent) {
     require(event.target.doc === type.doc) { "event target must belong to the same document" }
     val directEvent = event.copyForDeep(
         target = type,
@@ -112,7 +112,7 @@ fun callTypeObservers(type: AbstractYType, transaction: YTransactionEvent?, even
     emitDeepTypeObserverEvents(type, directEvent)
 }
 
-fun insertContent(
+public fun insertContent(
     parent: YText,
     index: Int,
     content: AbstractContent,
@@ -121,7 +121,7 @@ fun insertContent(
 ): ItemTextListPosition =
     insertContent(parent, createItemTextListPosition(parent, index), content, formats, origin)
 
-fun insertContent(
+public fun insertContent(
     parent: YText,
     currPos: ItemTextListPosition,
     content: AbstractContent,
@@ -134,7 +134,7 @@ fun insertContent(
     return currPos
 }
 
-fun insertContentHelper(
+public fun insertContentHelper(
     parent: YText,
     index: Int,
     insert: Any?,
@@ -143,7 +143,7 @@ fun insertContentHelper(
 ): ItemTextListPosition =
     insertContentHelper(parent, createItemTextListPosition(parent, index), insert, formats, origin)
 
-fun insertContentHelper(
+public fun insertContentHelper(
     parent: YText,
     currPos: ItemTextListPosition,
     insert: Any?,
@@ -167,7 +167,7 @@ fun insertContentHelper(
     return currPos
 }
 
-fun typeListLength(type: AbstractYType): Int = when (type) {
+public fun typeListLength(type: AbstractYType): Int = when (type) {
     is YUnopenedRoot -> error("open root '${type.name}' with a concrete getter first")
     is YArray -> type.length
     is YText -> type.length
@@ -176,7 +176,7 @@ fun typeListLength(type: AbstractYType): Int = when (type) {
     is YMap -> error("YMap is not a list type")
 }
 
-fun typeListSlice(type: AbstractYType, start: Int = 0, end: Int = typeListLength(type)): List<Any?> {
+public fun typeListSlice(type: AbstractYType, start: Int = 0, end: Int = typeListLength(type)): List<Any?> {
     val values = typeListValues(type)
     val normalizedStart = normalizeTypeListSliceIndex(start, values.size)
     val normalizedEnd = normalizeTypeListSliceIndex(end, values.size)
@@ -184,12 +184,12 @@ fun typeListSlice(type: AbstractYType, start: Int = 0, end: Int = typeListLength
     return values.subList(normalizedStart, normalizedEnd)
 }
 
-fun typeListGet(type: AbstractYType, index: Int): Any? {
+public fun typeListGet(type: AbstractYType, index: Int): Any? {
     if (index < 0) return null
     return typeListValues(type).getOrNull(index)
 }
 
-fun typeListInsertGenerics(type: AbstractYType, index: Int, content: List<Any?>) {
+public fun typeListInsertGenerics(type: AbstractYType, index: Int, content: List<Any?>) {
     require(index >= 0) { "index must be non-negative" }
     require(index <= typeListLength(type)) { "insert index is out of bounds" }
     if (content.isEmpty()) return
@@ -223,7 +223,7 @@ fun typeListInsertGenerics(type: AbstractYType, index: Int, content: List<Any?>)
     }
 }
 
-fun typeListInsertGenericsAfter(type: AbstractYType, referenceItem: Item?, content: List<Any?>) {
+public fun typeListInsertGenericsAfter(type: AbstractYType, referenceItem: Item?, content: List<Any?>) {
     val index = if (referenceItem == null) {
         0
     } else {
@@ -236,11 +236,11 @@ fun typeListInsertGenericsAfter(type: AbstractYType, referenceItem: Item?, conte
     typeListInsertGenerics(type, index, content)
 }
 
-fun typeListPushGenerics(type: AbstractYType, content: List<Any?>) {
+public fun typeListPushGenerics(type: AbstractYType, content: List<Any?>) {
     typeListInsertGenerics(type, typeListLength(type), content)
 }
 
-fun typeListDelete(type: AbstractYType, index: Int, length: Int) {
+public fun typeListDelete(type: AbstractYType, index: Int, length: Int) {
     when (type) {
         is YUnopenedRoot -> error("open root '${type.name}' with a concrete getter first")
         is YArray -> type.delete(index, length)
@@ -375,33 +375,33 @@ private fun AbstractRenderer.clockBoundaries(client: Long): List<Long> = buildLi
     }
 }
 
-fun typeMapSet(parent: AbstractYType, key: String, value: Any?): Any? =
+public fun typeMapSet(parent: AbstractYType, key: String, value: Any?): Any? =
     parent.doc.setTypeAttribute(parent.name, key, value)
 
-fun typeMapDelete(parent: AbstractYType, key: String) {
+public fun typeMapDelete(parent: AbstractYType, key: String) {
     parent.doc.deleteTypeAttribute(parent.name, key)
 }
 
-fun typeMapGet(parent: AbstractYType, key: String): Any? =
+public fun typeMapGet(parent: AbstractYType, key: String): Any? =
     parent.doc.visibleMapValue(parent.name, key)?.let(parent.doc::valueToAny)
 
-fun typeMapGetAll(parent: AbstractYType): Map<String, Any?> =
+public fun typeMapGetAll(parent: AbstractYType): Map<String, Any?> =
     parent.doc.typeAttributes(parent.name)
 
-fun typeMapHas(parent: AbstractYType, key: String): Boolean =
+public fun typeMapHas(parent: AbstractYType, key: String): Boolean =
     parent.doc.hasTypeAttribute(parent.name, key)
 
-fun typeMapGetSnapshot(parent: AbstractYType, key: String, snapshot: Snapshot): Any? =
+public fun typeMapGetSnapshot(parent: AbstractYType, key: String, snapshot: Snapshot): Any? =
     parent.doc.mapValueAtSnapshot(parent, key, snapshot)?.let(parent.doc::valueToAny)
 
-fun typeMapGetAllSnapshot(parent: AbstractYType, snapshot: Snapshot): Map<String, Any?> =
+public fun typeMapGetAllSnapshot(parent: AbstractYType, snapshot: Snapshot): Map<String, Any?> =
     parent.doc.mapAtSnapshot(parent, snapshot).mapValues { (_, value) -> parent.doc.valueToAny(value) }
 
-fun typeMapGetDelta(parent: AbstractYType, attrsToRender: Set<String?>? = null): YMapDelta =
+public fun typeMapGetDelta(parent: AbstractYType, attrsToRender: Set<String?>? = null): YMapDelta =
     typeMapGetDelta(YMapDelta(), parent, attrsToRender)
 
 @Suppress("UNUSED_PARAMETER")
-fun typeMapGetDelta(
+public fun typeMapGetDelta(
     delta: YMapDelta,
     parent: AbstractYType,
     attrsToRender: Set<String?>? = null,
@@ -428,10 +428,10 @@ fun typeMapGetDelta(
     return delta
 }
 
-fun createMapIterator(type: AbstractYType): Iterator<Map.Entry<String, Any?>> =
+public fun createMapIterator(type: AbstractYType): Iterator<Map.Entry<String, Any?>> =
     typeMapGetAll(type).entries.iterator()
 
-fun isVisible(item: Item, snapshot: Snapshot? = null): Boolean {
+public fun isVisible(item: Item, snapshot: Snapshot? = null): Boolean {
     if (snapshot == null) return !item.deleted
     val seenClock = snapshot.sv[item.id.client] ?: return false
     return seenClock > item.id.clock && !snapshot.ds.hasId(item.id)

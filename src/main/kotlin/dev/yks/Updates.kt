@@ -2,7 +2,7 @@ package dev.yks
 
 import java.util.TreeMap
 
-data class YDocOptions(
+public data class YDocOptions(
     val clientId: Long = YDoc.generateNewClientId(),
     val guid: String = java.util.UUID.randomUUID().toString(),
     val collectionId: String? = null,
@@ -15,40 +15,40 @@ data class YDocOptions(
 ) {
     val collectionid: String? get() = collectionId
 
-    fun toDoc(): YDoc = YDoc(this)
+    public fun toDoc(): YDoc = YDoc(this)
 
-    fun toDoc(runtimeOptions: YDocRuntimeOptions): YDoc = YDoc(this, runtimeOptions)
+    public fun toDoc(runtimeOptions: YDocRuntimeOptions): YDoc = YDoc(this, runtimeOptions)
 }
 
-fun applyUpdate(doc: YDoc, update: ByteArray, origin: Any? = null) {
+public fun applyUpdate(doc: YDoc, update: ByteArray, origin: Any? = null) {
     doc.applyUpdate(update, origin)
 }
 
-fun applyUpdateV2(doc: YDoc, update: ByteArray, origin: Any? = null) {
+public fun applyUpdateV2(doc: YDoc, update: ByteArray, origin: Any? = null) {
     doc.applyUpdateV2(update, origin)
 }
 
-fun readUpdate(doc: YDoc, update: ByteArray, origin: Any? = null) {
+public fun readUpdate(doc: YDoc, update: ByteArray, origin: Any? = null) {
     applyUpdate(doc, update, origin)
 }
 
-fun readUpdate(decoder: BinaryDecoder, doc: YDoc, origin: Any? = null) {
+public fun readUpdate(decoder: BinaryDecoder, doc: YDoc, origin: Any? = null) {
     doc.applyUpdate(decoder.readRemainingBytes(), origin)
 }
 
-fun readUpdate(decoder: UpdateDecoderV1, doc: YDoc, origin: Any? = null) {
+public fun readUpdate(decoder: UpdateDecoderV1, doc: YDoc, origin: Any? = null) {
     readUpdate(decoder.restDecoder, doc, origin)
 }
 
-fun readUpdateV2(doc: YDoc, update: ByteArray, origin: Any? = null) {
+public fun readUpdateV2(doc: YDoc, update: ByteArray, origin: Any? = null) {
     applyUpdateV2(doc, update, origin)
 }
 
-fun readUpdateV2(decoder: BinaryDecoder, doc: YDoc, origin: Any? = null) {
+public fun readUpdateV2(decoder: BinaryDecoder, doc: YDoc, origin: Any? = null) {
     doc.applyUpdateV2(decoder.readRemainingBytes(), origin)
 }
 
-fun readUpdateV2(decoder: UpdateDecoderV2, doc: YDoc, origin: Any? = null) {
+public fun readUpdateV2(decoder: UpdateDecoderV2, doc: YDoc, origin: Any? = null) {
     doc.applyUpdate(
         UpdateCodec.decodeV2(
             decoder,
@@ -59,21 +59,21 @@ fun readUpdateV2(decoder: UpdateDecoderV2, doc: YDoc, origin: Any? = null) {
     )
 }
 
-fun encodeStateAsUpdate(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
+public fun encodeStateAsUpdate(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
     doc.encodeStateAsUpdate(encodedStateVector)
 
-fun encodeStateAsUpdateLossless(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
+public fun encodeStateAsUpdateLossless(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
     doc.encodeStateAsUpdateLossless(encodedStateVector)
 
-fun encodeStateAsUpdateV2(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
+public fun encodeStateAsUpdateV2(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
     doc.encodeStateAsUpdateV2(encodedStateVector)
 
-fun encodeStateAsUpdateV2Lossless(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
+public fun encodeStateAsUpdateV2Lossless(doc: YDoc, encodedStateVector: ByteArray = ByteArray(0)): ByteArray =
     doc.encodeStateAsUpdateV2Lossless(encodedStateVector)
 
-fun encodeStateVector(doc: YDoc): ByteArray = doc.encodeStateVector()
+public fun encodeStateVector(doc: YDoc): ByteArray = doc.encodeStateVector()
 
-fun writeStateAsUpdate(
+public fun writeStateAsUpdate(
     encoder: BinaryEncoder,
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
@@ -88,7 +88,7 @@ fun writeStateAsUpdate(
         ),
     )
 
-fun writeStateAsUpdateLossless(
+public fun writeStateAsUpdateLossless(
     encoder: BinaryEncoder,
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
@@ -103,7 +103,7 @@ fun writeStateAsUpdateLossless(
         ),
     )
 
-fun writeStateAsUpdate(
+public fun writeStateAsUpdate(
     encoder: IdSetEncoderV1,
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
@@ -112,7 +112,7 @@ fun writeStateAsUpdate(
     return encoder
 }
 
-fun writeStateAsUpdateLossless(
+public fun writeStateAsUpdateLossless(
     encoder: IdSetEncoderV1,
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
@@ -121,7 +121,7 @@ fun writeStateAsUpdateLossless(
     return encoder
 }
 
-fun writeStateAsUpdateV2(
+public fun writeStateAsUpdateV2(
     encoder: BinaryEncoder,
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
@@ -129,7 +129,7 @@ fun writeStateAsUpdateV2(
     it.writeRawBytes(doc.encodeStateAsUpdateV2(encodeStateVector(targetStateVector)))
 }
 
-fun writeStateAsUpdateV2Lossless(
+public fun writeStateAsUpdateV2Lossless(
     encoder: BinaryEncoder,
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
@@ -137,7 +137,7 @@ fun writeStateAsUpdateV2Lossless(
     it.writeRawBytes(doc.encodeStateAsUpdateV2Lossless(encodeStateVector(targetStateVector)))
 }
 
-fun writeStateAsUpdateV2(
+public fun writeStateAsUpdateV2(
     encoder: UpdateEncoderV2,
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
@@ -145,7 +145,7 @@ fun writeStateAsUpdateV2(
     it.setEncodedUpdate(doc.encodeStateAsUpdateV2(encodeStateVector(targetStateVector)))
 }
 
-fun writeStateAsUpdateV2Lossless(
+public fun writeStateAsUpdateV2Lossless(
     encoder: UpdateEncoderV2,
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
@@ -153,21 +153,21 @@ fun writeStateAsUpdateV2Lossless(
     it.setEncodedUpdate(doc.encodeStateAsUpdateV2Lossless(encodeStateVector(targetStateVector)))
 }
 
-fun writeStateAsUpdateV2(
+public fun writeStateAsUpdateV2(
     encoder: IdSetEncoderV1,
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
 ): IdSetEncoderV1 =
     writeStateAsUpdate(encoder, doc, targetStateVector)
 
-fun writeStateAsUpdateV2Lossless(
+public fun writeStateAsUpdateV2Lossless(
     encoder: IdSetEncoderV1,
     doc: YDoc,
     targetStateVector: StateVector = emptyMap(),
 ): IdSetEncoderV1 =
     writeStateAsUpdateLossless(encoder, doc, targetStateVector)
 
-fun writeClientsStructs(
+public fun writeClientsStructs(
     encoder: BinaryEncoder,
     store: StructStore,
     stateVector: StateVector = emptyMap(),
@@ -177,7 +177,7 @@ fun writeClientsStructs(
         DocumentUpdate(store.itemsSince(stateVector), DeleteSet.empty(), store.parentItemIds(), store.parentKinds()),
     )
 
-fun writeClientsStructsLossless(
+public fun writeClientsStructsLossless(
     encoder: BinaryEncoder,
     store: StructStore,
     stateVector: StateVector = emptyMap(),
@@ -187,7 +187,7 @@ fun writeClientsStructsLossless(
         DocumentUpdate(store.itemsSince(stateVector), DeleteSet.empty(), store.parentItemIds(), store.parentKinds()),
     )
 
-fun writeClientsStructs(
+public fun writeClientsStructs(
     encoder: IdSetEncoderV1,
     store: StructStore,
     stateVector: StateVector = emptyMap(),
@@ -196,7 +196,7 @@ fun writeClientsStructs(
     return encoder
 }
 
-fun writeClientsStructsLossless(
+public fun writeClientsStructsLossless(
     encoder: IdSetEncoderV1,
     store: StructStore,
     stateVector: StateVector = emptyMap(),
@@ -205,7 +205,7 @@ fun writeClientsStructsLossless(
     return encoder
 }
 
-fun writeClientsStructs(
+public fun writeClientsStructs(
     encoder: UpdateEncoderV2,
     store: StructStore,
     stateVector: StateVector = emptyMap(),
@@ -222,7 +222,7 @@ fun writeClientsStructs(
     )
 }
 
-fun writeClientsStructsLossless(
+public fun writeClientsStructsLossless(
     encoder: UpdateEncoderV2,
     store: StructStore,
     stateVector: StateVector = emptyMap(),
@@ -239,17 +239,17 @@ fun writeClientsStructsLossless(
     )
 }
 
-fun createDocFromUpdate(update: ByteArray, doc: YDoc = YDoc()): YDoc {
+public fun createDocFromUpdate(update: ByteArray, doc: YDoc = YDoc()): YDoc {
     doc.applyUpdate(update)
     return doc
 }
 
-fun createDocFromUpdate(update: ByteArray, options: YDocOptions): YDoc =
+public fun createDocFromUpdate(update: ByteArray, options: YDocOptions): YDoc =
     createDocFromUpdate(update, options.toDoc())
 
-fun createDocFromUpdateV2(update: ByteArray, doc: YDoc = YDoc()): YDoc = doc.also { applyUpdateV2(it, update) }
+public fun createDocFromUpdateV2(update: ByteArray, doc: YDoc = YDoc()): YDoc = doc.also { applyUpdateV2(it, update) }
 
-fun createDocFromUpdateV2(update: ByteArray, options: YDocOptions): YDoc =
+public fun createDocFromUpdateV2(update: ByteArray, options: YDocOptions): YDoc =
     createDocFromUpdateV2(update, options.toDoc())
 
 internal fun YDoc.concreteRootMetadata(): Map<String, SnapshotRootType> =
@@ -285,42 +285,42 @@ private fun cloneDocInto(source: YDoc, target: YDoc): YDoc {
     return createDocFromUpdate(encodeStateAsUpdateLossless(source), target)
 }
 
-fun cloneDoc(doc: YDoc): YDoc = cloneDocInto(doc, YDoc())
+public fun cloneDoc(doc: YDoc): YDoc = cloneDocInto(doc, YDoc())
 
-fun cloneDoc(doc: YDoc, options: YDocOptions): YDoc =
+public fun cloneDoc(doc: YDoc, options: YDocOptions): YDoc =
     cloneDocInto(doc, options.toDoc())
 
-fun writeStructs(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray {
+public fun writeStructs(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray {
     val idSet = createIdSet()
     idRanges.forEach { range -> idSet.add(client, range.clock, range.len) }
     return writeStructsFromIdSet(doc, idSet)
 }
 
-fun writeStructsV2(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray =
+public fun writeStructsV2(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray =
     createIdSet().also { ids -> idRanges.forEach { ids.add(client, it.clock, it.len) } }
         .let { writeStructsFromIdSetV2(doc, it) }
 
-fun writeStructsLossless(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray =
+public fun writeStructsLossless(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray =
     createIdSet().also { ids -> idRanges.forEach { ids.add(client, it.clock, it.len) } }
         .let { writeStructsFromIdSetLossless(doc, it) }
 
-fun writeStructsV2Lossless(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray =
+public fun writeStructsV2Lossless(doc: YDoc, client: Long, idRanges: List<IdRange>): ByteArray =
     createIdSet().also { ids -> idRanges.forEach { ids.add(client, it.clock, it.len) } }
         .let { writeStructsFromIdSetV2Lossless(doc, it) }
 
-fun writeStructsFromIdSet(doc: YDoc, idSet: IdSet): ByteArray =
+public fun writeStructsFromIdSet(doc: YDoc, idSet: IdSet): ByteArray =
     encodeStructsFromIdSet(doc, idSet)
 
-fun writeStructsFromIdSetV2(doc: YDoc, idSet: IdSet): ByteArray =
+public fun writeStructsFromIdSetV2(doc: YDoc, idSet: IdSet): ByteArray =
     encodeStructsFromIdSetV2(doc, idSet)
 
-fun writeStructsFromIdSetLossless(doc: YDoc, idSet: IdSet): ByteArray =
+public fun writeStructsFromIdSetLossless(doc: YDoc, idSet: IdSet): ByteArray =
     encodeStructsFromIdSetLossless(doc, idSet)
 
-fun writeStructsFromIdSetV2Lossless(doc: YDoc, idSet: IdSet): ByteArray =
+public fun writeStructsFromIdSetV2Lossless(doc: YDoc, idSet: IdSet): ByteArray =
     encodeStructsFromIdSetV2Lossless(doc, idSet)
 
-fun encodeStructsFromIdSet(doc: YDoc, idSet: IdSet): ByteArray =
+public fun encodeStructsFromIdSet(doc: YDoc, idSet: IdSet): ByteArray =
     UpdateCodec.encode(
         DocumentUpdate(
             doc.itemsForIdSet(idSet),
@@ -330,7 +330,7 @@ fun encodeStructsFromIdSet(doc: YDoc, idSet: IdSet): ByteArray =
         ),
     )
 
-fun encodeStructsFromIdSetLossless(doc: YDoc, idSet: IdSet): ByteArray =
+public fun encodeStructsFromIdSetLossless(doc: YDoc, idSet: IdSet): ByteArray =
     UpdateCodec.encodeLossless(
         DocumentUpdate(
             doc.itemsForIdSet(idSet, materializeTextAttributes = true),
@@ -340,7 +340,7 @@ fun encodeStructsFromIdSetLossless(doc: YDoc, idSet: IdSet): ByteArray =
         ),
     )
 
-fun encodeStructsFromIdSetV2(doc: YDoc, idSet: IdSet): ByteArray =
+public fun encodeStructsFromIdSetV2(doc: YDoc, idSet: IdSet): ByteArray =
     UpdateCodec.encodeV2(
         DocumentUpdate(
             doc.itemsForIdSet(idSet),
@@ -350,7 +350,7 @@ fun encodeStructsFromIdSetV2(doc: YDoc, idSet: IdSet): ByteArray =
         ),
     )
 
-fun encodeStructsFromIdSetV2Lossless(doc: YDoc, idSet: IdSet): ByteArray =
+public fun encodeStructsFromIdSetV2Lossless(doc: YDoc, idSet: IdSet): ByteArray =
     UpdateCodec.encodeV2Lossless(
         DocumentUpdate(
             doc.itemsForIdSet(idSet, materializeTextAttributes = true),
@@ -360,19 +360,19 @@ fun encodeStructsFromIdSetV2Lossless(doc: YDoc, idSet: IdSet): ByteArray =
         ),
     )
 
-fun writeStructsFromTransaction(transaction: YTransactionEvent): ByteArray =
+public fun writeStructsFromTransaction(transaction: YTransactionEvent): ByteArray =
     encodeStructsFromTransaction(transaction)
 
-fun writeStructsFromTransactionV2(transaction: YTransactionEvent): ByteArray =
+public fun writeStructsFromTransactionV2(transaction: YTransactionEvent): ByteArray =
     encodeStructsFromTransactionV2(transaction)
 
-fun writeStructsFromTransactionLossless(transaction: YTransactionEvent): ByteArray =
+public fun writeStructsFromTransactionLossless(transaction: YTransactionEvent): ByteArray =
     encodeStructsFromTransactionLossless(transaction)
 
-fun writeStructsFromTransactionV2Lossless(transaction: YTransactionEvent): ByteArray =
+public fun writeStructsFromTransactionV2Lossless(transaction: YTransactionEvent): ByteArray =
     encodeStructsFromTransactionV2Lossless(transaction)
 
-fun encodeStructsFromTransaction(transaction: YTransactionEvent): ByteArray =
+public fun encodeStructsFromTransaction(transaction: YTransactionEvent): ByteArray =
     UpdateCodec.encode(
         DocumentUpdate(
             transaction.addedItems.map { it.copy() },
@@ -382,7 +382,7 @@ fun encodeStructsFromTransaction(transaction: YTransactionEvent): ByteArray =
         ),
     )
 
-fun encodeStructsFromTransactionV2(transaction: YTransactionEvent): ByteArray =
+public fun encodeStructsFromTransactionV2(transaction: YTransactionEvent): ByteArray =
     UpdateCodec.encodeV2(
         DocumentUpdate(
             transaction.addedItems.map { it.copy() },
@@ -392,7 +392,7 @@ fun encodeStructsFromTransactionV2(transaction: YTransactionEvent): ByteArray =
         ),
     )
 
-fun encodeStructsFromTransactionLossless(transaction: YTransactionEvent): ByteArray =
+public fun encodeStructsFromTransactionLossless(transaction: YTransactionEvent): ByteArray =
     UpdateCodec.encodeLossless(
         DocumentUpdate(
             transaction.addedItems.map { it.copy() },
@@ -402,7 +402,7 @@ fun encodeStructsFromTransactionLossless(transaction: YTransactionEvent): ByteAr
         ),
     )
 
-fun encodeStructsFromTransactionV2Lossless(transaction: YTransactionEvent): ByteArray =
+public fun encodeStructsFromTransactionV2Lossless(transaction: YTransactionEvent): ByteArray =
     UpdateCodec.encodeV2Lossless(
         DocumentUpdate(
             transaction.addedItems.map { it.copy() },
@@ -412,19 +412,19 @@ fun encodeStructsFromTransactionV2Lossless(transaction: YTransactionEvent): Byte
         ),
     )
 
-fun writeUpdateMessageFromTransaction(transaction: YTransactionEvent): ByteArray? =
+public fun writeUpdateMessageFromTransaction(transaction: YTransactionEvent): ByteArray? =
     encodeUpdateMessageFromTransaction(transaction)
 
-fun writeUpdateMessageFromTransactionV2(transaction: YTransactionEvent): ByteArray? =
+public fun writeUpdateMessageFromTransactionV2(transaction: YTransactionEvent): ByteArray? =
     encodeUpdateMessageFromTransactionV2(transaction)
 
-fun writeUpdateMessageFromTransactionLossless(transaction: YTransactionEvent): ByteArray? =
+public fun writeUpdateMessageFromTransactionLossless(transaction: YTransactionEvent): ByteArray? =
     encodeUpdateMessageFromTransactionLossless(transaction)
 
-fun writeUpdateMessageFromTransactionV2Lossless(transaction: YTransactionEvent): ByteArray? =
+public fun writeUpdateMessageFromTransactionV2Lossless(transaction: YTransactionEvent): ByteArray? =
     encodeUpdateMessageFromTransactionV2Lossless(transaction)
 
-fun encodeUpdateMessageFromTransaction(transaction: YTransactionEvent): ByteArray? {
+public fun encodeUpdateMessageFromTransaction(transaction: YTransactionEvent): ByteArray? {
     if (transaction.insertSet.isEmpty() && transaction.deleteSet.isEmpty) return null
     return UpdateCodec.encode(
         DocumentUpdate(
@@ -436,10 +436,10 @@ fun encodeUpdateMessageFromTransaction(transaction: YTransactionEvent): ByteArra
     )
 }
 
-fun encodeUpdateMessageFromTransactionLossless(transaction: YTransactionEvent): ByteArray? =
+public fun encodeUpdateMessageFromTransactionLossless(transaction: YTransactionEvent): ByteArray? =
     if (transaction.insertSet.isEmpty() && transaction.deleteSet.isEmpty) null else transaction.update.copyOf()
 
-fun encodeUpdateMessageFromTransactionV2(transaction: YTransactionEvent): ByteArray? =
+public fun encodeUpdateMessageFromTransactionV2(transaction: YTransactionEvent): ByteArray? =
     if (transaction.insertSet.isEmpty() && transaction.deleteSet.isEmpty) null else UpdateCodec.encodeV2(
         DocumentUpdate(
             transaction.addedItems.map { it.copy() },
@@ -449,7 +449,7 @@ fun encodeUpdateMessageFromTransactionV2(transaction: YTransactionEvent): ByteAr
         ),
     )
 
-fun encodeUpdateMessageFromTransactionV2Lossless(transaction: YTransactionEvent): ByteArray? =
+public fun encodeUpdateMessageFromTransactionV2Lossless(transaction: YTransactionEvent): ByteArray? =
     if (transaction.insertSet.isEmpty() && transaction.deleteSet.isEmpty) null else UpdateCodec.encodeV2Lossless(
         DocumentUpdate(
             transaction.addedItems.map { it.copy() },
@@ -459,7 +459,7 @@ fun encodeUpdateMessageFromTransactionV2Lossless(transaction: YTransactionEvent)
         ),
     )
 
-data class DecodedUpdateStruct(
+public data class DecodedUpdateStruct(
     val id: Id,
     val origin: Id?,
     val rightOrigin: Id?,
@@ -471,48 +471,48 @@ data class DecodedUpdateStruct(
     val content: AbstractContent,
 )
 
-data class DecodedUpdate(
+public data class DecodedUpdate(
     val structs: List<DecodedUpdateStruct>,
     val deleteSet: DeleteSet,
 ) {
     val ds: DeleteSet get() = deleteSet
 }
 
-class LazyStructReader private constructor(
+public class LazyStructReader private constructor(
     update: DocumentUpdate,
-    val filterSkips: Boolean = false,
+    public val filterSkips: Boolean = false,
 ) {
     private val structs: List<AbstractStruct> = update.itemsWithDeleteState().map { it.toItemStruct(YDoc()) }
     private var index: Int = 0
     private val decodedDeleteSet: DeleteSet = update.deleteSet.copy()
 
-    var curr: AbstractStruct? = null
+    public var curr: AbstractStruct? = null
         private set
 
-    var done: Boolean = false
+    public var done: Boolean = false
         private set
 
-    val deleteSet: DeleteSet get() = decodedDeleteSet.copy()
+    public val deleteSet: DeleteSet get() = decodedDeleteSet.copy()
 
-    val ds: DeleteSet get() = deleteSet
+    public val ds: DeleteSet get() = deleteSet
 
-    constructor(update: ByteArray, filterSkips: Boolean = false) :
+    public constructor(update: ByteArray, filterSkips: Boolean = false) :
         this(UpdateCodec.decode(update), filterSkips)
 
-    constructor(decoder: BinaryDecoder, filterSkips: Boolean = false) :
+    public constructor(decoder: BinaryDecoder, filterSkips: Boolean = false) :
         this(UpdateCodec.decode(decoder), filterSkips)
 
-    constructor(decoder: UpdateDecoderV1, filterSkips: Boolean = false) :
+    public constructor(decoder: UpdateDecoderV1, filterSkips: Boolean = false) :
         this(decoder.restDecoder, filterSkips)
 
-    constructor(decoder: UpdateDecoderV2, filterSkips: Boolean = false) :
+    public constructor(decoder: UpdateDecoderV2, filterSkips: Boolean = false) :
         this(UpdateCodec.decodeV2(decoder), filterSkips)
 
     init {
         next()
     }
 
-    fun next(): AbstractStruct? {
+    public fun next(): AbstractStruct? {
         do {
             curr = if (index < structs.size) structs[index++] else null
         } while (filterSkips && curr is Skip)
@@ -521,18 +521,18 @@ class LazyStructReader private constructor(
     }
 }
 
-class LazyStructWriter(
-    val encoder: BinaryEncoder = BinaryEncoder(),
+public class LazyStructWriter(
+    public val encoder: BinaryEncoder = BinaryEncoder(),
 ) {
-    constructor(encoder: IdSetEncoderV1) : this(encoder.restEncoder)
+    public constructor(encoder: IdSetEncoderV1) : this(encoder.restEncoder)
 
-    var currClient: Long = 0
+    public var currClient: Long = 0
         private set
-    var startClock: Long = 0
+    public var startClock: Long = 0
         private set
-    var written: Int = 0
+    public var written: Int = 0
         private set
-    val clientStructs: MutableList<DecodedUpdateStruct> = mutableListOf()
+    public val clientStructs: MutableList<DecodedUpdateStruct> = mutableListOf()
     private val items = mutableListOf<StoreItem>()
     private var finished: Boolean = false
 
@@ -556,15 +556,15 @@ class LazyStructWriter(
         return encoder
     }
 
-    fun toByteArray(): ByteArray {
+    public fun toByteArray(): ByteArray {
         finish()
         return encoder.toByteArray()
     }
 
-    fun toUint8Array(): ByteArray = toByteArray()
+    public fun toUint8Array(): ByteArray = toByteArray()
 }
 
-fun writeStructToLazyStructWriter(
+public fun writeStructToLazyStructWriter(
     lazyWriter: LazyStructWriter,
     struct: DecodedUpdateStruct,
     offset: Long = 0,
@@ -574,7 +574,7 @@ fun writeStructToLazyStructWriter(
     return lazyWriter
 }
 
-fun writeStructToLazyStructWriter(
+public fun writeStructToLazyStructWriter(
     lazyWriter: LazyStructWriter,
     struct: AbstractStruct,
     offset: Long = 0,
@@ -582,9 +582,9 @@ fun writeStructToLazyStructWriter(
 ): LazyStructWriter =
     writeStructToLazyStructWriter(lazyWriter, struct.toDecodedUpdateStruct(), offset, offsetEnd)
 
-fun finishLazyStructWriting(lazyWriter: LazyStructWriter): BinaryEncoder = lazyWriter.finish()
+public fun finishLazyStructWriting(lazyWriter: LazyStructWriter): BinaryEncoder = lazyWriter.finish()
 
-fun decodeUpdate(update: ByteArray): DecodedUpdate {
+public fun decodeUpdate(update: ByteArray): DecodedUpdate {
     val decoded = UpdateCodec.decode(update)
     return DecodedUpdate(
         structs = decoded.itemsWithDeleteState().map { it.toDecodedStruct() },
@@ -592,7 +592,7 @@ fun decodeUpdate(update: ByteArray): DecodedUpdate {
     )
 }
 
-fun decodeUpdateV2(update: ByteArray): DecodedUpdate {
+public fun decodeUpdateV2(update: ByteArray): DecodedUpdate {
     val decoded = UpdateCodec.decodeV2(update)
     return DecodedUpdate(
         structs = decoded.itemsWithDeleteState().map { it.toDecodedStruct() },
@@ -600,9 +600,9 @@ fun decodeUpdateV2(update: ByteArray): DecodedUpdate {
     )
 }
 
-fun logUpdate(update: ByteArray): String = formatDecodedUpdate(decodeUpdate(update))
+public fun logUpdate(update: ByteArray): String = formatDecodedUpdate(decodeUpdate(update))
 
-fun logUpdateV2(update: ByteArray): String = formatDecodedUpdate(decodeUpdateV2(update))
+public fun logUpdateV2(update: ByteArray): String = formatDecodedUpdate(decodeUpdateV2(update))
 
 private fun formatDecodedUpdate(decoded: DecodedUpdate): String {
     val structs = decoded.structs.joinToString(
@@ -621,7 +621,7 @@ private fun formatDecodedUpdate(decoded: DecodedUpdate): String {
     return "$structs\n$deletes"
 }
 
-fun convertUpdateFormat(
+public fun convertUpdateFormat(
     update: ByteArray,
     blockTransformer: (DecodedUpdateStruct) -> DecodedUpdateStruct = { it },
 ): ByteArray {
@@ -633,7 +633,7 @@ fun convertUpdateFormat(
     return UpdateCodec.encode(DocumentUpdate(transformed, decoded.deleteSet.copy()))
 }
 
-fun convertUpdateFormatLossless(
+public fun convertUpdateFormatLossless(
     update: ByteArray,
     blockTransformer: (DecodedUpdateStruct) -> DecodedUpdateStruct = { it },
 ): ByteArray {
@@ -644,30 +644,30 @@ fun convertUpdateFormatLossless(
     return UpdateCodec.encodeLossless(DocumentUpdate(transformed, decoded.deleteSet.copy()))
 }
 
-fun convertUpdateFormatV1ToV2(update: ByteArray): ByteArray {
+public fun convertUpdateFormatV1ToV2(update: ByteArray): ByteArray {
     requireStandardYjsUpdateInput(update, "V1")
     return UpdateCodec.encodeV2(UpdateCodec.decode(update))
 }
 
-fun convertUpdateFormatV1ToV2Lossless(update: ByteArray): ByteArray =
+public fun convertUpdateFormatV1ToV2Lossless(update: ByteArray): ByteArray =
     UpdateCodec.encodeV2Lossless(UpdateCodec.decode(update))
 
-fun convertUpdateFormatV2ToV1(update: ByteArray): ByteArray {
+public fun convertUpdateFormatV2ToV1(update: ByteArray): ByteArray {
     requireStandardYjsUpdateInput(update, "V2")
     return UpdateCodec.encode(UpdateCodec.decodeV2(update))
 }
 
-fun convertUpdateFormatV2ToV1Lossless(update: ByteArray): ByteArray =
+public fun convertUpdateFormatV2ToV1Lossless(update: ByteArray): ByteArray =
     UpdateCodec.encodeLossless(UpdateCodec.decodeV2(update))
 
-data class ObfuscatorOptions(
+public data class ObfuscatorOptions(
     val formatting: Boolean = true,
     val subdocs: Boolean = true,
     val name: Boolean = true,
     val yxml: Boolean = name,
 )
 
-fun obfuscateUpdate(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray {
+public fun obfuscateUpdate(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray {
     requireStandardYjsUpdateInput(update, "V1")
     val decoded = UpdateCodec.decode(update)
     val obfuscator = UpdateObfuscator(options)
@@ -677,7 +677,7 @@ fun obfuscateUpdate(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOp
     return UpdateCodec.encode(DocumentUpdate(obfuscatedItems, decoded.deleteSet.copy()))
 }
 
-fun obfuscateUpdateLossless(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray {
+public fun obfuscateUpdateLossless(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray {
     val decoded = UpdateCodec.decode(update)
     val obfuscator = UpdateObfuscator(options)
     val obfuscatedItems = decoded.items.map { item ->
@@ -686,7 +686,7 @@ fun obfuscateUpdateLossless(update: ByteArray, options: ObfuscatorOptions = Obfu
     return UpdateCodec.encodeLossless(DocumentUpdate(obfuscatedItems, decoded.deleteSet.copy()))
 }
 
-fun obfuscateUpdateV2(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray {
+public fun obfuscateUpdateV2(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray {
     requireStandardYjsUpdateInput(update, "V2")
     return UpdateCodec.decodeV2(update).let { decoded ->
         val obfuscator = UpdateObfuscator(options)
@@ -700,7 +700,7 @@ fun obfuscateUpdateV2(update: ByteArray, options: ObfuscatorOptions = Obfuscator
 }
 
 
-fun obfuscateUpdateV2Lossless(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray =
+public fun obfuscateUpdateV2Lossless(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray =
     UpdateCodec.decodeV2(update).let { decoded ->
         val obfuscator = UpdateObfuscator(options)
         UpdateCodec.encodeV2Lossless(
@@ -711,108 +711,108 @@ fun obfuscateUpdateV2Lossless(update: ByteArray, options: ObfuscatorOptions = Ob
         )
     }
 
-data class ContentIds(
+public data class ContentIds(
     val inserts: IdSet,
     val deletes: IdSet,
 )
 
-data class ContentMap(
+public data class ContentMap(
     val inserts: IdMap,
     val deletes: IdMap,
 )
 
-fun createContentIds(
+public fun createContentIds(
     inserts: IdSet = createIdSet(),
     deletes: IdSet = createIdSet(),
 ): ContentIds = ContentIds(inserts, deletes)
 
-fun createInsertSetFromDoc(doc: YDoc, filterDeleted: Boolean = false): IdSet =
+public fun createInsertSetFromDoc(doc: YDoc, filterDeleted: Boolean = false): IdSet =
     createInsertIdSet(UpdateCodec.decode(doc.encodeStateAsUpdateLossless()).itemsWithDeleteState(), filterDeleted)
 
-fun createDeleteSetFromDoc(doc: YDoc): IdSet = doc.deleteSet().toIdSet()
+public fun createDeleteSetFromDoc(doc: YDoc): IdSet = doc.deleteSet().toIdSet()
 
-fun createInsertSetFromStructStore(doc: YDoc, filterDeleted: Boolean = false): IdSet =
+public fun createInsertSetFromStructStore(doc: YDoc, filterDeleted: Boolean = false): IdSet =
     createInsertSetFromDoc(doc, filterDeleted)
 
-fun createInsertSetFromStructStore(store: StructStore, filterDeleted: Boolean = false): IdSet =
+public fun createInsertSetFromStructStore(store: StructStore, filterDeleted: Boolean = false): IdSet =
     createInsertIdSet(store.allItems(), filterDeleted)
 
-fun createContentIdsFromDoc(doc: YDoc): ContentIds = createContentIdsFromUpdate(doc.encodeStateAsUpdateLossless())
+public fun createContentIdsFromDoc(doc: YDoc): ContentIds = createContentIdsFromUpdate(doc.encodeStateAsUpdateLossless())
 
-fun createContentIdsFromDocDiff(left: YDoc, right: YDoc): ContentIds =
+public fun createContentIdsFromDocDiff(left: YDoc, right: YDoc): ContentIds =
     excludeContentIds(createContentIdsFromDoc(left), createContentIdsFromDoc(right))
 
-fun excludeContentIds(contentIds: ContentIds, excludedContentIds: ContentIds): ContentIds =
+public fun excludeContentIds(contentIds: ContentIds, excludedContentIds: ContentIds): ContentIds =
     createContentIds(
         inserts = diffIdSet(contentIds.inserts, excludedContentIds.inserts),
         deletes = diffIdSet(contentIds.deletes, excludedContentIds.deletes),
     )
 
-fun mergeContentIds(contentIds: List<ContentIds>): ContentIds =
+public fun mergeContentIds(contentIds: List<ContentIds>): ContentIds =
     createContentIds(
         inserts = mergeIdSets(contentIds.map { it.inserts }),
         deletes = mergeIdSets(contentIds.map { it.deletes }),
     )
 
-fun intersectContentIds(left: ContentIds, right: ContentIds): ContentIds =
+public fun intersectContentIds(left: ContentIds, right: ContentIds): ContentIds =
     createContentIds(
         inserts = intersectSets(left.inserts, right.inserts),
         deletes = intersectSets(left.deletes, right.deletes),
     )
 
-fun intersectContentIds(left: ContentIds, right: ContentMap): ContentIds =
+public fun intersectContentIds(left: ContentIds, right: ContentMap): ContentIds =
     createContentIds(
         inserts = intersectSets(left.inserts, createIdSetFromIdMap(right.inserts)),
         deletes = intersectSets(left.deletes, createIdSetFromIdMap(right.deletes)),
     )
 
-fun writeContentIds(encoder: BinaryEncoder, contentIds: ContentIds) {
+public fun writeContentIds(encoder: BinaryEncoder, contentIds: ContentIds) {
     writeContentIdSet(encoder, contentIds.inserts)
     writeContentIdSet(encoder, contentIds.deletes)
 }
 
-fun writeContentIds(encoder: IdSetEncoderV1, contentIds: ContentIds) {
+public fun writeContentIds(encoder: IdSetEncoderV1, contentIds: ContentIds) {
     writeIdSet(encoder, contentIds.inserts)
     writeIdSet(encoder, contentIds.deletes)
 }
 
-fun encodeContentIds(contentIds: ContentIds): ByteArray {
+public fun encodeContentIds(contentIds: ContentIds): ByteArray {
     val encoder = IdSetEncoderV2()
     writeContentIds(encoder, contentIds)
     return encoder.toUint8Array()
 }
 
-fun readContentIds(decoder: BinaryDecoder): ContentIds =
+public fun readContentIds(decoder: BinaryDecoder): ContentIds =
     createContentIds(
         inserts = readContentIdSet(decoder),
         deletes = readContentIdSet(decoder),
     )
 
-fun readContentIds(decoder: IdSetDecoderV1): ContentIds =
+public fun readContentIds(decoder: IdSetDecoderV1): ContentIds =
     createContentIds(
         inserts = readIdSet(decoder),
         deletes = readIdSet(decoder),
     )
 
-fun decodeContentIds(bytes: ByteArray): ContentIds {
+public fun decodeContentIds(bytes: ByteArray): ContentIds {
     val decoder = IdSetDecoderV2(bytes)
     val contentIds = readContentIds(decoder)
     check(!decoder.hasRemaining()) { "ContentIds has trailing bytes" }
     return contentIds
 }
 
-fun createContentMap(
+public fun createContentMap(
     inserts: IdMap = createIdMap(),
     deletes: IdMap = createIdMap(),
 ): ContentMap = ContentMap(inserts, deletes)
 
-fun createContentIdsFromContentMap(contentMap: ContentMap): ContentIds =
+public fun createContentIdsFromContentMap(contentMap: ContentMap): ContentIds =
     createContentIds(
         inserts = createIdSetFromIdMap(contentMap.inserts),
         deletes = createIdSetFromIdMap(contentMap.deletes),
     )
 
-fun createContentMapFromContentIds(
+public fun createContentMapFromContentIds(
     contentIds: ContentIds,
     insertAttrs: List<ContentAttribute>,
     deleteAttrs: List<ContentAttribute> = insertAttrs,
@@ -821,37 +821,37 @@ fun createContentMapFromContentIds(
     deletes = createIdMapFromIdSet(contentIds.deletes, deleteAttrs),
 )
 
-fun excludeContentMap(contentMap: ContentMap, excludedContentIds: ContentIds): ContentMap =
+public fun excludeContentMap(contentMap: ContentMap, excludedContentIds: ContentIds): ContentMap =
     createContentMap(
         inserts = diffIdMap(contentMap.inserts, excludedContentIds.inserts),
         deletes = diffIdMap(contentMap.deletes, excludedContentIds.deletes),
     )
 
-fun excludeContentMap(contentMap: ContentMap, excludedContentMap: ContentMap): ContentMap =
+public fun excludeContentMap(contentMap: ContentMap, excludedContentMap: ContentMap): ContentMap =
     createContentMap(
         inserts = diffIdMap(contentMap.inserts, excludedContentMap.inserts),
         deletes = diffIdMap(contentMap.deletes, excludedContentMap.deletes),
     )
 
-fun mergeContentMaps(contentMaps: List<ContentMap>): ContentMap =
+public fun mergeContentMaps(contentMaps: List<ContentMap>): ContentMap =
     createContentMap(
         inserts = mergeIdMaps(contentMaps.map { it.inserts }),
         deletes = mergeIdMaps(contentMaps.map { it.deletes }),
     )
 
-fun intersectContentMap(left: ContentMap, right: ContentIds): ContentMap =
+public fun intersectContentMap(left: ContentMap, right: ContentIds): ContentMap =
     createContentMap(
         inserts = intersectIdMapWithIdSet(left.inserts, right.inserts),
         deletes = intersectIdMapWithIdSet(left.deletes, right.deletes),
     )
 
-fun intersectContentMap(left: ContentMap, right: ContentMap): ContentMap =
+public fun intersectContentMap(left: ContentMap, right: ContentMap): ContentMap =
     createContentMap(
         inserts = intersectMaps(left.inserts, right.inserts),
         deletes = intersectMaps(left.deletes, right.deletes),
     )
 
-fun filterContentMap(
+public fun filterContentMap(
     contentMap: ContentMap,
     insertPredicate: (List<ContentAttribute>) -> Boolean,
     deletePredicate: (List<ContentAttribute>) -> Boolean = insertPredicate,
@@ -860,42 +860,42 @@ fun filterContentMap(
     deletes = filterIdMap(contentMap.deletes, deletePredicate),
 )
 
-fun writeContentMap(encoder: BinaryEncoder, contentMap: ContentMap) {
+public fun writeContentMap(encoder: BinaryEncoder, contentMap: ContentMap) {
     writeContentIdMap(encoder, contentMap.inserts)
     writeContentIdMap(encoder, contentMap.deletes)
 }
 
-fun writeContentMap(encoder: IdSetEncoderV1, contentMap: ContentMap) {
+public fun writeContentMap(encoder: IdSetEncoderV1, contentMap: ContentMap) {
     writeIdMap(encoder, contentMap.inserts)
     writeIdMap(encoder, contentMap.deletes)
 }
 
-fun encodeContentMap(contentMap: ContentMap): ByteArray {
+public fun encodeContentMap(contentMap: ContentMap): ByteArray {
     val encoder = IdSetEncoderV2()
     writeContentMap(encoder, contentMap)
     return encoder.toUint8Array()
 }
 
-fun readContentMap(decoder: BinaryDecoder): ContentMap =
+public fun readContentMap(decoder: BinaryDecoder): ContentMap =
     createContentMap(
         inserts = readContentIdMap(decoder),
         deletes = readContentIdMap(decoder),
     )
 
-fun readContentMap(decoder: IdSetDecoderV1): ContentMap =
+public fun readContentMap(decoder: IdSetDecoderV1): ContentMap =
     createContentMap(
         inserts = readIdMap(decoder),
         deletes = readIdMap(decoder),
     )
 
-fun decodeContentMap(bytes: ByteArray): ContentMap {
+public fun decodeContentMap(bytes: ByteArray): ContentMap {
     val decoder = IdSetDecoderV2(bytes)
     val contentMap = readContentMap(decoder)
     check(!decoder.hasRemaining()) { "ContentMap has trailing bytes" }
     return contentMap
 }
 
-fun createContentIdsFromUpdate(update: ByteArray): ContentIds {
+public fun createContentIdsFromUpdate(update: ByteArray): ContentIds {
     val decoded = UpdateCodec.decode(update)
     return createContentIds(
         inserts = createInsertIdSet(decoded.itemsWithDeleteState()),
@@ -907,7 +907,7 @@ private fun DocumentUpdate.itemsWithDeleteState(): List<StoreItem> = items.map {
     if (item.deleted || !deleteSet.contains(item.id)) item else item.copy(deleted = true)
 }
 
-fun createContentIdsFromUpdateV2(update: ByteArray): ContentIds {
+public fun createContentIdsFromUpdateV2(update: ByteArray): ContentIds {
     val decoded = UpdateCodec.decodeV2(update)
     return createContentIds(
         inserts = createInsertIdSet(decoded.itemsWithDeleteState()),
@@ -915,7 +915,7 @@ fun createContentIdsFromUpdateV2(update: ByteArray): ContentIds {
     )
 }
 
-fun intersectUpdateWithContentIds(update: ByteArray, contentIds: ContentIds): ByteArray {
+public fun intersectUpdateWithContentIds(update: ByteArray, contentIds: ContentIds): ByteArray {
     requireStandardYjsUpdateInput(update, "V1")
     val decoded = UpdateCodec.decode(update)
     val filteredItems = decoded.items.intersectClockRanges(contentIds.inserts, requiresClockContinuity = false)
@@ -928,7 +928,7 @@ fun intersectUpdateWithContentIds(update: ByteArray, contentIds: ContentIds): By
     return UpdateCodec.encode(DocumentUpdate(filteredItems, filteredDeletes))
 }
 
-fun intersectUpdateWithContentIdsLossless(update: ByteArray, contentIds: ContentIds): ByteArray {
+public fun intersectUpdateWithContentIdsLossless(update: ByteArray, contentIds: ContentIds): ByteArray {
     val decoded = UpdateCodec.decode(update)
     val filteredItems = decoded.items.intersectClockRanges(contentIds.inserts, requiresClockContinuity = false)
     val filteredDeletes = decoded.deleteSet.toIdSet()
@@ -938,7 +938,7 @@ fun intersectUpdateWithContentIdsLossless(update: ByteArray, contentIds: Content
     return UpdateCodec.encodeLossless(DocumentUpdate(filteredItems, filteredDeletes))
 }
 
-fun intersectUpdateWithContentIdsV2(update: ByteArray, contentIds: ContentIds): ByteArray {
+public fun intersectUpdateWithContentIdsV2(update: ByteArray, contentIds: ContentIds): ByteArray {
     requireStandardYjsUpdateInput(update, "V2")
     return UpdateCodec.decodeV2(update).let { decoded ->
         val filteredItems = decoded.items.intersectClockRanges(contentIds.inserts)
@@ -949,7 +949,7 @@ fun intersectUpdateWithContentIdsV2(update: ByteArray, contentIds: ContentIds): 
     }
 }
 
-fun intersectUpdateWithContentIdsV2Lossless(update: ByteArray, contentIds: ContentIds): ByteArray =
+public fun intersectUpdateWithContentIdsV2Lossless(update: ByteArray, contentIds: ContentIds): ByteArray =
     UpdateCodec.decodeV2(update).let { decoded ->
         val filteredItems = decoded.items.intersectClockRanges(contentIds.inserts)
         val filteredDeletes = intersectSets(decoded.deleteSet.toIdSet(), contentIds.deletes).toDeleteSet()
@@ -971,29 +971,29 @@ private fun List<StoreItem>.intersectClockRanges(
         }
 }
 
-fun mergeUpdates(updates: List<ByteArray>): ByteArray {
+public fun mergeUpdates(updates: List<ByteArray>): ByteArray {
     updates.forEach { update -> requireStandardYjsUpdateInput(update, "V1") }
     if (updates.size == 1) return UpdateCodec.encode(UpdateCodec.decode(updates.single()))
     return mergeDecodedUpdates(updates.map(UpdateCodec::decode), UpdateCodec::encode)
 }
 
-fun mergeUpdatesLossless(updates: List<ByteArray>): ByteArray {
+public fun mergeUpdatesLossless(updates: List<ByteArray>): ByteArray {
     if (updates.size == 1) return updates.single()
     return mergeDecodedUpdates(updates.map(UpdateCodec::decode), UpdateCodec::encodeLossless)
 }
 
-fun mergeUpdatesV2(updates: List<ByteArray>): ByteArray {
+public fun mergeUpdatesV2(updates: List<ByteArray>): ByteArray {
     updates.forEach { update -> requireStandardYjsUpdateInput(update, "V2") }
     if (updates.size == 1) return UpdateCodec.encodeV2(UpdateCodec.decodeV2(updates.single()))
     return mergeDecodedUpdates(updates.map(UpdateCodec::decodeV2), UpdateCodec::encodeV2)
 }
 
-fun mergeUpdatesV2Lossless(updates: List<ByteArray>): ByteArray {
+public fun mergeUpdatesV2Lossless(updates: List<ByteArray>): ByteArray {
     if (updates.size == 1) return UpdateCodec.encodeV2Lossless(UpdateCodec.decodeV2(updates.single()))
     return mergeDecodedUpdates(updates.map(UpdateCodec::decodeV2), UpdateCodec::encodeV2Lossless)
 }
 
-fun diffUpdate(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
+public fun diffUpdate(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
     requireStandardYjsUpdateInput(update, "V1")
     val stateVector = decodeStateVector(encodedStateVector)
     val decoded = UpdateCodec.decode(update)
@@ -1001,14 +1001,14 @@ fun diffUpdate(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
     return UpdateCodec.encode(DocumentUpdate(filtered, decoded.deleteSet))
 }
 
-fun diffUpdateLossless(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
+public fun diffUpdateLossless(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
     val stateVector = decodeStateVector(encodedStateVector)
     val decoded = UpdateCodec.decode(update)
     val filtered = decoded.items.mapNotNull { item -> item.sliceFromClock(stateVector[item.id.client] ?: 0) }
     return UpdateCodec.encodeLossless(DocumentUpdate(filtered, decoded.deleteSet))
 }
 
-fun diffUpdateV2(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
+public fun diffUpdateV2(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
     requireStandardYjsUpdateInput(update, "V2")
     val stateVector = decodeStateVector(encodedStateVector)
     val decoded = UpdateCodec.decodeV2(update)
@@ -1016,7 +1016,7 @@ fun diffUpdateV2(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
     return UpdateCodec.encodeV2(DocumentUpdate(filtered, decoded.deleteSet))
 }
 
-fun diffUpdateV2Lossless(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
+public fun diffUpdateV2Lossless(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
     val stateVector = decodeStateVector(encodedStateVector)
     val decoded = UpdateCodec.decodeV2(update)
     val filtered = decoded.items.mapNotNull { item -> item.sliceFromClock(stateVector[item.id.client] ?: 0) }
@@ -1030,7 +1030,7 @@ private fun StoreItem.sliceFromClock(targetClock: Long): StoreItem? {
     return sliceClocks(targetClock, end)
 }
 
-fun encodeStateVectorFromUpdate(update: ByteArray): ByteArray {
+public fun encodeStateVectorFromUpdate(update: ByteArray): ByteArray {
     val decoded = UpdateCodec.decode(update)
     val stateVector = decoded.items
         .groupBy { it.id.client }
@@ -1039,7 +1039,7 @@ fun encodeStateVectorFromUpdate(update: ByteArray): ByteArray {
     return dev.yks.encodeStateVector(stateVector)
 }
 
-fun encodeStateVectorFromUpdateV2(update: ByteArray): ByteArray {
+public fun encodeStateVectorFromUpdateV2(update: ByteArray): ByteArray {
     val decoded = UpdateCodec.decodeV2(update)
     val stateVector = decoded.items
         .groupBy { it.id.client }

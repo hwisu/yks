@@ -1,9 +1,9 @@
 package dev.yks
 
-const val structGCRefNumber: Int = 0
-const val structSkipRefNumber: Int = 10
+public const val structGCRefNumber: Int = 0
+public const val structSkipRefNumber: Int = 10
 
-open class AbstractStruct(
+public open class AbstractStruct(
     private val initialId: Id,
     private var initialLength: Long,
 ) {
@@ -11,26 +11,26 @@ open class AbstractStruct(
         require(initialLength > 0) { "struct length must be positive" }
     }
 
-    open val id: Id get() = initialId
-    open var length: Long
+    public open val id: Id get() = initialId
+    public open var length: Long
         get() = initialLength
         set(value) {
             require(value > 0) { "struct length must be positive" }
             initialLength = value
         }
-    open val deleted: Boolean get() = false
-    open val isItem: Boolean get() = false
-    open val ref: Int? get() = null
-    val end: Long get() = checkedClockAdd(id.clock, length, "struct end")
+    public open val deleted: Boolean get() = false
+    public open val isItem: Boolean get() = false
+    public open val ref: Int? get() = null
+    public val end: Long get() = checkedClockAdd(id.clock, length, "struct end")
 
-    open fun mergeWith(right: AbstractStruct): Boolean = false
+    public open fun mergeWith(right: AbstractStruct): Boolean = false
 
-    open fun splice(diff: Long): AbstractStruct {
+    public open fun splice(diff: Long): AbstractStruct {
         error("struct cannot be spliced")
     }
 }
 
-class GC(
+public class GC(
     override val id: Id,
     override var length: Long,
 ) : AbstractStruct(id, length) {
@@ -51,7 +51,7 @@ class GC(
     }
 }
 
-class Skip(
+public class Skip(
     override val id: Id,
     override var length: Long,
 ) : AbstractStruct(id, length) {
@@ -72,7 +72,7 @@ class Skip(
     }
 }
 
-data class ItemStruct(
+public data class ItemStruct(
     override val id: Id,
     override var length: Long,
     override val deleted: Boolean,
@@ -87,24 +87,24 @@ data class ItemStruct(
     override val isItem: Boolean get() = true
 }
 
-typealias Item = ItemStruct
+public typealias Item = ItemStruct
 
-fun addStructToIdSet(idSet: IdSet, struct: AbstractStruct) {
+public fun addStructToIdSet(idSet: IdSet, struct: AbstractStruct) {
     idSet.add(struct.id, struct.length)
 }
 
-data class FollowRedoneResult(
+public data class FollowRedoneResult(
     val item: ItemStruct,
     val diff: Long,
 )
 
-fun followRedone(doc: YDoc, id: Id): FollowRedoneResult {
+public fun followRedone(doc: YDoc, id: Id): FollowRedoneResult {
     val followedId = doc.followRedone(id)
     val item = doc.getItem(followedId)?.toItemStruct(doc) ?: error("struct not found: $followedId")
     return FollowRedoneResult(item, followedId.clock - item.id.clock)
 }
 
-fun keepItem(doc: YDoc, item: Item?, keep: Boolean = true): IdSet {
+public fun keepItem(doc: YDoc, item: Item?, keep: Boolean = true): IdSet {
     val kept = createIdSet()
     var current = item
     while (current != null) {
@@ -117,7 +117,7 @@ fun keepItem(doc: YDoc, item: Item?, keep: Boolean = true): IdSet {
     return kept
 }
 
-fun findIndexSS(structs: List<AbstractStruct>, clock: Long): Int {
+public fun findIndexSS(structs: List<AbstractStruct>, clock: Long): Int {
     require(clock >= 0) { "clock must be non-negative" }
     require(structs.isNotEmpty()) { "structs must not be empty" }
     var left = 0
@@ -134,7 +134,7 @@ fun findIndexSS(structs: List<AbstractStruct>, clock: Long): Int {
     error("clock $clock is not covered by structs")
 }
 
-fun findIndexCleanStart(structs: MutableList<AbstractStruct>, clock: Long): Int {
+public fun findIndexCleanStart(structs: MutableList<AbstractStruct>, clock: Long): Int {
     val index = findIndexSS(structs, clock)
     val struct = structs[index]
     if (struct.id.clock < clock) {
@@ -144,7 +144,7 @@ fun findIndexCleanStart(structs: MutableList<AbstractStruct>, clock: Long): Int 
     return index
 }
 
-fun splitStruct(leftStruct: AbstractStruct, diff: Long): AbstractStruct {
+public fun splitStruct(leftStruct: AbstractStruct, diff: Long): AbstractStruct {
     require(diff > 0 && diff < leftStruct.length) { "diff must split the struct" }
     return when (leftStruct) {
         is GC -> leftStruct.splice(diff)
@@ -165,7 +165,7 @@ fun splitStruct(leftStruct: AbstractStruct, diff: Long): AbstractStruct {
     }
 }
 
-fun iterateStructs(
+public fun iterateStructs(
     structs: MutableList<AbstractStruct>,
     clockStart: Long,
     len: Long,
@@ -185,7 +185,7 @@ fun iterateStructs(
     } while (index < structs.size && structs[index].id.clock < clockEnd)
 }
 
-fun iterateStructsWithoutSplits(
+public fun iterateStructsWithoutSplits(
     structs: List<AbstractStruct>,
     clockStart: Long,
     len: Long,
@@ -207,7 +207,7 @@ fun iterateStructsWithoutSplits(
     }
 }
 
-fun tryToMergeWithLefts(structs: MutableList<AbstractStruct>, pos: Int): Int {
+public fun tryToMergeWithLefts(structs: MutableList<AbstractStruct>, pos: Int): Int {
     require(pos in 0 until structs.size) { "pos is out of bounds" }
     var i = pos
     while (i > 0) {
@@ -222,7 +222,7 @@ fun tryToMergeWithLefts(structs: MutableList<AbstractStruct>, pos: Int): Int {
     return pos - i
 }
 
-fun replaceStruct(
+public fun replaceStruct(
     structs: MutableList<AbstractStruct>,
     struct: AbstractStruct,
     newStruct: AbstractStruct,
@@ -235,7 +235,7 @@ fun replaceStruct(
     return newStruct
 }
 
-fun replaceStruct(
+public fun replaceStruct(
     blocks: BlockSet,
     struct: AbstractStruct,
     newStruct: AbstractStruct,
@@ -244,7 +244,7 @@ fun replaceStruct(
     return replaceStruct(refs, struct, newStruct)
 }
 
-fun tryMerge(ds: IdSet, blocks: BlockSet): Int {
+public fun tryMerge(ds: IdSet, blocks: BlockSet): Int {
     var merged = 0
     ds.clients.forEach { (client, ranges) ->
         val structs = blocks.clients[client]?.refs ?: return@forEach
@@ -265,7 +265,7 @@ fun tryMerge(ds: IdSet, blocks: BlockSet): Int {
     return merged
 }
 
-fun updateCurrentFormats(currentFormats: MutableMap<String, Any?>, format: ContentFormat) {
+public fun updateCurrentFormats(currentFormats: MutableMap<String, Any?>, format: ContentFormat) {
     if (format.value == null) {
         currentFormats.remove(format.key)
     } else {
@@ -273,7 +273,7 @@ fun updateCurrentFormats(currentFormats: MutableMap<String, Any?>, format: Conte
     }
 }
 
-fun createInsertSliceFromStructs(
+public fun createInsertSliceFromStructs(
     structs: List<AbstractStruct>,
     filterDeleted: Boolean = false,
 ): List<IdRange> {
@@ -304,16 +304,16 @@ fun createInsertSliceFromStructs(
     return idItems
 }
 
-fun _createInsertSliceFromStructs(
+public fun _createInsertSliceFromStructs(
     structs: List<AbstractStruct>,
     filterDeleted: Boolean = false,
 ): List<IdRange> = createInsertSliceFromStructs(structs, filterDeleted)
 
-fun nextID(doc: YDoc): Id = doc.nextId()
+public fun nextID(doc: YDoc): Id = doc.nextId()
 
-fun nextID(transaction: YTransaction): Id = nextID(transaction.doc)
+public fun nextID(transaction: YTransaction): Id = nextID(transaction.doc)
 
-fun getTypeStructs(type: AbstractYType): List<ItemStruct> =
+public fun getTypeStructs(type: AbstractYType): List<ItemStruct> =
     type.doc.typeChildren(type).flatMap { item ->
         item.toItemStruct(type.doc).logicalAnyValueViews()
     }
@@ -336,32 +336,32 @@ private fun ItemStruct.logicalAnyValueViews(): List<ItemStruct> {
     }
 }
 
-fun getItem(store: StructStore, id: Id): ItemStruct = store.getItem(id)
+public fun getItem(store: StructStore, id: Id): ItemStruct = store.getItem(id)
 
-fun getItemCleanStart(doc: YDoc, id: Id): ItemStruct =
+public fun getItemCleanStart(doc: YDoc, id: Id): ItemStruct =
     doc.store.getStoreItemCleanStart(id).toItemStruct(doc)
 
-fun getItemCleanStart(transaction: YTransaction, id: Id): ItemStruct =
+public fun getItemCleanStart(transaction: YTransaction, id: Id): ItemStruct =
     transaction.doc.store
         .getStoreItemCleanStart(id, transaction::registerSplitMergeCandidate)
         .toItemStruct(transaction.doc)
 
-fun getItemCleanEnd(doc: YDoc, id: Id): ItemStruct =
+public fun getItemCleanEnd(doc: YDoc, id: Id): ItemStruct =
     doc.store.getStoreItemCleanEnd(id).toItemStruct(doc)
 
-fun getItemCleanEnd(transaction: YTransaction, id: Id): ItemStruct =
+public fun getItemCleanEnd(transaction: YTransaction, id: Id): ItemStruct =
     transaction.doc.store
         .getStoreItemCleanEnd(id, transaction::registerSplitMergeCandidate)
         .toItemStruct(transaction.doc)
 
-fun getItemCleanEnd(transaction: YTransaction, store: StructStore, id: Id): ItemStruct {
+public fun getItemCleanEnd(transaction: YTransaction, store: StructStore, id: Id): ItemStruct {
     require(transaction.doc.store === store) { "store must belong to the transaction document" }
     return store
         .getStoreItemCleanEnd(id, transaction::registerSplitMergeCandidate)
         .toItemStruct(transaction.doc)
 }
 
-fun iterateStructsByIdSet(
+public fun iterateStructsByIdSet(
     doc: YDoc,
     idSet: IdSet,
     action: (struct: ItemStruct, offset: Long, length: Long) -> Unit,
@@ -372,7 +372,7 @@ fun iterateStructsByIdSet(
     }
 }
 
-fun iterateStructsByIdSet(
+public fun iterateStructsByIdSet(
     transaction: YTransaction,
     idSet: IdSet,
     action: (struct: ItemStruct, offset: Long, length: Long) -> Unit,
@@ -380,7 +380,7 @@ fun iterateStructsByIdSet(
     iterateStructsByIdSet(transaction.doc, idSet, action)
 }
 
-fun iterateStructsByIdSetWithoutSplits(
+public fun iterateStructsByIdSetWithoutSplits(
     doc: YDoc,
     idSet: IdSet,
     action: (struct: ItemStruct, offset: Long, length: Long) -> Unit,
@@ -388,7 +388,7 @@ fun iterateStructsByIdSetWithoutSplits(
     iterateStructsByIdSetWithoutSplits(doc.store, idSet, action)
 }
 
-fun iterateStructsByIdSetWithoutSplits(
+public fun iterateStructsByIdSetWithoutSplits(
     transaction: YTransaction,
     idSet: IdSet,
     action: (struct: ItemStruct, offset: Long, length: Long) -> Unit,
@@ -396,7 +396,7 @@ fun iterateStructsByIdSetWithoutSplits(
     iterateStructsByIdSetWithoutSplits(transaction.doc.store, idSet, action)
 }
 
-fun iterateStructsByIdSetWithoutSplits(
+public fun iterateStructsByIdSetWithoutSplits(
     store: StructStore,
     idSet: IdSet,
     action: (struct: ItemStruct, offset: Long, length: Long) -> Unit,
@@ -412,7 +412,7 @@ fun iterateStructsByIdSetWithoutSplits(
     }
 }
 
-fun iterateDeletedStructs(
+public fun iterateDeletedStructs(
     doc: YDoc,
     deleteSet: DeleteSet,
     action: (AbstractStruct) -> Unit,
@@ -420,7 +420,7 @@ fun iterateDeletedStructs(
     iterateStructsByIdSet(doc, deleteSet.toIdSet()) { struct, _, _ -> action(struct) }
 }
 
-fun iterateDeletedStructs(
+public fun iterateDeletedStructs(
     transaction: YTransaction,
     deleteSet: DeleteSet,
     action: (AbstractStruct) -> Unit,
@@ -428,7 +428,7 @@ fun iterateDeletedStructs(
     iterateDeletedStructs(transaction.doc, deleteSet, action)
 }
 
-fun gcIdSet(
+public fun gcIdSet(
     doc: YDoc,
     idSet: IdSet,
     gcFilter: (AbstractStruct) -> Boolean = doc.gcFilter,
@@ -476,19 +476,19 @@ private fun collectDeletedItemContent(
     }
 }
 
-fun tryGc(
+public fun tryGc(
     doc: YDoc,
     idSet: IdSet,
     gcFilter: (AbstractStruct) -> Boolean = doc.gcFilter,
 ): IdSet = gcIdSet(doc, idSet, gcFilter)
 
-fun tryGc(
+public fun tryGc(
     transaction: YTransaction,
     idSet: IdSet,
     gcFilter: (AbstractStruct) -> Boolean = transaction.doc.gcFilter,
 ): IdSet = gcIdSet(transaction.doc, idSet, gcFilter)
 
-fun tryGc(
+public fun tryGc(
     deleteSet: DeleteSet,
     store: StructStore,
     gcFilter: (AbstractStruct) -> Boolean,
@@ -499,25 +499,25 @@ fun tryGc(
     store.mergeDeletedItems(deleteSet)
 }
 
-fun tryGcDeleteSet(
+public fun tryGcDeleteSet(
     doc: YDoc,
     idSet: IdSet,
     gcFilter: (AbstractStruct) -> Boolean = doc.gcFilter,
 ): IdSet = gcIdSet(doc, idSet, gcFilter)
 
-fun tryGcDeleteSet(
+public fun tryGcDeleteSet(
     transaction: YTransaction,
     idSet: IdSet,
     gcFilter: (AbstractStruct) -> Boolean = transaction.doc.gcFilter,
 ): IdSet = gcIdSet(transaction.doc, idSet, gcFilter)
 
-fun tryGcDeleteSet(
+public fun tryGcDeleteSet(
     doc: YDoc,
     deleteSet: DeleteSet,
     gcFilter: (AbstractStruct) -> Boolean = doc.gcFilter,
 ): IdSet = tryGcDeleteSet(doc, deleteSet.toIdSet(), gcFilter)
 
-fun tryGcDeleteSet(
+public fun tryGcDeleteSet(
     transaction: YTransaction,
     deleteSet: DeleteSet,
     gcFilter: (AbstractStruct) -> Boolean = transaction.doc.gcFilter,

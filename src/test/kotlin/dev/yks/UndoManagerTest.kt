@@ -11,6 +11,96 @@ import kotlin.test.assertTrue
 
 class UndoManagerTest {
     @Test
+    fun undoTracksEverySliceAfterPackedTextItemsArePartiallyDeleted() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val text = doc.getText("undo")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        listOf(
+            Triple("I", 0, "B0"),
+            Triple("I", 2, "C1"),
+            Triple("I", 4, "D2"),
+            Triple("D", 1, "2"),
+            Triple("I", 1, "F4"),
+            Triple("I", 0, "G5"),
+            Triple("I", 1, "H6"),
+            Triple("D", 5, "1"),
+            Triple("I", 7, "J8"),
+            Triple("D", 1, "1"),
+            Triple("D", 3, "2"),
+            Triple("I", 8, "M11"),
+        ).forEach { (operation, index, value) ->
+            if (operation == "I") text.insert(index, value) else text.delete(index, value.toInt())
+        }
+
+        assertEquals("G651J8D2M11", text.toString())
+        while (undoManager.canUndo) undoManager.undo()
+        assertEquals("", text.toString())
+        while (undoManager.canRedo) undoManager.redo()
+        assertEquals("G651J8D2M11", text.toString())
+    }
+
+    @Test
+    fun redoPreservesOrderAcrossRepeatedPartialDeletionAndRestoration() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val text = doc.getText("undo")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        listOf(
+            Triple("I", 0, "H0"),
+            Triple("I", 1, "I1"),
+            Triple("I", 3, "J2"),
+            Triple("D", 2, "1"),
+            Triple("D", 1, "1"),
+            Triple("I", 3, "M5"),
+            Triple("D", 2, "1"),
+            Triple("D", 0, "1"),
+            Triple("I", 0, "P8"),
+            Triple("I", 4, "Q9"),
+            Triple("D", 0, "2"),
+            Triple("D", 1, "2"),
+        ).forEach { (operation, index, value) ->
+            if (operation == "I") text.insert(index, value) else text.delete(index, value.toInt())
+        }
+
+        assertEquals("J950", text.toString())
+        while (undoManager.canUndo) undoManager.undo()
+        assertEquals("", text.toString())
+        while (undoManager.canRedo) undoManager.redo()
+        assertEquals("J950", text.toString())
+    }
+
+    @Test
+    fun redoPreservesOrderAcrossNestedInteriorInsertions() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val text = doc.getText("undo")
+        val undoManager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+
+        listOf(
+            Triple("I", 0, "Q0"),
+            Triple("I", 1, "R1"),
+            Triple("D", 0, "2"),
+            Triple("I", 2, "T3"),
+            Triple("I", 2, "U4"),
+            Triple("I", 2, "V5"),
+            Triple("D", 2, "2"),
+            Triple("D", 2, "1"),
+            Triple("D", 2, "2"),
+            Triple("I", 1, "Z9"),
+            Triple("I", 1, "A10"),
+            Triple("I", 3, "B11"),
+        ).forEach { (operation, index, value) ->
+            if (operation == "I") text.insert(index, value) else text.delete(index, value.toInt())
+        }
+
+        assertEquals("1A1B110Z903", text.toString())
+        while (undoManager.canUndo) undoManager.undo()
+        assertEquals("", text.toString())
+        while (undoManager.canRedo) undoManager.redo()
+        assertEquals("1A1B110Z903", text.toString())
+    }
+
+    @Test
     fun undoAndRedoTextInsertion() {
         val doc = YDoc(clientId = 1)
         val text = doc.getText("body")

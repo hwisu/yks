@@ -8,12 +8,12 @@ package dev.yks
  * the attribution data is itself stored in shared types, another document can reconstruct the
  * mappings by applying a normal Yjs update and creating a [PermanentUserData] over that store.
  */
-class PermanentUserData(
-    val doc: YDoc,
-    val yusers: YMap = doc.getMap("users"),
+public class PermanentUserData(
+    public val doc: YDoc,
+    public val yusers: YMap = doc.getMap("users"),
 ) : AutoCloseable {
-    val clients: MutableMap<Long, String> = linkedMapOf()
-    val dss: MutableMap<String, DeleteSet> = linkedMapOf()
+    public val clients: MutableMap<Long, String> = linkedMapOf()
+    public val dss: MutableMap<String, DeleteSet> = linkedMapOf()
 
     private val userBindings = linkedMapOf<String, UserBinding>()
     private val mappingSubscriptions = mutableListOf<Subscription>()
@@ -35,7 +35,7 @@ class PermanentUserData(
     /**
      * Associates [clientId] with [userDescription] and records qualifying local deletions.
      */
-    fun setUserMapping(
+    public fun setUserMapping(
         doc: YDoc,
         clientId: Long,
         userDescription: String,
@@ -54,9 +54,9 @@ class PermanentUserData(
         }
     }
 
-    fun getUserByClientId(clientId: Long): String? = clients[clientId]
+    public fun getUserByClientId(clientId: Long): String? = clients[clientId]
 
-    fun getUserByDeletedId(id: Id): String? =
+    public fun getUserByDeletedId(id: Id): String? =
         dss.entries.firstOrNull { (_, deleteSet) -> deleteSet.contains(id) }?.key
 
     override fun close() {

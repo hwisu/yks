@@ -13,7 +13,7 @@ audited boundary.
 
 ## Install
 
-Release `0.1.1` is published as `dev.yks:yks:0.1.1` in the repository's GitHub
+Release `0.2.0` is published as `dev.yks:yks:0.2.0` in the repository's GitHub
 Packages Maven registry. GitHub requires authentication when downloading Maven
 packages, including packages attached to public repositories.
 
@@ -55,7 +55,7 @@ Then add the dependency:
 
 ```kotlin
 dependencies {
-    implementation("dev.yks:yks:0.1.1")
+    implementation("dev.yks:yks:0.2.0")
 }
 ```
 
@@ -247,9 +247,10 @@ Malformed UTF-8 and legacy JSON are rejected rather than repaired silently.
   outside the JVM surface.
 - Kotlin callback/type shapes and Kotlin-specific extensions are not a
   line-for-line port of every JavaScript export.
-- The interop gate includes a deterministic 500-seed concurrent array/text/map
-  differential test. It is still not a substitute for application-specific or
-  adversarial testing.
+- The interop gate includes 500 deterministic concurrent array/text/map seeds,
+  100 advanced XML/subdocument/relative-position/V2/UndoManager seeds, and
+  1,000 deterministic malformed V1/V2 seeds. It is still not a substitute for
+  application-specific or coverage-guided production fuzzing.
 
 ## Build and test
 
@@ -264,6 +265,7 @@ Requirements:
 npm ci
 npm run test:interop
 npm run benchmark:performance:check
+npm run benchmark:performance:advanced
 ./gradlew check consumerSmokeTest
 ./gradlew jmh
 ./scripts/verify-reproducible-artifacts.sh
@@ -295,8 +297,8 @@ fragmented-prefix formatting, observer-isolation edits, and sequential
 incremental standard-update application. Results are written to
 `build/reports/jmh/results.json`.
 
-The cross-runtime gate uses 50 warmup batches and 30 measured batches for 33
-workloads. Every workload must satisfy strict ratio parity
+The strict cross-runtime gate uses 50 warmup batches and 30 measured batches
+for 35 workloads. Every workload must satisfy strict ratio parity
 (`YKS/Yjs <= 1.5x`), and micro workloads must independently remain within the
 process-level latency budget (`YKS <= 6 ms`). Neither condition is a fallback
 for the other. Each warmup uses the same explicit repeat count as a measured
@@ -304,10 +306,16 @@ sample, so the JVM is not measured in interpreted/C1 code while V8 is already
 optimized. Destructive fixtures are prepared before each invocation, outside
 the measured interval, and the JVM runner waits outside measurement after each
 workload warmup so queued tiered compilation cannot contaminate the next one.
+The separate advanced report always measures XML construction/rendering and
+1,000 undo/redo steps in addition to the strict relative-position and V2
+scenarios. UndoManager currently has a documented engine-owned CPU gap; it
+remains visible in that report without weakening the 1.5x release gate.
+Kotlin explicit API mode, warnings-as-errors, and the committed `api/yks.api`
+baseline make accidental public or binary API drift a build failure.
 Release JARs disable file timestamps, use reproducible entry order, embed the
 exact `YKS-Revision`, and are built twice and byte-compared before publication.
 
-Pushing a tag such as `v0.1.1` runs the same gates, publishes that immutable
+Pushing a tag such as `v0.2.0` runs the same gates, publishes that immutable
 version to GitHub Packages, and verifies it again from a clean remote consumer.
 
 ## License

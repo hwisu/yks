@@ -1,5 +1,6 @@
 package dev.yks
 
+import kotlin.test.assertContentEquals
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -123,6 +124,27 @@ class RelativePositionTest {
         assertEquals(original.item, decoded.item)
         assertEquals(original.assoc, decoded.assoc)
         assertEquals(2, assertNotNull(createAbsolutePositionFromRelativePosition(decoded, doc)).index)
+    }
+
+    @Test
+    fun relativePositionAssocUsesUpstreamLib0SignedVarInt() {
+        val position = RelativePosition(tname = "relative", assoc = -1)
+        val upstreamBytes = byteArrayOf(
+            0x01,
+            0x08,
+            'r'.code.toByte(),
+            'e'.code.toByte(),
+            'l'.code.toByte(),
+            'a'.code.toByte(),
+            't'.code.toByte(),
+            'i'.code.toByte(),
+            'v'.code.toByte(),
+            'e'.code.toByte(),
+            0x41,
+        )
+
+        assertContentEquals(upstreamBytes, encodeRelativePosition(position))
+        assertEquals(position, decodeRelativePosition(upstreamBytes))
     }
 
     @Test

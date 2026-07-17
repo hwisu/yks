@@ -1,17 +1,17 @@
 package dev.yks
 
-const val rendererType: String = "y:r"
-val `$renderer`: String = rendererType
+public const val rendererType: String = "y:r"
+public val `$renderer`: String = rendererType
 
-data class AttributionSchemaField(
+public data class AttributionSchemaField(
     val type: String,
     val optional: Boolean = true,
     val itemType: String? = null,
     val valueType: String? = null,
 )
 
-class AttributionJsonSchema internal constructor() {
-    val fields: Map<String, AttributionSchemaField> = linkedMapOf(
+public class AttributionJsonSchema internal constructor() {
+    public val fields: Map<String, AttributionSchemaField> = linkedMapOf(
         "insert" to AttributionSchemaField(type = "array", itemType = "string"),
         "insertAt" to AttributionSchemaField(type = "number"),
         "delete" to AttributionSchemaField(type = "array", itemType = "string"),
@@ -20,7 +20,7 @@ class AttributionJsonSchema internal constructor() {
         "formatAt" to AttributionSchemaField(type = "number"),
     )
 
-    fun check(value: Any?): Boolean {
+    public fun check(value: Any?): Boolean {
         val map = value as? Map<*, *> ?: return false
         return map.all { (key, rawValue) ->
             key is String && fields[key]?.matches(rawValue) == true
@@ -28,9 +28,9 @@ class AttributionJsonSchema internal constructor() {
     }
 }
 
-val attributionJsonSchema: AttributionJsonSchema = AttributionJsonSchema()
+public val attributionJsonSchema: AttributionJsonSchema = AttributionJsonSchema()
 
-data class AttributedContent(
+public data class AttributedContent(
     val content: AbstractContent,
     val clock: Long,
     val deleted: Boolean,
@@ -71,7 +71,7 @@ private fun Any?.matchesRecordValueType(type: String?): Boolean = when (type) {
     else -> matchesSchemaType(type)
 }
 
-data class RendererEvent(
+public data class RendererEvent(
     val name: String,
     val renderer: AbstractRenderer,
     val idSet: IdSet? = null,
@@ -79,23 +79,23 @@ data class RendererEvent(
     val local: Boolean = true,
 )
 
-abstract class AbstractRenderer {
+public abstract class AbstractRenderer {
     private val eventListeners = linkedMapOf<String, MutableList<(RendererEvent) -> Unit>>()
 
-    open val attributed: IdSet = createIdSet()
-    open val type: String get() = rendererType
-    open val `$type`: String get() = rendererType
+    public open val attributed: IdSet = createIdSet()
+    public open val type: String get() = rendererType
+    public open val `$type`: String get() = rendererType
 
-    open fun hasItem(item: ItemStruct): Boolean =
+    public open fun hasItem(item: ItemStruct): Boolean =
         attributed.intersects(item.id.client, item.id.clock, item.length)
 
-    fun on(eventName: String, listener: (RendererEvent) -> Unit): Subscription {
+    public fun on(eventName: String, listener: (RendererEvent) -> Unit): Subscription {
         val listeners = eventListeners.getOrPut(eventName) { mutableListOf() }
         listeners.add(listener)
         return Subscription { off(eventName, listener) }
     }
 
-    fun once(eventName: String, listener: (RendererEvent) -> Unit): Subscription {
+    public fun once(eventName: String, listener: (RendererEvent) -> Unit): Subscription {
         lateinit var subscription: Subscription
         val onceListener: (RendererEvent) -> Unit = { event ->
             subscription.close()
@@ -105,7 +105,7 @@ abstract class AbstractRenderer {
         return subscription
     }
 
-    fun off(eventName: String, listener: (RendererEvent) -> Unit) {
+    public fun off(eventName: String, listener: (RendererEvent) -> Unit) {
         val listeners = eventListeners[eventName] ?: return
         listeners.remove(listener)
         if (listeners.isEmpty()) {
@@ -113,19 +113,19 @@ abstract class AbstractRenderer {
         }
     }
 
-    fun emit(eventName: String, event: RendererEvent = RendererEvent(name = eventName, renderer = this)) {
+    public fun emit(eventName: String, event: RendererEvent = RendererEvent(name = eventName, renderer = this)) {
         emit(if (event.name == eventName && event.renderer === this) event else event.copy(name = eventName, renderer = this))
     }
 
-    fun emit(event: RendererEvent) {
+    public fun emit(event: RendererEvent) {
         callAllYksCallbacks(eventListeners[event.name].orEmpty().toList()) { listener -> listener(event) }
     }
 
-    open fun destroy() {
+    public open fun destroy() {
         eventListeners.clear()
     }
 
-    abstract fun readContent(
+    public abstract fun readContent(
         contents: MutableList<AttributedContent>,
         client: Long,
         clock: Long,
@@ -134,10 +134,10 @@ abstract class AbstractRenderer {
         renderBehavior: Int,
     )
 
-    abstract fun contentLength(item: ItemStruct): Long
+    public abstract fun contentLength(item: ItemStruct): Long
 }
 
-fun rendererContentLength(renderer: AbstractRenderer?, item: ItemStruct): Long =
+public fun rendererContentLength(renderer: AbstractRenderer?, item: ItemStruct): Long =
     if (renderer != null && renderer.hasItem(item)) {
         renderer.contentLength(item)
     } else if (item.deleted || !item.countable) {
@@ -146,7 +146,7 @@ fun rendererContentLength(renderer: AbstractRenderer?, item: ItemStruct): Long =
         item.length
     }
 
-open class BaseRenderer : AbstractRenderer() {
+public open class BaseRenderer : AbstractRenderer() {
     override fun readContent(
         contents: MutableList<AttributedContent>,
         client: Long,
@@ -165,19 +165,19 @@ open class BaseRenderer : AbstractRenderer() {
         if (item.deleted || !item.countable) 0 else item.length
 }
 
-val baseRenderer: BaseRenderer = BaseRenderer()
+public val baseRenderer: BaseRenderer = BaseRenderer()
 
-open class TwosetRenderer(
+public open class TwosetRenderer(
     inserts: IdMap,
     deletes: IdMap,
 ) : AbstractRenderer() {
-    var inserts: IdMap = inserts
+    public var inserts: IdMap = inserts
         set(value) {
             field = value
             attributed = rendererAttributed(field, deletes)
         }
 
-    var deletes: IdMap = deletes
+    public var deletes: IdMap = deletes
         set(value) {
             field = value
             attributed = rendererAttributed(inserts, field)
@@ -216,16 +216,16 @@ open class TwosetRenderer(
     }
 }
 
-class Attributions(
-    val inserts: IdMap = createIdMap(),
-    val deletes: IdMap = createIdMap(),
+public class Attributions(
+    public val inserts: IdMap = createIdMap(),
+    public val deletes: IdMap = createIdMap(),
 )
 
-data class DiffRendererOptions(
+public data class DiffRendererOptions(
     val attrs: Attributions? = null,
 )
 
-class DiffRenderer(
+public class DiffRenderer(
     private val prevDoc: YDoc,
     private val nextDoc: YDoc,
     options: DiffRendererOptions = DiffRendererOptions(),
@@ -258,14 +258,14 @@ class DiffRenderer(
         prevDoc.on("destroy") { _: YDocEvent -> destroy() }
     private var destroyed: Boolean = false
 
-    var suggestionMode: Boolean = true
-    var suggestionOrigins: List<Any?>? = null
+    public var suggestionMode: Boolean = true
+    public var suggestionOrigins: List<Any?>? = null
 
-    fun acceptAllChanges() {
+    public fun acceptAllChanges() {
         applyUpdate(prevDoc, encodeStateAsUpdateLossless(nextDoc), origin = this)
     }
 
-    fun acceptChanges(start: Id, end: Id = start) {
+    public fun acceptChanges(start: Id, end: Id = start) {
         require(start.client == end.client) { "accepted change range must belong to one client" }
         require(end.clock >= start.clock) { "end must not be before start" }
         val selected = createIdSet().also { ids -> ids.add(start.client, start.clock, end.clock - start.clock + 1) }
@@ -277,13 +277,13 @@ class DiffRenderer(
         )
     }
 
-    fun rejectAllChanges() {
+    public fun rejectAllChanges() {
         val rejectedInserts = createIdSetFromIdMap(inserts)
         val rejectedDeletes = createIdSetFromIdMap(deletes)
         rejectChangeSet(rejectedInserts, rejectedDeletes)
     }
 
-    fun rejectChanges(start: Id, end: Id = start) {
+    public fun rejectChanges(start: Id, end: Id = start) {
         require(start.client == end.client) { "rejected change range must belong to one client" }
         require(end.clock >= start.clock) { "end must not be before start" }
         val selected = createIdSet().also { ids -> ids.add(start.client, start.clock, end.clock - start.clock + 1) }
@@ -562,17 +562,17 @@ private fun YValue.nestedTypeRefs(): List<YValue.TypeRef> = when (this) {
     is YValue.SubdocRef -> emptyList()
 }
 
-fun createDiffRenderer(
+public fun createDiffRenderer(
     prevDoc: YDoc,
     nextDoc: YDoc,
     options: DiffRendererOptions = DiffRendererOptions(),
 ): DiffRenderer = DiffRenderer(prevDoc, nextDoc, options)
 
-class SnapshotRenderer(
-    val prevSnapshot: Snapshot,
-    val nextSnapshot: Snapshot = prevSnapshot,
+public class SnapshotRenderer(
+    public val prevSnapshot: Snapshot,
+    public val nextSnapshot: Snapshot = prevSnapshot,
 ) : AbstractRenderer() {
-    val attrs: IdMap = snapshotAttrs(prevSnapshot, nextSnapshot)
+    public val attrs: IdMap = snapshotAttrs(prevSnapshot, nextSnapshot)
     override val attributed: IdSet = createIdSetFromIdMap(attrs)
 
     override fun hasItem(item: ItemStruct): Boolean =
@@ -617,7 +617,7 @@ class SnapshotRenderer(
     }
 }
 
-fun createSnapshotRenderer(
+public fun createSnapshotRenderer(
     prevSnapshot: Snapshot,
     nextSnapshot: Snapshot = prevSnapshot,
 ): SnapshotRenderer = SnapshotRenderer(prevSnapshot, nextSnapshot)

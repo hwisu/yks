@@ -2,43 +2,43 @@ package dev.yks
 
 import java.math.BigInteger
 
-sealed interface YValue {
-    fun toAny(): Any?
+public sealed interface YValue {
+    public fun toAny(): Any?
 
     /** Distinct from [Null], matching JavaScript/lib0 `undefined`. */
-    data object Undefined : YValue {
+    public data object Undefined : YValue {
         override fun toAny(): Any = this
     }
 
-    data object Null : YValue {
+    public data object Null : YValue {
         override fun toAny(): Any? = null
     }
 
-    data class Bool(val value: Boolean) : YValue {
+    public data class Bool(val value: Boolean) : YValue {
         override fun toAny(): Any = value
     }
 
-    data class LongNumber(val value: Long) : YValue {
+    public data class LongNumber(val value: Long) : YValue {
         override fun toAny(): Any = value
     }
 
-    data class DoubleNumber(val value: Double) : YValue {
+    public data class DoubleNumber(val value: Double) : YValue {
         override fun toAny(): Any = value
     }
 
     /** A signed integer carried by lib0's 64-bit bigint representation. */
-    data class BigIntNumber(val value: BigInteger) : YValue {
+    public data class BigIntNumber(val value: BigInteger) : YValue {
         override fun toAny(): Any = value
     }
 
-    data class StringValue(val value: String) : YValue {
+    public data class StringValue(val value: String) : YValue {
         override fun toAny(): Any = value
     }
 
-    class BinaryValue(private val value: ByteArray) : YValue {
+    public class BinaryValue(private val value: ByteArray) : YValue {
         override fun toAny(): Any = value.copyOf()
 
-        fun bytes(): ByteArray = value.copyOf()
+        public fun bytes(): ByteArray = value.copyOf()
 
         override fun equals(other: Any?): Boolean = other is BinaryValue && value.contentEquals(other.value)
 
@@ -47,19 +47,19 @@ sealed interface YValue {
         override fun toString(): String = "BinaryValue(${value.size} bytes)"
     }
 
-    data class ListValue(val value: List<YValue>) : YValue {
+    public data class ListValue(val value: List<YValue>) : YValue {
         override fun toAny(): Any = value.map { it.toAny() }
     }
 
-    data class MapValue(val value: Map<String, YValue>) : YValue {
+    public data class MapValue(val value: Map<String, YValue>) : YValue {
         override fun toAny(): Any = value.mapValues { (_, nested) -> nested.toAny() }
     }
 
-    data class TypeRef(val kind: RootKind, val name: String) : YValue {
+    public data class TypeRef(val kind: RootKind, val name: String) : YValue {
         override fun toAny(): Any = mapOf("kind" to kind.name, "name" to name)
     }
 
-    data class SubdocRef(
+    public data class SubdocRef(
         val guid: String,
         val gc: Boolean,
         val shouldLoad: Boolean,
@@ -81,8 +81,8 @@ sealed interface YValue {
         )
     }
 
-    companion object {
-        fun from(value: Any?): YValue = when (value) {
+    public companion object {
+        public fun from(value: Any?): YValue = when (value) {
             null -> Null
             Lib0Undefined -> Undefined
             is YValue -> value
@@ -118,7 +118,7 @@ sealed interface YValue {
     }
 }
 
-fun writeYValue(encoder: BinaryEncoder, value: YValue) {
+public fun writeYValue(encoder: BinaryEncoder, value: YValue) {
     when (value) {
         YValue.Undefined -> encoder.writeByte(11)
         YValue.Null -> encoder.writeByte(0)
@@ -177,7 +177,7 @@ fun writeYValue(encoder: BinaryEncoder, value: YValue) {
     }
 }
 
-fun readYValue(decoder: BinaryDecoder): YValue {
+public fun readYValue(decoder: BinaryDecoder): YValue {
     decoder.decodeBudget.consumeNode()
     return when (val tag = decoder.readByte()) {
         0 -> YValue.Null

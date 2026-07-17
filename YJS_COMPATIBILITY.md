@@ -37,8 +37,9 @@ verifies:
   state-vector operations;
 - arrays, maps, rich text, embeds, live XML, subdocuments, delete sets, GC,
   snapshots, relative positions, typed/direct/deep events, and undo/redo;
-- out-of-order and concurrent delivery, including a deterministic 500-seed
-  array/text/map differential suite;
+- out-of-order and concurrent delivery, including 500 deterministic
+  array/text/map seeds, 100 advanced XML/subdocument/relative-position/V2/
+  UndoManager seeds, and 1,000 malformed V1/V2 seeds;
 - Kotlin-produced updates applied by Yjs, and Yjs-produced updates applied by
   Kotlin;
 - publication to a Maven repository followed by a clean standalone consumer

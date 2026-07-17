@@ -1,6 +1,6 @@
 package dev.yks
 
-data class IdRange(val clock: Long, val len: Long) {
+public data class IdRange(val clock: Long, val len: Long) {
     init {
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
@@ -10,29 +10,29 @@ data class IdRange(val clock: Long, val len: Long) {
 
     val attrs: List<ContentAttribute> get() = emptyList()
 
-    fun contains(clock: Long): Boolean = clock >= this.clock && clock < end
+    public fun contains(clock: Long): Boolean = clock >= this.clock && clock < end
 
-    fun copyWith(clock: Long, len: Long): IdRange = IdRange(clock, len)
+    public fun copyWith(clock: Long, len: Long): IdRange = IdRange(clock, len)
 }
 
-data class MaybeIdRange(val clock: Long, val len: Long, val exists: Boolean)
+public data class MaybeIdRange(val clock: Long, val len: Long, val exists: Boolean)
 
-fun createMaybeIdRange(clock: Long, len: Long, exists: Boolean): MaybeIdRange =
+public fun createMaybeIdRange(clock: Long, len: Long, exists: Boolean): MaybeIdRange =
     MaybeIdRange(clock, len, exists)
 
-class IdRanges(ids: List<IdRange> = emptyList()) {
+public class IdRanges(ids: List<IdRange> = emptyList()) {
     private val ranges = ids.toMutableList()
 
-    fun copy(): IdRanges = IdRanges(getIds())
+    public fun copy(): IdRanges = IdRanges(getIds())
 
-    fun add(clock: Long, len: Long) {
+    public fun add(clock: Long, len: Long) {
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return
         ranges.add(IdRange(clock, len))
     }
 
-    fun delete(clock: Long, len: Long) {
+    public fun delete(clock: Long, len: Long) {
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return
@@ -43,7 +43,7 @@ class IdRanges(ids: List<IdRange> = emptyList()) {
         ranges.addAll(idSet.ranges(0))
     }
 
-    fun getIds(): List<IdRange> {
+    public fun getIds(): List<IdRange> {
         val idSet = createIdSet()
         ranges.forEach { range -> idSet.add(0, range.clock, range.len) }
         ranges.clear()
@@ -52,7 +52,7 @@ class IdRanges(ids: List<IdRange> = emptyList()) {
     }
 }
 
-fun findIndexInIdRanges(ranges: List<IdRange>, clock: Long): Int? {
+public fun findIndexInIdRanges(ranges: List<IdRange>, clock: Long): Int? {
     var left = 0
     var right = ranges.lastIndex
     while (left <= right) {
@@ -67,7 +67,7 @@ fun findIndexInIdRanges(ranges: List<IdRange>, clock: Long): Int? {
     return null
 }
 
-fun findRangeStartInIdRanges(ranges: List<IdRange>, clock: Long): Int? {
+public fun findRangeStartInIdRanges(ranges: List<IdRange>, clock: Long): Int? {
     var left = 0
     var right = ranges.lastIndex
     while (left <= right) {
@@ -82,7 +82,7 @@ fun findRangeStartInIdRanges(ranges: List<IdRange>, clock: Long): Int? {
     return if (left < ranges.size) left else null
 }
 
-class IdSet(
+public class IdSet(
     clients: Map<Long, List<IdRange>> = emptyMap(),
 ) {
     private val clientRanges: MutableMap<Long, MutableList<IdRange>> = linkedMapOf()
@@ -93,16 +93,16 @@ class IdSet(
         }
     }
 
-    val clients: Map<Long, List<IdRange>>
+    public val clients: Map<Long, List<IdRange>>
         get() = clientRanges.mapValues { (_, ranges) -> ranges.toList() }
 
-    fun isEmpty(): Boolean = clientRanges.values.all { it.isEmpty() }
+    public fun isEmpty(): Boolean = clientRanges.values.all { it.isEmpty() }
 
-    fun forEach(action: (range: IdRange, client: Long) -> Unit) {
+    public fun forEach(action: (range: IdRange, client: Long) -> Unit) {
         ranges().forEach { (client, range) -> action(range, client) }
     }
 
-    fun add(client: Long, clock: Long, len: Long) {
+    public fun add(client: Long, clock: Long, len: Long) {
         require(client >= 0) { "client must be non-negative" }
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
@@ -110,11 +110,11 @@ class IdSet(
         clientRanges.getOrPut(client) { mutableListOf() }.addAndMerge(IdRange(clock, len))
     }
 
-    fun add(id: Id, len: Long = 1) {
+    public fun add(id: Id, len: Long = 1) {
         add(id.client, id.clock, len)
     }
 
-    fun delete(client: Long, clock: Long, len: Long) {
+    public fun delete(client: Long, clock: Long, len: Long) {
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return
@@ -141,12 +141,12 @@ class IdSet(
         }
     }
 
-    fun has(client: Long, clock: Long): Boolean =
+    public fun has(client: Long, clock: Long): Boolean =
         clientRanges[client]?.let { ranges -> findIndexInIdRanges(ranges, clock) != null } == true
 
-    fun hasId(id: Id): Boolean = has(id.client, id.clock)
+    public fun hasId(id: Id): Boolean = has(id.client, id.clock)
 
-    fun intersects(client: Long, clock: Long, len: Long): Boolean {
+    public fun intersects(client: Long, clock: Long, len: Long): Boolean {
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return false
@@ -156,9 +156,9 @@ class IdSet(
         return ranges[index].clock < end
     }
 
-    fun intersects(id: Id, len: Long = 1): Boolean = intersects(id.client, id.clock, len)
+    public fun intersects(id: Id, len: Long = 1): Boolean = intersects(id.client, id.clock, len)
 
-    fun slice(client: Long, clock: Long, len: Long): List<MaybeIdRange> {
+    public fun slice(client: Long, clock: Long, len: Long): List<MaybeIdRange> {
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         val end = checkedClockAdd(clock, len, "id-set slice end")
@@ -191,9 +191,9 @@ class IdSet(
         return result
     }
 
-    fun ranges(client: Long): List<IdRange> = clientRanges[client]?.toList().orEmpty()
+    public fun ranges(client: Long): List<IdRange> = clientRanges[client]?.toList().orEmpty()
 
-    fun ranges(): List<Pair<Long, IdRange>> = buildList {
+    public fun ranges(): List<Pair<Long, IdRange>> = buildList {
         clientRanges.keys.sorted().forEach { client ->
             clientRanges.getValue(client).forEach { range -> add(client to range) }
         }
@@ -231,11 +231,11 @@ private fun MutableList<IdRange>.addAndMerge(incoming: IdRange) {
     add(firstAffected, IdRange(mergedStart, mergedEnd - mergedStart))
 }
 
-fun createIdSet(): IdSet = IdSet()
+public fun createIdSet(): IdSet = IdSet()
 
-fun equalIdSets(left: IdSet, right: IdSet): Boolean = left.ranges() == right.ranges()
+public fun equalIdSets(left: IdSet, right: IdSet): Boolean = left.ranges() == right.ranges()
 
-fun mergeIdSets(sets: List<IdSet>): IdSet {
+public fun mergeIdSets(sets: List<IdSet>): IdSet {
     val merged = createIdSet()
     sets.forEach { set ->
         set.ranges().forEach { (client, range) -> merged.add(client, range.clock, range.len) }
@@ -243,19 +243,19 @@ fun mergeIdSets(sets: List<IdSet>): IdSet {
     return merged
 }
 
-fun insertIntoIdSet(dest: IdSet, src: IdSet) {
+public fun insertIntoIdSet(dest: IdSet, src: IdSet) {
     src.ranges().forEach { (client, range) -> dest.add(client, range.clock, range.len) }
 }
 
-fun _deleteRangeFromIdSet(set: IdSet, client: Long, clock: Long, len: Long) {
+public fun _deleteRangeFromIdSet(set: IdSet, client: Long, clock: Long, len: Long) {
     set.delete(client, clock, len)
 }
 
-fun _deleteRangeFromIdSet(set: IdMap, client: Long, clock: Long, len: Long) {
+public fun _deleteRangeFromIdSet(set: IdMap, client: Long, clock: Long, len: Long) {
     set.delete(client, clock, len)
 }
 
-fun diffIdSet(set: IdSet, exclude: IdSet): IdSet {
+public fun diffIdSet(set: IdSet, exclude: IdSet): IdSet {
     val result = createIdSet()
     set.ranges().forEach { (client, range) ->
         exclude.slice(client, range.clock, range.len).forEach { excluded ->
@@ -267,13 +267,13 @@ fun diffIdSet(set: IdSet, exclude: IdSet): IdSet {
     return result
 }
 
-fun diffIdSet(set: IdSet, exclude: IdMap): IdSet = diffIdSet(set, createIdSetFromIdMap(exclude))
+public fun diffIdSet(set: IdSet, exclude: IdMap): IdSet = diffIdSet(set, createIdSetFromIdMap(exclude))
 
-fun _diffSet(set: IdSet, exclude: IdSet): IdSet = diffIdSet(set, exclude)
+public fun _diffSet(set: IdSet, exclude: IdSet): IdSet = diffIdSet(set, exclude)
 
-fun _diffSet(set: IdSet, exclude: IdMap): IdSet = diffIdSet(set, exclude)
+public fun _diffSet(set: IdSet, exclude: IdMap): IdSet = diffIdSet(set, exclude)
 
-fun intersectSets(left: IdSet, right: IdSet): IdSet {
+public fun intersectSets(left: IdSet, right: IdSet): IdSet {
     val result = createIdSet()
     left.ranges().forEach { (client, range) ->
         right.slice(client, range.clock, range.len)
@@ -283,13 +283,13 @@ fun intersectSets(left: IdSet, right: IdSet): IdSet {
     return result
 }
 
-fun intersectSets(left: IdSet, right: IdMap): IdSet = intersectSets(left, createIdSetFromIdMap(right))
+public fun intersectSets(left: IdSet, right: IdMap): IdSet = intersectSets(left, createIdSetFromIdMap(right))
 
-fun _intersectSets(left: IdSet, right: IdSet): IdSet = intersectSets(left, right)
+public fun _intersectSets(left: IdSet, right: IdSet): IdSet = intersectSets(left, right)
 
-fun _intersectSets(left: IdSet, right: IdMap): IdSet = intersectSets(left, right)
+public fun _intersectSets(left: IdSet, right: IdMap): IdSet = intersectSets(left, right)
 
-fun writeIdSet(encoder: BinaryEncoder, idSet: IdSet) {
+public fun writeIdSet(encoder: BinaryEncoder, idSet: IdSet) {
     requireYjsSafeIdSet(idSet)
     val clients = idSet.clients.filterValues { it.isNotEmpty() }.toSortedMap(compareByDescending { it })
     encoder.writeVarUInt(clients.size.toLong())
@@ -303,7 +303,7 @@ fun writeIdSet(encoder: BinaryEncoder, idSet: IdSet) {
     }
 }
 
-fun writeIdSet(encoder: IdSetEncoderV1, idSet: IdSet) {
+public fun writeIdSet(encoder: IdSetEncoderV1, idSet: IdSet) {
     requireYjsSafeIdSet(idSet)
     val clients = idSet.clients.filterValues { it.isNotEmpty() }.toSortedMap(compareByDescending { it })
     encoder.restEncoder.writeVarUInt(clients.size.toLong())
@@ -335,13 +335,13 @@ internal fun requireYjsSafeIdSet(idSet: IdSet) {
     }
 }
 
-fun encodeIdSet(idSet: IdSet): ByteArray {
+public fun encodeIdSet(idSet: IdSet): ByteArray {
     val encoder = IdSetEncoderV2()
     writeIdSet(encoder, idSet)
     return encoder.toUint8Array()
 }
 
-fun readIdSet(decoder: BinaryDecoder): IdSet {
+public fun readIdSet(decoder: BinaryDecoder): IdSet {
     val idSet = createIdSet()
     repeat(decoder.readVarUInt().toDecodedCount()) {
         val client = decoder.readVarUInt()
@@ -352,7 +352,7 @@ fun readIdSet(decoder: BinaryDecoder): IdSet {
     return idSet
 }
 
-fun readIdSet(decoder: IdSetDecoderV1): IdSet {
+public fun readIdSet(decoder: IdSetDecoderV1): IdSet {
     val idSet = createIdSet()
     repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
         decoder.resetDsCurVal()
@@ -364,10 +364,10 @@ fun readIdSet(decoder: IdSetDecoderV1): IdSet {
     return idSet
 }
 
-fun readAndApplyDeleteSet(decoder: BinaryDecoder, doc: YDoc, origin: Any? = null): ByteArray? =
+public fun readAndApplyDeleteSet(decoder: BinaryDecoder, doc: YDoc, origin: Any? = null): ByteArray? =
     applyKnownDeleteSetAndEncodeUnapplied(readIdSet(decoder), doc, origin)
 
-fun readAndApplyDeleteSet(decoder: IdSetDecoderV1, doc: YDoc, origin: Any? = null): ByteArray? =
+public fun readAndApplyDeleteSet(decoder: IdSetDecoderV1, doc: YDoc, origin: Any? = null): ByteArray? =
     applyKnownDeleteSetAndEncodeUnapplied(readIdSet(decoder), doc, origin)
 
 private fun applyKnownDeleteSetAndEncodeUnapplied(deleteIds: IdSet, doc: YDoc, origin: Any?): ByteArray? {
@@ -397,22 +397,22 @@ private fun applyKnownDeleteSetAndEncodeUnapplied(deleteIds: IdSet, doc: YDoc, o
     }
 }
 
-fun decodeIdSet(bytes: ByteArray): IdSet {
+public fun decodeIdSet(bytes: ByteArray): IdSet {
     val decoder = IdSetDecoderV2(bytes)
     val idSet = readIdSet(decoder)
     check(!decoder.hasRemaining()) { "IdSet has trailing bytes" }
     return idSet
 }
 
-data class ContentAttribute(
+public data class ContentAttribute(
     val name: String,
     val value: YValue,
 ) {
     val `val`: Any? get() = value.toAny()
 
-    fun toAny(): Any? = value.toAny()
+    public fun toAny(): Any? = value.toAny()
 
-    fun hash(): String {
+    public fun hash(): String {
         val encoder = BinaryEncoder()
         encoder.writeString(name)
         writeYValue(encoder, value)
@@ -420,9 +420,9 @@ data class ContentAttribute(
     }
 }
 
-fun createContentAttribute(name: String, value: Any?): ContentAttribute = ContentAttribute(name, YValue.from(value))
+public fun createContentAttribute(name: String, value: Any?): ContentAttribute = ContentAttribute(name, YValue.from(value))
 
-data class AttrRange(
+public data class AttrRange(
     val clock: Long,
     val len: Long,
     val attrs: List<ContentAttribute>,
@@ -434,34 +434,34 @@ data class AttrRange(
 
     val end: Long = checkedClockAdd(clock, len, "attribute range end")
 
-    fun copyWith(clock: Long, len: Long): AttrRange = AttrRange(clock, len, attrs)
+    public fun copyWith(clock: Long, len: Long): AttrRange = AttrRange(clock, len, attrs)
 }
 
-data class MaybeAttrRange(
+public data class MaybeAttrRange(
     val clock: Long,
     val len: Long,
     val attrs: List<ContentAttribute>?,
 )
 
-fun createMaybeAttrRange(
+public fun createMaybeAttrRange(
     clock: Long,
     len: Long,
     attrs: List<ContentAttribute>?,
 ): MaybeAttrRange = MaybeAttrRange(clock, len, attrs)
 
-class AttrRanges(ids: List<AttrRange> = emptyList()) {
+public class AttrRanges(ids: List<AttrRange> = emptyList()) {
     private val ranges = ids.toMutableList()
 
-    fun copy(): AttrRanges = AttrRanges(getIds())
+    public fun copy(): AttrRanges = AttrRanges(getIds())
 
-    fun add(clock: Long, len: Long, attrs: List<ContentAttribute>) {
+    public fun add(clock: Long, len: Long, attrs: List<ContentAttribute>) {
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return
         ranges.add(AttrRange(clock, len, attrs))
     }
 
-    fun getIds(): List<AttrRange> {
+    public fun getIds(): List<AttrRange> {
         val idMap = createIdMap()
         ranges.forEach { range -> idMap.add(0, range.clock, range.len, range.attrs) }
         ranges.clear()
@@ -470,7 +470,7 @@ class AttrRanges(ids: List<AttrRange> = emptyList()) {
     }
 }
 
-class IdMap(
+public class IdMap(
     clients: Map<Long, List<AttrRange>> = emptyMap(),
     attrsH: Map<String, ContentAttribute> = emptyMap(),
     attrs: Set<ContentAttribute> = emptySet(),
@@ -487,22 +487,22 @@ class IdMap(
         }
     }
 
-    val clients: Map<Long, List<AttrRange>>
+    public val clients: Map<Long, List<AttrRange>>
         get() = clientRanges.mapValues { (_, ranges) -> ranges.toList() }
 
-    val attrsH: Map<String, ContentAttribute>
+    public val attrsH: Map<String, ContentAttribute>
         get() = attributeHashes.toMap()
 
-    val attrs: Set<ContentAttribute>
+    public val attrs: Set<ContentAttribute>
         get() = attributes.toSet()
 
-    fun isEmpty(): Boolean = clientRanges.values.all { it.isEmpty() }
+    public fun isEmpty(): Boolean = clientRanges.values.all { it.isEmpty() }
 
-    fun forEach(action: (range: AttrRange, client: Long) -> Unit) {
+    public fun forEach(action: (range: AttrRange, client: Long) -> Unit) {
         ranges().forEach { (client, range) -> action(range, client) }
     }
 
-    fun add(client: Long, clock: Long, len: Long, attrs: List<ContentAttribute>) {
+    public fun add(client: Long, clock: Long, len: Long, attrs: List<ContentAttribute>) {
         require(client >= 0) { "client must be non-negative" }
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
@@ -517,7 +517,7 @@ class IdMap(
         }
     }
 
-    fun delete(client: Long, clock: Long, len: Long) {
+    public fun delete(client: Long, clock: Long, len: Long) {
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         if (len == 0L) return
@@ -541,11 +541,11 @@ class IdMap(
         }
     }
 
-    fun has(client: Long, clock: Long): Boolean = clientRanges[client]?.findContainingIndex(clock) != null
+    public fun has(client: Long, clock: Long): Boolean = clientRanges[client]?.findContainingIndex(clock) != null
 
-    fun hasId(id: Id): Boolean = has(id.client, id.clock)
+    public fun hasId(id: Id): Boolean = has(id.client, id.clock)
 
-    fun slice(client: Long, clock: Long, len: Long): List<MaybeAttrRange> {
+    public fun slice(client: Long, clock: Long, len: Long): List<MaybeAttrRange> {
         require(clock >= 0) { "clock must be non-negative" }
         require(len >= 0) { "len must be non-negative" }
         val end = checkedClockAdd(clock, len, "id-map slice end")
@@ -574,11 +574,11 @@ class IdMap(
         return result
     }
 
-    fun sliceId(id: Id, len: Long): List<MaybeAttrRange> = slice(id.client, id.clock, len)
+    public fun sliceId(id: Id, len: Long): List<MaybeAttrRange> = slice(id.client, id.clock, len)
 
-    fun ranges(client: Long): List<AttrRange> = clientRanges[client]?.toList().orEmpty()
+    public fun ranges(client: Long): List<AttrRange> = clientRanges[client]?.toList().orEmpty()
 
-    fun ranges(): List<Pair<Long, AttrRange>> = buildList {
+    public fun ranges(): List<Pair<Long, AttrRange>> = buildList {
         clientRanges.keys.sorted().forEach { client ->
             clientRanges.getValue(client).forEach { range -> add(client to range) }
         }
@@ -756,26 +756,26 @@ private fun MutableList<MaybeAttrRange>.append(range: MaybeAttrRange) {
     }
 }
 
-fun createIdMap(): IdMap = IdMap()
+public fun createIdMap(): IdMap = IdMap()
 
-fun createIdMapFromIdSet(idSet: IdSet, attrs: List<ContentAttribute>): IdMap {
+public fun createIdMapFromIdSet(idSet: IdSet, attrs: List<ContentAttribute>): IdMap {
     val idMap = createIdMap()
     idSet.ranges().forEach { (client, range) -> idMap.add(client, range.clock, range.len, attrs) }
     return idMap
 }
 
-fun createIdSetFromIdMap(idMap: IdMap): IdSet {
+public fun createIdSetFromIdMap(idMap: IdMap): IdSet {
     val idSet = createIdSet()
     idMap.ranges().forEach { (client, range) -> idSet.add(client, range.clock, range.len) }
     return idSet
 }
 
-fun equalIdMaps(left: IdMap, right: IdMap): Boolean = left.ranges() == right.ranges()
+public fun equalIdMaps(left: IdMap, right: IdMap): Boolean = left.ranges() == right.ranges()
 
-fun idmapAttrsEqual(left: List<ContentAttribute>, right: List<ContentAttribute>): Boolean =
+public fun idmapAttrsEqual(left: List<ContentAttribute>, right: List<ContentAttribute>): Boolean =
     left.size == right.size && left.all { attr -> right.contains(attr) }
 
-fun mergeIdMaps(maps: List<IdMap>): IdMap {
+public fun mergeIdMaps(maps: List<IdMap>): IdMap {
     val merged = createIdMap()
     maps.forEach { idMap ->
         idMap.ranges().forEach { (client, range) -> merged.add(client, range.clock, range.len, range.attrs) }
@@ -783,15 +783,15 @@ fun mergeIdMaps(maps: List<IdMap>): IdMap {
     return merged
 }
 
-fun insertIntoIdMap(dest: IdMap, src: IdMap) {
+public fun insertIntoIdMap(dest: IdMap, src: IdMap) {
     src.ranges().forEach { (client, range) -> dest.add(client, range.clock, range.len, range.attrs) }
 }
 
-fun insertIntoIdMap(dest: IdMap, src: IdSet) {
+public fun insertIntoIdMap(dest: IdMap, src: IdSet) {
     src.ranges().forEach { (client, range) -> dest.add(client, range.clock, range.len, range.attrs) }
 }
 
-fun diffIdMap(idMap: IdMap, exclude: IdSet): IdMap {
+public fun diffIdMap(idMap: IdMap, exclude: IdSet): IdMap {
     val result = createIdMap()
     idMap.ranges().forEach { (client, range) ->
         exclude.slice(client, range.clock, range.len).forEach { slice ->
@@ -803,13 +803,13 @@ fun diffIdMap(idMap: IdMap, exclude: IdSet): IdMap {
     return result
 }
 
-fun diffIdMap(idMap: IdMap, exclude: IdMap): IdMap = diffIdMap(idMap, createIdSetFromIdMap(exclude))
+public fun diffIdMap(idMap: IdMap, exclude: IdMap): IdMap = diffIdMap(idMap, createIdSetFromIdMap(exclude))
 
-fun _diffSet(set: IdMap, exclude: IdSet): IdMap = diffIdMap(set, exclude)
+public fun _diffSet(set: IdMap, exclude: IdSet): IdMap = diffIdMap(set, exclude)
 
-fun _diffSet(set: IdMap, exclude: IdMap): IdMap = diffIdMap(set, exclude)
+public fun _diffSet(set: IdMap, exclude: IdMap): IdMap = diffIdMap(set, exclude)
 
-fun intersectMaps(left: IdMap, right: IdMap): IdMap {
+public fun intersectMaps(left: IdMap, right: IdMap): IdMap {
     val result = createIdMap()
     left.ranges().forEach { (client, range) ->
         right.slice(client, range.clock, range.len).forEach { slice ->
@@ -822,9 +822,9 @@ fun intersectMaps(left: IdMap, right: IdMap): IdMap {
     return result
 }
 
-fun _intersectSets(left: IdMap, right: IdMap): IdMap = intersectMaps(left, right)
+public fun _intersectSets(left: IdMap, right: IdMap): IdMap = intersectMaps(left, right)
 
-fun intersectMaps(left: IdMap, right: IdSet): IdMap {
+public fun intersectMaps(left: IdMap, right: IdSet): IdMap {
     val result = createIdMap()
     left.ranges().forEach { (client, range) ->
         right.slice(client, range.clock, range.len)
@@ -834,9 +834,9 @@ fun intersectMaps(left: IdMap, right: IdSet): IdMap {
     return result
 }
 
-fun _intersectSets(left: IdMap, right: IdSet): IdMap = intersectMaps(left, right)
+public fun _intersectSets(left: IdMap, right: IdSet): IdMap = intersectMaps(left, right)
 
-fun filterIdMap(idMap: IdMap, predicate: (List<ContentAttribute>) -> Boolean): IdMap {
+public fun filterIdMap(idMap: IdMap, predicate: (List<ContentAttribute>) -> Boolean): IdMap {
     val filtered = createIdMap()
     idMap.ranges().forEach { (client, range) ->
         if (predicate(range.attrs)) {
@@ -846,7 +846,7 @@ fun filterIdMap(idMap: IdMap, predicate: (List<ContentAttribute>) -> Boolean): I
     return filtered
 }
 
-fun writeIdMap(encoder: BinaryEncoder, idMap: IdMap) {
+public fun writeIdMap(encoder: BinaryEncoder, idMap: IdMap) {
     val clients = idMap.clients.filterValues { it.isNotEmpty() }.toSortedMap()
     encoder.writeVarUInt(clients.size.toLong())
     clients.forEach { (client, ranges) ->
@@ -864,7 +864,7 @@ fun writeIdMap(encoder: BinaryEncoder, idMap: IdMap) {
     }
 }
 
-fun writeIdMap(encoder: IdSetEncoderV1, idMap: IdMap) {
+public fun writeIdMap(encoder: IdSetEncoderV1, idMap: IdMap) {
     val clients = idMap.clients.filterValues { it.isNotEmpty() }.toSortedMap()
     encoder.restEncoder.writeVarUInt(clients.size.toLong())
     var lastWrittenClientId = 0L
@@ -905,13 +905,13 @@ fun writeIdMap(encoder: IdSetEncoderV1, idMap: IdMap) {
     }
 }
 
-fun encodeIdMap(idMap: IdMap): ByteArray {
+public fun encodeIdMap(idMap: IdMap): ByteArray {
     val encoder = IdSetEncoderV2()
     writeIdMap(encoder, idMap)
     return encoder.toUint8Array()
 }
 
-fun readIdMap(decoder: BinaryDecoder): IdMap {
+public fun readIdMap(decoder: BinaryDecoder): IdMap {
     val idMap = createIdMap()
     repeat(decoder.readVarUInt().toDecodedCount()) {
         val client = decoder.readVarUInt()
@@ -927,7 +927,7 @@ fun readIdMap(decoder: BinaryDecoder): IdMap {
     return idMap
 }
 
-fun readIdMap(decoder: IdSetDecoderV1): IdMap {
+public fun readIdMap(decoder: IdSetDecoderV1): IdMap {
     val idMap = createIdMap()
     val visitedAttributes = mutableListOf<ContentAttribute>()
     val visitedAttrNames = mutableListOf<String>()
@@ -958,7 +958,7 @@ fun readIdMap(decoder: IdSetDecoderV1): IdMap {
     return idMap
 }
 
-fun decodeIdMap(bytes: ByteArray): IdMap {
+public fun decodeIdMap(bytes: ByteArray): IdMap {
     val decoder = IdSetDecoderV2(bytes)
     val idMap = readIdMap(decoder)
     check(!decoder.hasRemaining()) { "IdMap has trailing bytes" }

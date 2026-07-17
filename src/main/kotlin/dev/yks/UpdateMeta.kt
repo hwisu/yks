@@ -1,15 +1,15 @@
 package dev.yks
 
 /** Clock bounds carried by the struct section of an update. Delete sets are not included. */
-data class UpdateMeta(
+public data class UpdateMeta(
     val from: StateVector,
     val to: StateVector,
 )
 
-fun parseUpdateMeta(update: ByteArray): UpdateMeta =
+public fun parseUpdateMeta(update: ByteArray): UpdateMeta =
     UpdateCodec.parseMeta(update)
 
-fun parseUpdateMetaV2(update: ByteArray): UpdateMeta =
+public fun parseUpdateMetaV2(update: ByteArray): UpdateMeta =
     UpdateCodec.parseMetaV2(update)
 
 internal fun DocumentUpdate.toUpdateMeta(): UpdateMeta {

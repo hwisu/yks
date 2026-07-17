@@ -77,18 +77,18 @@ internal fun boundedIntRangeEnd(start: Int, length: Long, size: Int, label: Stri
     return start + boundedLength
 }
 
-class BinaryEncoder {
+public class BinaryEncoder {
     private val out = ByteArrayOutputStream()
 
-    fun writeByte(value: Int) {
+    public fun writeByte(value: Int) {
         out.write(value and 0xff)
     }
 
-    fun writeBoolean(value: Boolean) {
+    public fun writeBoolean(value: Boolean) {
         writeByte(if (value) 1 else 0)
     }
 
-    fun writeVarUInt(value: Long) {
+    public fun writeVarUInt(value: Long) {
         require(value >= 0) { "varuint cannot encode negative values: $value" }
         var current = value
         while (current >= 0x80) {
@@ -98,7 +98,7 @@ class BinaryEncoder {
         writeByte(current.toInt())
     }
 
-    fun writeVarInt(value: Long) {
+    public fun writeVarInt(value: Long) {
         var current = (value shl 1) xor (value shr 63)
         // Zig-zag encoding spans the full unsigned 64-bit domain. Values whose encoded
         // high bit is set are negative only as a Kotlin Long representation, not as a
@@ -110,7 +110,7 @@ class BinaryEncoder {
         writeByte(current.toInt())
     }
 
-    fun writeLib0VarInt(value: Long, forceNegative: Boolean = false) {
+    public fun writeLib0VarInt(value: Long, forceNegative: Boolean = false) {
         val negative = value < 0 || forceNegative
         var current = if (value < 0) -value else value
         writeByte(
@@ -125,7 +125,7 @@ class BinaryEncoder {
         }
     }
 
-    fun writeString(value: String) {
+    public fun writeString(value: String) {
         val encoder = Charsets.UTF_8.newEncoder()
             .onMalformedInput(CodingErrorAction.REPLACE)
             .onUnmappableCharacter(CodingErrorAction.REPLACE)
@@ -136,59 +136,59 @@ class BinaryEncoder {
         out.write(bytes)
     }
 
-    fun writeBytes(value: ByteArray) {
+    public fun writeBytes(value: ByteArray) {
         writeVarUInt(value.size.toLong())
         out.write(value)
     }
 
-    fun writeRawBytes(value: ByteArray) {
+    public fun writeRawBytes(value: ByteArray) {
         out.write(value)
     }
 
-    fun writeFloat32(value: Float) {
+    public fun writeFloat32(value: Float) {
         val bits = java.lang.Float.floatToRawIntBits(value)
         repeat(Int.SIZE_BYTES) { index ->
             writeByte((bits ushr ((Int.SIZE_BYTES - index - 1) * 8)) and 0xff)
         }
     }
 
-    fun writeFloat64(value: Double) {
+    public fun writeFloat64(value: Double) {
         val bits = java.lang.Double.doubleToRawLongBits(value)
         repeat(Long.SIZE_BYTES) { index ->
             writeByte(((bits ushr ((Long.SIZE_BYTES - index - 1) * 8)) and 0xff).toInt())
         }
     }
 
-    fun writeInt64(value: Long) {
+    public fun writeInt64(value: Long) {
         repeat(Long.SIZE_BYTES) { index ->
             writeByte(((value ushr ((Long.SIZE_BYTES - index - 1) * 8)) and 0xff).toInt())
         }
     }
 
-    fun toByteArray(): ByteArray = out.toByteArray()
+    public fun toByteArray(): ByteArray = out.toByteArray()
 }
 
-class BinaryDecoder(
+public class BinaryDecoder(
     private val bytes: ByteArray,
 ) {
     internal val decodeBudget: DecodeBudget = DecodeBudget()
 
     private var offset = 0
 
-    fun hasRemaining(): Boolean = offset < bytes.size
+    public fun hasRemaining(): Boolean = offset < bytes.size
 
-    fun readByte(): Int {
+    public fun readByte(): Int {
         check(offset < bytes.size) { "unexpected end of input" }
         return bytes[offset++].toInt() and 0xff
     }
 
-    fun readBoolean(): Boolean = when (val value = readByte()) {
+    public fun readBoolean(): Boolean = when (val value = readByte()) {
         0 -> false
         1 -> true
         else -> error("invalid boolean byte: $value")
     }
 
-    fun readVarUInt(): Long {
+    public fun readVarUInt(): Long {
         var result = 0L
         var shift = 0
         while (true) {
@@ -202,12 +202,12 @@ class BinaryDecoder(
         }
     }
 
-    fun readVarInt(): Long {
+    public fun readVarInt(): Long {
         val value = readVarUInt()
         return (value ushr 1) xor -(value and 1)
     }
 
-    fun readLib0VarInt(): Long = readLib0VarIntWithSign().first
+    public fun readLib0VarInt(): Long = readLib0VarIntWithSign().first
 
     internal fun readLib0VarIntWithSign(): Pair<Long, Boolean> {
         var byte = readByte()
@@ -223,7 +223,7 @@ class BinaryDecoder(
         return sign * result to (sign < 0)
     }
 
-    fun readString(): String {
+    public fun readString(): String {
         val length = readVarUInt().toDecodedCount("string byte length", minOf(MAX_DECODED_BINARY_SIZE, bytes.size - offset))
         check(length <= bytes.size - offset) { "invalid string length: $length" }
         decodeBudget.consumePayloadBytes(length)
@@ -250,7 +250,7 @@ class BinaryDecoder(
         return value
     }
 
-    fun readBytes(): ByteArray {
+    public fun readBytes(): ByteArray {
         val length = readVarUInt().toDecodedCount("byte array length", minOf(MAX_DECODED_BINARY_SIZE, bytes.size - offset))
         check(length <= bytes.size - offset) { "invalid byte array length: $length" }
         decodeBudget.consumePayloadBytes(length)
@@ -259,25 +259,25 @@ class BinaryDecoder(
         return value
     }
 
-    fun readFloat32(): Float {
+    public fun readFloat32(): Float {
         var bits = 0
         repeat(Int.SIZE_BYTES) { bits = (bits shl 8) or readByte() }
         return java.lang.Float.intBitsToFloat(bits)
     }
 
-    fun readFloat64(): Double {
+    public fun readFloat64(): Double {
         var bits = 0L
         repeat(Long.SIZE_BYTES) { bits = (bits shl 8) or readByte().toLong() }
         return java.lang.Double.longBitsToDouble(bits)
     }
 
-    fun readInt64(): Long {
+    public fun readInt64(): Long {
         var value = 0L
         repeat(Long.SIZE_BYTES) { value = (value shl 8) or readByte().toLong() }
         return value
     }
 
-    fun readRemainingBytes(): ByteArray {
+    public fun readRemainingBytes(): ByteArray {
         decodeBudget.consumePayloadBytes(bytes.size - offset)
         val value = bytes.copyOfRange(offset, bytes.size)
         offset = bytes.size

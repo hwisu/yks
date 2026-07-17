@@ -1,32 +1,32 @@
 package dev.yks
 
-data class SnapshotRootType(
+public data class SnapshotRootType(
     val kind: RootKind,
     val xmlElementNodeName: String? = null,
 )
 
-data class Snapshot(
+public data class Snapshot(
     val ds: DeleteSet,
     val sv: StateVector,
     /** Local adaptation metadata; standard snapshot encoding intentionally contains only ds/sv. */
     val roots: Map<String, SnapshotRootType> = emptyMap(),
 ) {
-    constructor(deleteSet: IdSet, stateVector: StateVector) : this(deleteSet.toDeleteSet(), stateVector.toMap())
+    public constructor(deleteSet: IdSet, stateVector: StateVector) : this(deleteSet.toDeleteSet(), stateVector.toMap())
 
     val deleteSet: DeleteSet get() = ds
 }
 
-fun createSnapshot(deleteSet: DeleteSet, stateVector: StateVector): Snapshot =
+public fun createSnapshot(deleteSet: DeleteSet, stateVector: StateVector): Snapshot =
     Snapshot(deleteSet, stateVector)
 
-fun createSnapshot(deleteSet: IdSet, stateVector: StateVector): Snapshot =
+public fun createSnapshot(deleteSet: IdSet, stateVector: StateVector): Snapshot =
     Snapshot(deleteSet.toDeleteSet(), stateVector.toMap())
 
-val emptySnapshot: Snapshot = createSnapshot(createIdSet(), emptyMap())
+public val emptySnapshot: Snapshot = createSnapshot(createIdSet(), emptyMap())
 
 private object SplitSnapshotAffectedStructsMetaKey
 
-fun snapshot(doc: YDoc): Snapshot = doc.withDocumentAccess {
+public fun snapshot(doc: YDoc): Snapshot = doc.withDocumentAccess {
     Snapshot(
         ds = doc.deleteSet(),
         sv = doc.stateVector().toMap(),
@@ -35,7 +35,7 @@ fun snapshot(doc: YDoc): Snapshot = doc.withDocumentAccess {
 }
 
 @Suppress("UNCHECKED_CAST")
-fun splitSnapshotAffectedStructs(transaction: YTransaction, snapshot: Snapshot) {
+public fun splitSnapshotAffectedStructs(transaction: YTransaction, snapshot: Snapshot) {
     val seen = transaction.meta.getOrPut(SplitSnapshotAffectedStructsMetaKey, ::identitySnapshotSet) as MutableSet<Snapshot>
     if (!seen.add(snapshot)) return
     val store = transaction.doc.store
@@ -61,20 +61,20 @@ fun splitSnapshotAffectedStructs(transaction: YTransaction, snapshot: Snapshot) 
 private fun identitySnapshotSet(): MutableSet<Snapshot> =
     java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Snapshot, Boolean>())
 
-fun createDocFromSnapshot(originDoc: YDoc, snapshot: Snapshot, newDoc: YDoc = YDoc()): YDoc {
+public fun createDocFromSnapshot(originDoc: YDoc, snapshot: Snapshot, newDoc: YDoc = YDoc()): YDoc {
     check(!originDoc.gc) { "Garbage-collection must be disabled in `originDoc`!" }
     newDoc.preMaterializeRoots(snapshot.roots)
     newDoc.applyUpdate(originDoc.encodeSnapshotAsUpdate(snapshot), origin = "snapshot")
     return newDoc
 }
 
-fun equalSnapshots(left: Snapshot, right: Snapshot): Boolean =
+public fun equalSnapshots(left: Snapshot, right: Snapshot): Boolean =
     left.sv == right.sv && equalDeleteSets(left.ds, right.ds)
 
-fun encodeSnapshot(snapshot: Snapshot): ByteArray =
+public fun encodeSnapshot(snapshot: Snapshot): ByteArray =
     encodeSnapshotV2(snapshot, IdSetEncoderV1())
 
-fun encodeSnapshotV2(snapshot: Snapshot, encoder: IdSetEncoderV1 = IdSetEncoderV2()): ByteArray {
+public fun encodeSnapshotV2(snapshot: Snapshot, encoder: IdSetEncoderV1 = IdSetEncoderV2()): ByteArray {
     val deleteIds = snapshot.ds.toIdSet()
     requireYjsSafeIdSet(deleteIds)
     requireYjsSafeStateVector(snapshot.sv)
@@ -83,16 +83,16 @@ fun encodeSnapshotV2(snapshot: Snapshot, encoder: IdSetEncoderV1 = IdSetEncoderV
     return encoder.toByteArray()
 }
 
-fun decodeSnapshot(bytes: ByteArray): Snapshot =
+public fun decodeSnapshot(bytes: ByteArray): Snapshot =
     decodeSnapshotWithDecoder(IdSetDecoderV1(bytes))
 
-fun decodeSnapshot(decoder: IdSetDecoderV1): Snapshot =
+public fun decodeSnapshot(decoder: IdSetDecoderV1): Snapshot =
     decodeSnapshotWithDecoder(decoder)
 
-fun decodeSnapshotV2(bytes: ByteArray): Snapshot =
+public fun decodeSnapshotV2(bytes: ByteArray): Snapshot =
     decodeSnapshotWithDecoder(IdSetDecoderV2(bytes))
 
-fun decodeSnapshotV2(decoder: IdSetDecoderV1): Snapshot =
+public fun decodeSnapshotV2(decoder: IdSetDecoderV1): Snapshot =
     decodeSnapshotWithDecoder(decoder)
 
 private fun decodeSnapshotWithDecoder(decoder: IdSetDecoderV1): Snapshot {
@@ -102,10 +102,10 @@ private fun decodeSnapshotWithDecoder(decoder: IdSetDecoderV1): Snapshot {
     return createSnapshot(deleteSet, stateVector)
 }
 
-fun snapshotContainsUpdate(snapshot: Snapshot, update: ByteArray): Boolean =
+public fun snapshotContainsUpdate(snapshot: Snapshot, update: ByteArray): Boolean =
     snapshotContainsDecodedUpdate(snapshot, UpdateCodec.decode(update))
 
-fun snapshotContainsUpdateV2(snapshot: Snapshot, update: ByteArray): Boolean =
+public fun snapshotContainsUpdateV2(snapshot: Snapshot, update: ByteArray): Boolean =
     snapshotContainsDecodedUpdate(snapshot, UpdateCodec.decodeV2(update))
 
 private fun snapshotContainsDecodedUpdate(snapshot: Snapshot, decoded: DocumentUpdate): Boolean {

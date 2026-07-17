@@ -1,14 +1,14 @@
 package dev.yks
 
-class EventHandler<ARG0, ARG1> {
-    val l: MutableList<(ARG0, ARG1) -> Unit> = mutableListOf()
+public class EventHandler<ARG0, ARG1> {
+    public val l: MutableList<(ARG0, ARG1) -> Unit> = mutableListOf()
 
     internal val listeners: MutableList<(ARG0, ARG1) -> Unit> get() = l
 }
 
-fun <ARG0, ARG1> createEventHandler(): EventHandler<ARG0, ARG1> = EventHandler()
+public fun <ARG0, ARG1> createEventHandler(): EventHandler<ARG0, ARG1> = EventHandler()
 
-fun <ARG0, ARG1> addEventHandlerListener(
+public fun <ARG0, ARG1> addEventHandlerListener(
     eventHandler: EventHandler<ARG0, ARG1>,
     listener: (ARG0, ARG1) -> Unit,
 ): Int {
@@ -16,7 +16,7 @@ fun <ARG0, ARG1> addEventHandlerListener(
     return eventHandler.listeners.size
 }
 
-fun <ARG0, ARG1> removeEventHandlerListener(
+public fun <ARG0, ARG1> removeEventHandlerListener(
     eventHandler: EventHandler<ARG0, ARG1>,
     listener: (ARG0, ARG1) -> Unit,
 ): Boolean {
@@ -27,11 +27,11 @@ fun <ARG0, ARG1> removeEventHandlerListener(
     return removed
 }
 
-fun <ARG0, ARG1> removeAllEventHandlerListeners(eventHandler: EventHandler<ARG0, ARG1>) {
+public fun <ARG0, ARG1> removeAllEventHandlerListeners(eventHandler: EventHandler<ARG0, ARG1>) {
     eventHandler.listeners.clear()
 }
 
-fun <ARG0, ARG1> callEventHandlerListeners(
+public fun <ARG0, ARG1> callEventHandlerListeners(
     eventHandler: EventHandler<ARG0, ARG1>,
     arg0: ARG0,
     arg1: ARG1,

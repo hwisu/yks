@@ -86,6 +86,13 @@ of concurrent array, text, and map operations across three Yjs clients. The
 Kotlin `YjsDifferentialFuzzTest` applies every shuffled update sequence and
 compares the final state with the upstream oracle.
 
+`generate-advanced-differential-fuzz.mjs` adds 100 deterministic upstream
+oracle seeds for live XML, subdocument replacement and lifecycle state,
+relative positions across edits, update V2 merge/diff/format conversion, and
+UndoManager undo/redo sequences. A separate 1,000-seed malformed V1/V2
+property test requires every failure to remain within the stable `YksException`
+public boundary and applies a per-test timeout.
+
 ## Fixture policy
 
 `generate-fixtures.mjs` is the source of generated fixtures. Hand-authored
@@ -110,6 +117,6 @@ Root XML kind and a root element node name are absent from Yjs wire. An applied
 ambiguous root remains unopened until an explicit typed getter supplies that
 schema; local clone/snapshot helpers retain root metadata known at capture time.
 
-The fixture scenarios and seeded differential test are not a production-scale
-benchmark or adversarial fuzzer; applications should still add fixtures for
-their own mutation and update-delivery patterns.
+The fixture scenarios and deterministic property tests are regression gates,
+not a coverage-guided production fuzzer. Applications should still add
+fixtures for their own mutation and update-delivery patterns.

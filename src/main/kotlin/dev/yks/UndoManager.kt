@@ -1,6 +1,6 @@
 package dev.yks
 
-data class UndoManagerOptions(
+public data class UndoManagerOptions(
     val captureTimeoutMillis: Long = 500,
     val captureTimeout: Long? = null,
     val trackedOrigins: Set<Any?> = setOf(null),
@@ -23,29 +23,29 @@ data class UndoManagerOptions(
         captureTimeout ?: captureTimeoutMillis
 }
 
-class StackItem internal constructor(
+public class StackItem internal constructor(
     internal val insertedItems: List<StoreItem>,
     internal val deletedItems: List<RestoreItem>,
     internal val explicitInserts: IdSet? = null,
     internal val explicitDeletes: IdSet? = null,
 ) {
-    constructor(insertions: IdSet, deletions: IdSet) : this(
+    public constructor(insertions: IdSet, deletions: IdSet) : this(
         insertedItems = emptyList(),
         deletedItems = emptyList(),
         explicitInserts = insertions.copy(),
         explicitDeletes = deletions.copy(),
     )
 
-    val meta: MutableMap<Any?, Any?> = linkedMapOf()
-    val inserts: IdSet get() = explicitInserts?.copy() ?: insertedItems.toIdSet()
-    val deletes: IdSet get() = explicitDeletes?.copy() ?: deletedItems.map { it.item }.toIdSet()
-    val insertedCount: Int get() = explicitInserts?.rangeLengthAsInt() ?: insertedItems
+    public val meta: MutableMap<Any?, Any?> = linkedMapOf()
+    public val inserts: IdSet get() = explicitInserts?.copy() ?: insertedItems.toIdSet()
+    public val deletes: IdSet get() = explicitDeletes?.copy() ?: deletedItems.map { it.item }.toIdSet()
+    public val insertedCount: Int get() = explicitInserts?.rangeLengthAsInt() ?: insertedItems
         .sumOf { item -> item.length }
         .toNonNegativeInt("undo insertion count")
-    val deletedCount: Int get() = explicitDeletes?.rangeLengthAsInt() ?: deletedItems
+    public val deletedCount: Int get() = explicitDeletes?.rangeLengthAsInt() ?: deletedItems
         .sumOf { restore -> restore.item.length }
         .toNonNegativeInt("undo deletion count")
-    val isEmpty: Boolean
+    public val isEmpty: Boolean
         get() {
             val insertsEmpty = explicitInserts?.isEmpty() ?: insertedItems.isEmpty()
             val deletesEmpty = explicitDeletes?.isEmpty() ?: deletedItems.isEmpty()
@@ -53,12 +53,12 @@ class StackItem internal constructor(
         }
 }
 
-enum class UndoStackItemType {
+public enum class UndoStackItemType {
     Undo,
     Redo,
 }
 
-data class UndoManagerEvent(
+public data class UndoManagerEvent(
     val stackItem: StackItem? = null,
     val type: UndoStackItemType? = null,
     val origin: Any? = null,
@@ -67,74 +67,74 @@ data class UndoManagerEvent(
     val redoStackCleared: Boolean = false,
 )
 
-class UndoManager private constructor(
+public class UndoManager private constructor(
     private val doc: YDoc,
     initialScopeNames: Set<String>?,
     private val options: UndoManagerOptions,
 ) : AutoCloseable {
-    constructor(typeScope: AbstractYType, options: UndoManagerOptions = UndoManagerOptions()) :
+    public constructor(typeScope: AbstractYType, options: UndoManagerOptions = UndoManagerOptions()) :
         this(typeScope.doc, setOf(typeScope.name), options)
 
-    constructor(typeScope: List<AbstractYType>, options: UndoManagerOptions = UndoManagerOptions()) :
+    public constructor(typeScope: List<AbstractYType>, options: UndoManagerOptions = UndoManagerOptions()) :
         this(resolveDoc(typeScope, options.doc), typeScope.map { it.name }.toSet(), options)
 
-    constructor(doc: YDoc, options: UndoManagerOptions = UndoManagerOptions()) :
+    public constructor(doc: YDoc, options: UndoManagerOptions = UndoManagerOptions()) :
         this(doc, null, options)
 
     private val subscription = doc.observeTransactions(::capture)
     private val destroySubscription = doc.on("destroy") { _: YDocEvent -> close() }
     private var scopeNames: MutableSet<String>? = initialScopeNames?.toMutableSet()
     private val trackedOrigins = options.trackedOrigins.toMutableSet().also { it.add(this) }
-    val undoStack: MutableList<StackItem> = mutableListOf()
-    val redoStack: MutableList<StackItem> = mutableListOf()
+    public val undoStack: MutableList<StackItem> = mutableListOf()
+    public val redoStack: MutableList<StackItem> = mutableListOf()
     private val eventListeners = linkedMapOf<String, MutableList<(UndoManagerEvent) -> Unit>>()
     private var lastCaptureTime = 0L
     private var captureDisabled = false
     private var closed = false
-    var currStackItem: StackItem? = null
+    public var currStackItem: StackItem? = null
         private set
-    var undoing: Boolean = false
+    public var undoing: Boolean = false
         private set
-    var redoing: Boolean = false
+    public var redoing: Boolean = false
         private set
 
-    val canUndo: Boolean get() = undoStack.isNotEmpty()
-    val canRedo: Boolean get() = redoStack.isNotEmpty()
-    val undoStackSize: Int get() = undoStack.size
-    val redoStackSize: Int get() = redoStack.size
+    public val canUndo: Boolean get() = undoStack.isNotEmpty()
+    public val canRedo: Boolean get() = redoStack.isNotEmpty()
+    public val undoStackSize: Int get() = undoStack.size
+    public val redoStackSize: Int get() = redoStack.size
 
-    fun canUndo(): Boolean = canUndo
+    public fun canUndo(): Boolean = canUndo
 
-    fun canRedo(): Boolean = canRedo
+    public fun canRedo(): Boolean = canRedo
 
-    fun stopCapturing() {
+    public fun stopCapturing() {
         lastCaptureTime = 0
     }
 
-    fun addToScope(typeScope: AbstractYType) {
+    public fun addToScope(typeScope: AbstractYType) {
         require(typeScope.doc === doc) { "UndoManager scope type must belong to the same YDoc" }
         scopeNames?.add(typeScope.name)
     }
 
-    fun addToScope(typeScope: List<AbstractYType>) {
+    public fun addToScope(typeScope: List<AbstractYType>) {
         require(typeScope.isNotEmpty()) { "UndoManager type scope must not be empty" }
         typeScope.forEach(::addToScope)
     }
 
-    fun addToScope(docScope: YDoc) {
+    public fun addToScope(docScope: YDoc) {
         require(docScope === doc) { "UndoManager scope doc must be the managed YDoc" }
         scopeNames = null
     }
 
-    fun addTrackedOrigin(origin: Any?) {
+    public fun addTrackedOrigin(origin: Any?) {
         trackedOrigins.add(origin)
     }
 
-    fun removeTrackedOrigin(origin: Any?) {
+    public fun removeTrackedOrigin(origin: Any?) {
         trackedOrigins.remove(origin)
     }
 
-    fun clear(clearUndoStack: Boolean = true, clearRedoStack: Boolean = true) {
+    public fun clear(clearUndoStack: Boolean = true, clearRedoStack: Boolean = true) {
         val undoStackCleared = clearUndoStack && undoStack.isNotEmpty()
         val redoStackCleared = clearRedoStack && redoStack.isNotEmpty()
         if (clearUndoStack) undoStack.clear()
@@ -151,13 +151,13 @@ class UndoManager private constructor(
         }
     }
 
-    fun on(eventName: String, listener: (UndoManagerEvent) -> Unit): Subscription {
+    public fun on(eventName: String, listener: (UndoManagerEvent) -> Unit): Subscription {
         val listeners = eventListeners.getOrPut(eventName) { mutableListOf() }
         listeners.add(listener)
         return Subscription { off(eventName, listener) }
     }
 
-    fun once(eventName: String, listener: (UndoManagerEvent) -> Unit): Subscription {
+    public fun once(eventName: String, listener: (UndoManagerEvent) -> Unit): Subscription {
         lateinit var subscription: Subscription
         val onceListener: (UndoManagerEvent) -> Unit = { event ->
             subscription.close()
@@ -167,7 +167,7 @@ class UndoManager private constructor(
         return subscription
     }
 
-    fun off(eventName: String, listener: (UndoManagerEvent) -> Unit) {
+    public fun off(eventName: String, listener: (UndoManagerEvent) -> Unit) {
         val listeners = eventListeners[eventName] ?: return
         listeners.remove(listener)
         if (listeners.isEmpty()) {
@@ -175,7 +175,7 @@ class UndoManager private constructor(
         }
     }
 
-    fun undo(): StackItem? {
+    public fun undo(): StackItem? {
         undoing = true
         redoing = false
         try {
@@ -208,7 +208,7 @@ class UndoManager private constructor(
         }
     }
 
-    fun redo(): StackItem? {
+    public fun redo(): StackItem? {
         undoing = false
         redoing = true
         try {
@@ -250,7 +250,7 @@ class UndoManager private constructor(
         eventListeners.clear()
     }
 
-    fun destroy() {
+    public fun destroy() {
         close()
     }
 
@@ -471,15 +471,19 @@ class UndoManager private constructor(
         val insertedById = linkedMapOf<Id, StoreItem>()
         val insertedItems = stackItem.explicitInserts
             ?.let { idSet -> doc.itemsForIdSet(idSet, { !it.deleted }, deletedOverride = false) }
-            ?: stackItem.insertedItems
+            ?: stackItem.insertedItems.flatMap(::currentStoreSlices)
         insertedItems.forEach { item ->
             val followedId = doc.followRedone(item.id)
-            val current = if (followedId != item.id) {
-                doc.getItem(followedId)?.takeUnless { followed -> followed.deleted } ?: item
+            val currentItems = if (followedId != item.id) {
+                val redoneIds = createIdSet().also { ids -> ids.add(followedId, item.length) }
+                doc.itemsForIdSet(redoneIds, { followed -> !followed.deleted }, deletedOverride = false)
+                    .ifEmpty { listOf(item) }
             } else {
-                item
+                listOf(item)
             }
-            insertedById[current.id] = current.copy(deleted = false)
+            currentItems.forEach { current ->
+                insertedById[current.id] = current.copy(deleted = false)
+            }
         }
         val deletedById = linkedMapOf<Id, RestoreItem>()
         val deletedItems = stackItem.explicitDeletes
@@ -502,6 +506,16 @@ class UndoManager private constructor(
         ).also { normalized -> normalized.meta.putAll(stackItem.meta) }
     }
 
+    /**
+     * Transactions capture packed StoreItems, but later edits may split those clock ranges.
+     * Normalize against every current slice so undo never forgets the tail of a packed insert
+     * or delete after a partial edit.
+     */
+    private fun currentStoreSlices(item: StoreItem): List<StoreItem> {
+        val ids = createIdSet().also { it.add(item.id, item.length) }
+        return doc.itemsForIdSet(ids).ifEmpty { listOf(item) }
+    }
+
     private fun popNormalizedStackItem(stack: MutableList<StackItem>): StackItem? {
         while (stack.isNotEmpty()) {
             val normalized = normalizeStackItem(stack.removeLast())
@@ -516,7 +530,7 @@ class UndoManager private constructor(
         val changedParentTypes: Set<AbstractYType>,
     )
 
-    companion object {
+    public companion object {
         private fun resolveDoc(types: List<AbstractYType>, optionsDoc: YDoc?): YDoc {
             if (types.isEmpty()) {
                 return requireNotNull(optionsDoc) { "UndoManager type scope must not be empty without a doc option" }
@@ -531,7 +545,7 @@ class UndoManager private constructor(
     }
 }
 
-fun undoContentIds(
+public fun undoContentIds(
     doc: YDoc,
     contentIds: ContentIds,
     options: UndoManagerOptions = UndoManagerOptions(),
@@ -550,7 +564,7 @@ fun undoContentIds(
 }
 
 @Suppress("UNUSED_PARAMETER")
-fun redoItem(
+public fun redoItem(
     transaction: YTransaction,
     item: Item,
     redoitems: Set<Item> = emptySet(),
@@ -560,7 +574,7 @@ fun redoItem(
 ): Item? = redoItem(transaction.doc, item, redoitems, itemsToDelete, ignoreRemoteAttributeChanges, undoManager)
 
 @Suppress("UNUSED_PARAMETER")
-fun redoItem(
+public fun redoItem(
     doc: YDoc,
     item: Item,
     redoitems: Set<Item> = emptySet(),

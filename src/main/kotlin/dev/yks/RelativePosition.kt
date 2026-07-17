@@ -1,23 +1,23 @@
 package dev.yks
 
-data class RelativePosition(
+public data class RelativePosition(
     val type: Id? = null,
     val tname: String? = null,
     val item: Id? = null,
     val assoc: Int = 0,
 )
 
-data class AbsolutePosition(
+public data class AbsolutePosition(
     val type: AbstractYType,
     val index: Int,
     val assoc: Int = 0,
 )
 
-fun createAbsolutePosition(type: AbstractYType, index: Int, assoc: Int = 0): AbsolutePosition {
+public fun createAbsolutePosition(type: AbstractYType, index: Int, assoc: Int = 0): AbsolutePosition {
     return AbsolutePosition(type, index, assoc)
 }
 
-fun createRelativePosition(type: AbstractYType, item: Id? = null, assoc: Int = 0): RelativePosition {
+public fun createRelativePosition(type: AbstractYType, item: Id? = null, assoc: Int = 0): RelativePosition {
     val typeId = type.doc.typeRefItemId(type)
     return if (typeId == null) {
         RelativePosition(tname = type.name, item = item, assoc = assoc)
@@ -26,7 +26,7 @@ fun createRelativePosition(type: AbstractYType, item: Id? = null, assoc: Int = 0
     }
 }
 
-fun createRelativePositionFromTypeIndex(
+public fun createRelativePositionFromTypeIndex(
     type: AbstractYType,
     index: Int,
     assoc: Int = 0,
@@ -72,7 +72,7 @@ private fun createRelativePositionForTypeEndpoint(type: AbstractYType, assoc: In
     return createRelativePosition(type, item = null, assoc = assoc)
 }
 
-fun createAbsolutePositionFromRelativePosition(
+public fun createAbsolutePositionFromRelativePosition(
     relativePosition: RelativePosition,
     doc: YDoc,
     followUndoneDeletions: Boolean = true,
@@ -88,6 +88,16 @@ fun createAbsolutePositionFromRelativePosition(
         }
         val item = doc.getItem(anchorId) ?: return null
         val type = doc.typeForParent(item.parent) ?: doc.getOrNull(item.parent) ?: return null
+        if (renderer === baseRenderer) {
+            val visibleKind = if (type is YUnopenedRoot) item.content.kind else type.kind
+            val indexAfter = doc.visibleSequenceIndexAfter(type.name, visibleKind, anchorId) ?: return null
+            val includeAnchor = !item.deleted && (
+                relativePosition.assoc < 0 ||
+                    (!followUndoneDeletions && originalItem.deleted && anchorId != itemId)
+                )
+            val index = if (includeAnchor || item.deleted) indexAfter else indexAfter - 1
+            return AbsolutePosition(type, index.coerceAtLeast(0), relativePosition.assoc)
+        }
         val ordered = doc.relativePositionSequence(type, renderer)
         val rawIndex = ordered.indexOfFirst { candidate ->
             anchorId.client == candidate.id.client &&
@@ -137,6 +147,8 @@ fun createAbsolutePositionFromRelativePosition(
     } ?: return null
     val index = if (relativePosition.assoc < 0) {
         0
+    } else if (renderer === baseRenderer && type !is YUnopenedRoot) {
+        doc.visibleLength(type.name, type.kind).toNonNegativeInt("relative position index")
     } else {
         doc.relativePositionSequence(type, renderer)
             .fold(0L) { length, item ->
@@ -170,13 +182,13 @@ private fun YDoc.relativePositionSequence(
     }
 }
 
-fun encodeRelativePosition(relativePosition: RelativePosition): ByteArray {
+public fun encodeRelativePosition(relativePosition: RelativePosition): ByteArray {
     val encoder = BinaryEncoder()
     writeRelativePosition(encoder, relativePosition)
     return encoder.toByteArray()
 }
 
-fun writeRelativePosition(encoder: BinaryEncoder, relativePosition: RelativePosition): BinaryEncoder {
+public fun writeRelativePosition(encoder: BinaryEncoder, relativePosition: RelativePosition): BinaryEncoder {
     when {
         relativePosition.item != null -> {
             encoder.writeVarUInt(0)
@@ -192,23 +204,24 @@ fun writeRelativePosition(encoder: BinaryEncoder, relativePosition: RelativePosi
         }
         else -> error("unexpected relative position")
     }
-    encoder.writeVarInt(relativePosition.assoc.toLong())
+    // Yjs uses lib0's sign-bit varint here, not zig-zag varint.
+    encoder.writeLib0VarInt(relativePosition.assoc.toLong())
     return encoder
 }
 
-fun writeRelativePosition(encoder: IdSetEncoderV1, relativePosition: RelativePosition): IdSetEncoderV1 {
+public fun writeRelativePosition(encoder: IdSetEncoderV1, relativePosition: RelativePosition): IdSetEncoderV1 {
     writeRelativePosition(encoder.restEncoder, relativePosition)
     return encoder
 }
 
-fun decodeRelativePosition(bytes: ByteArray): RelativePosition {
+public fun decodeRelativePosition(bytes: ByteArray): RelativePosition {
     val decoder = BinaryDecoder(bytes)
     val relativePosition = readRelativePosition(decoder)
     check(!decoder.hasRemaining()) { "relative position has trailing bytes" }
     return relativePosition
 }
 
-fun readRelativePosition(decoder: BinaryDecoder): RelativePosition {
+public fun readRelativePosition(decoder: BinaryDecoder): RelativePosition {
     val relativePosition = when (val tag = decoder.readVarUInt()) {
         0L -> RelativePosition(item = readID(decoder), assoc = 0)
         1L -> RelativePosition(tname = decoder.readString(), assoc = 0)
@@ -216,30 +229,30 @@ fun readRelativePosition(decoder: BinaryDecoder): RelativePosition {
         else -> error("unknown relative position tag: $tag")
     }
     return if (decoder.hasRemaining()) {
-        relativePosition.copy(assoc = decoder.readVarInt().toIntExact("relative position assoc"))
+        relativePosition.copy(assoc = decoder.readLib0VarInt().toIntExact("relative position assoc"))
     } else {
         relativePosition
     }
 }
 
-fun readRelativePosition(decoder: IdSetDecoderV1): RelativePosition =
+public fun readRelativePosition(decoder: IdSetDecoderV1): RelativePosition =
     readRelativePosition(decoder.restDecoder)
 
-fun relativePositionToJSON(relativePosition: RelativePosition): Map<String, Any?> = buildMap {
+public fun relativePositionToJSON(relativePosition: RelativePosition): Map<String, Any?> = buildMap {
     relativePosition.type?.let { put("type", idToJSON(it)) }
     relativePosition.tname?.takeIf { it.isNotEmpty() }?.let { put("tname", it) }
     relativePosition.item?.let { put("item", idToJSON(it)) }
     put("assoc", relativePosition.assoc)
 }
 
-fun createRelativePositionFromJSON(json: Map<String, Any?>): RelativePosition = RelativePosition(
+public fun createRelativePositionFromJSON(json: Map<String, Any?>): RelativePosition = RelativePosition(
     type = (json["type"] as? Map<*, *>)?.let(::idFromJSON),
     tname = json["tname"] as? String,
     item = (json["item"] as? Map<*, *>)?.let(::idFromJSON),
     assoc = (json["assoc"] as? Number)?.toInt() ?: 0,
 )
 
-fun compareRelativePositions(left: RelativePosition?, right: RelativePosition?): Boolean = left == right
+public fun compareRelativePositions(left: RelativePosition?, right: RelativePosition?): Boolean = left == right
 
 private fun idToJSON(id: Id): Map<String, Long> = mapOf("client" to id.client, "clock" to id.clock)
 

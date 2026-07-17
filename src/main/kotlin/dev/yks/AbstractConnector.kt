@@ -6,18 +6,18 @@ package dev.yks
  * Providers can extend this class to expose a common document/awareness pair and use the
  * lightweight observable surface for provider-specific events.
  */
-open class AbstractConnector(
-    val doc: YDoc,
-    val awareness: Any?,
+public open class AbstractConnector(
+    public val doc: YDoc,
+    public val awareness: Any?,
 ) : AutoCloseable {
     private val listeners = linkedMapOf<String, MutableList<(Any?) -> Unit>>()
 
-    fun on(eventName: String, listener: (Any?) -> Unit): Subscription {
+    public fun on(eventName: String, listener: (Any?) -> Unit): Subscription {
         listeners.getOrPut(eventName) { mutableListOf() }.add(listener)
         return Subscription { off(eventName, listener) }
     }
 
-    fun once(eventName: String, listener: (Any?) -> Unit): Subscription {
+    public fun once(eventName: String, listener: (Any?) -> Unit): Subscription {
         lateinit var subscription: Subscription
         val onceListener: (Any?) -> Unit = { value ->
             subscription.close()
@@ -27,13 +27,13 @@ open class AbstractConnector(
         return subscription
     }
 
-    fun off(eventName: String, listener: (Any?) -> Unit) {
+    public fun off(eventName: String, listener: (Any?) -> Unit) {
         val eventListeners = listeners[eventName] ?: return
         eventListeners.remove(listener)
         if (eventListeners.isEmpty()) listeners.remove(eventName)
     }
 
-    fun emit(eventName: String, value: Any? = null) {
+    public fun emit(eventName: String, value: Any? = null) {
         callAllYksCallbacks(listeners[eventName].orEmpty().toList()) { listener -> listener(value) }
     }
 
@@ -41,7 +41,7 @@ open class AbstractConnector(
         listeners.clear()
     }
 
-    fun destroy() {
+    public fun destroy() {
         close()
     }
 }

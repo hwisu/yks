@@ -1,14 +1,14 @@
 package dev.yks
 
-class BlockRange(
-    var refs: MutableList<AbstractStruct>,
-    var i: Int = 0,
+public class BlockRange(
+    public var refs: MutableList<AbstractStruct>,
+    public var i: Int = 0,
 )
 
-class BlockSet(
-    val clients: MutableMap<Long, BlockRange> = linkedMapOf(),
+public class BlockSet(
+    public val clients: MutableMap<Long, BlockRange> = linkedMapOf(),
 ) {
-    fun toIdSet(): IdSet {
+    public fun toIdSet(): IdSet {
         val inserts = createIdSet()
         clients.toSortedMap().forEach { (client, range) ->
             var lastClock = 0L
@@ -28,7 +28,7 @@ class BlockSet(
         return inserts
     }
 
-    fun exclude(exclude: IdSet) {
+    public fun exclude(exclude: IdSet) {
         val clientIds = if (clients.size < exclude.clients.size) clients.keys.toList() else exclude.clients.keys.toList()
         clientIds.forEach { client ->
             val ranges = exclude.ranges(client)
@@ -59,7 +59,7 @@ class BlockSet(
         }
     }
 
-    fun insertInto(inserts: BlockSet) {
+    public fun insertInto(inserts: BlockSet) {
         inserts.clients.forEach { (client, newRange) ->
             val range = clients[client]
             if (range == null) {
@@ -92,7 +92,7 @@ class BlockSet(
     }
 }
 
-fun readBlockSet(decoder: UpdateDecoderV1): BlockSet {
+public fun readBlockSet(decoder: UpdateDecoderV1): BlockSet {
     val clients = linkedMapOf<Long, BlockRange>()
     repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
         val client = decoder.readClient()
@@ -104,7 +104,7 @@ fun readBlockSet(decoder: UpdateDecoderV1): BlockSet {
     return BlockSet(clients)
 }
 
-fun readBlockSet(decoder: UpdateDecoderV2): BlockSet {
+public fun readBlockSet(decoder: UpdateDecoderV2): BlockSet {
     val clients = linkedMapOf<Long, BlockRange>()
     repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
         val client = decoder.readClient()
@@ -116,7 +116,7 @@ fun readBlockSet(decoder: UpdateDecoderV2): BlockSet {
     return BlockSet(clients)
 }
 
-fun writeBlockSet(encoder: UpdateEncoderV1, blocks: BlockSet) {
+public fun writeBlockSet(encoder: UpdateEncoderV1, blocks: BlockSet) {
     encoder.restEncoder.writeVarUInt(blocks.clients.size.toLong())
     blocks.clients.toSortedMap(compareByDescending { it }).forEach { (client, range) ->
         encoder.writeClient(client)
@@ -125,7 +125,7 @@ fun writeBlockSet(encoder: UpdateEncoderV1, blocks: BlockSet) {
     }
 }
 
-fun writeBlockSet(encoder: UpdateEncoderV2, blocks: BlockSet) {
+public fun writeBlockSet(encoder: UpdateEncoderV2, blocks: BlockSet) {
     encoder.restEncoder.writeVarUInt(blocks.clients.size.toLong())
     blocks.clients.toSortedMap(compareByDescending { it }).forEach { (client, range) ->
         encoder.writeClient(client)
@@ -134,7 +134,7 @@ fun writeBlockSet(encoder: UpdateEncoderV2, blocks: BlockSet) {
     }
 }
 
-fun sliceStruct(left: AbstractStruct, diff: Long): AbstractStruct {
+public fun sliceStruct(left: AbstractStruct, diff: Long): AbstractStruct {
     require(diff >= 0) { "diff must be non-negative" }
     require(diff < left.length) { "diff must be smaller than struct length" }
     val id = Id(left.id.client, checkedClockAdd(left.id.clock, diff, "sliced struct clock"))

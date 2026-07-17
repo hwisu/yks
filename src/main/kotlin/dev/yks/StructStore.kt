@@ -1,11 +1,11 @@
 package dev.yks
 
-data class StructStoreIndex(
+public data class StructStoreIndex(
     val structs: List<AbstractStruct>,
     val index: Int,
 )
 
-data class PendingStructs(
+public data class PendingStructs(
     val missing: Map<Long, Long>,
     val update: ByteArray,
 )
@@ -134,7 +134,7 @@ private class ParentItemIndex {
     }
 }
 
-class StructStore(private val owner: YDoc? = null) {
+public class StructStore(private val owner: YDoc? = null) {
     private val clientItems: MutableMap<Long, MutableList<StoreItem>> = linkedMapOf()
     private val structViewOwner: YDoc by lazy(LazyThreadSafetyMode.NONE) { owner ?: YDoc() }
     private var allItemsCache: List<StoreItem>? = null
@@ -173,7 +173,7 @@ class StructStore(private val owner: YDoc? = null) {
     internal var sequenceBuildCount: Int = 0
         private set
 
-    val clients: Map<Long, List<ItemStruct>>
+    public val clients: Map<Long, List<ItemStruct>>
         get() {
             owner?.ensureThreadAccess()
             val viewOwner = structViewOwner
@@ -182,13 +182,13 @@ class StructStore(private val owner: YDoc? = null) {
             }
         }
 
-    val ds: IdSet
+    public val ds: IdSet
         get() {
             owner?.ensureThreadAccess()
             return deleteSet().toIdSet()
         }
 
-    var pendingStructs: PendingStructs?
+    public var pendingStructs: PendingStructs?
         get() {
             owner?.ensureThreadAccess()
             return owner?.pendingStructsView()
@@ -198,7 +198,7 @@ class StructStore(private val owner: YDoc? = null) {
             owner?.setPendingStructsView(value)
         }
 
-    var pendingDs: ByteArray?
+    public var pendingDs: ByteArray?
         get() {
             owner?.ensureThreadAccess()
             return owner?.pendingDeleteSetUpdate()
@@ -208,7 +208,7 @@ class StructStore(private val owner: YDoc? = null) {
             owner?.setPendingDeleteSetUpdate(value)
         }
 
-    val skips: IdSet = createIdSet()
+    public val skips: IdSet = createIdSet()
 
     internal fun captureSnapshot(): StructStoreSnapshot {
         check(activeSnapshot == null) { "a StructStore rollback checkpoint is already active" }
@@ -333,15 +333,15 @@ class StructStore(private val owner: YDoc? = null) {
         return true
     }
 
-    fun get(id: Id): AbstractStruct {
+    public fun get(id: Id): AbstractStruct {
         owner?.ensureThreadAccess()
         val item = getStoreItem(id) ?: error("struct not found: $id")
         return item.toItemStruct(structViewOwner)
     }
 
-    fun getItem(id: Id): ItemStruct = get(id) as ItemStruct
+    public fun getItem(id: Id): ItemStruct = get(id) as ItemStruct
 
-    fun getIndex(id: Id): StructStoreIndex {
+    public fun getIndex(id: Id): StructStoreIndex {
         owner?.ensureThreadAccess()
         val storeItems = clientItems[id.client].orEmpty()
         require(storeItems.isNotEmpty()) { "structs must not be empty" }
@@ -616,13 +616,13 @@ class StructStore(private val owner: YDoc? = null) {
         return updatedItems.values.toList()
     }
 
-    fun getClock(client: Long): Long {
+    public fun getClock(client: Long): Long {
         owner?.ensureThreadAccess()
         val structs = clientItems[client] ?: return 0
         return structs.lastOrNull()?.endClock() ?: 0
     }
 
-    fun stateVector(): StateVector {
+    public fun stateVector(): StateVector {
         owner?.ensureThreadAccess()
         if (skips.isEmpty() && stateVectorCacheVersion == version) return stateVectorCache
         val state = java.util.TreeMap<Long, Long>()
@@ -641,7 +641,7 @@ class StructStore(private val owner: YDoc? = null) {
         return snapshot
     }
 
-    fun integrityCheck() {
+    public fun integrityCheck() {
         owner?.ensureThreadAccess()
         clientItems.values.forEach { structs ->
             for (index in 1 until structs.size) {
@@ -841,7 +841,7 @@ class StructStore(private val owner: YDoc? = null) {
         return changed
     }
 
-    fun deleteSet(): DeleteSet {
+    public fun deleteSet(): DeleteSet {
         owner?.ensureThreadAccess()
         val cached = deleteSetCache ?: DeleteSet.empty().also { deleteSet ->
             allItems().forEach { item ->
@@ -958,6 +958,9 @@ class StructStore(private val owner: YDoc? = null) {
 
     internal fun sequenceNeighbors(item: StoreItem): Pair<StoreItem?, StoreItem?> =
         if (item.parentSub == null) sequenceIndex(item.parent).neighbors(item.id) else null to null
+
+    internal fun visibleSequenceNeighbors(item: StoreItem): Pair<StoreItem?, StoreItem?> =
+        if (item.parentSub == null) sequenceIndex(item.parent).visibleNeighbors(item.id) else null to null
 
     internal fun firstSequenceItem(parent: String): StoreItem? = sequenceIndex(parent).first()
 
@@ -1615,6 +1618,37 @@ private class IndexedSequence(
         return null
     }
 
+    private fun previousUndeletedNode(node: Node): Node? {
+        if ((node.treeLeft?.treeUndeletedCount ?: 0) > 0) {
+            return lastUndeletedNode(node.treeLeft)
+        }
+        var child = node
+        var parent = child.treeParent
+        while (parent != null) {
+            if (child === parent.treeRight) {
+                if (!parent.item.deleted) return parent
+                if ((parent.treeLeft?.treeUndeletedCount ?: 0) > 0) {
+                    return lastUndeletedNode(parent.treeLeft)
+                }
+            }
+            child = parent
+            parent = parent.treeParent
+        }
+        return null
+    }
+
+    private fun lastUndeletedNode(start: Node?): Node? {
+        var current = start
+        while (current != null) {
+            when {
+                (current.treeRight?.treeUndeletedCount ?: 0) > 0 -> current = current.treeRight
+                !current.item.deleted -> return current
+                else -> current = current.treeLeft
+            }
+        }
+        return null
+    }
+
     fun last(predicate: (StoreItem) -> Boolean): StoreItem? {
         var current = last
         while (current != null) {
@@ -1638,6 +1672,11 @@ private class IndexedSequence(
     fun neighbors(id: Id): Pair<StoreItem?, StoreItem?> {
         val node = nodesByStart[id] ?: return null to null
         return node.left?.item to node.right?.item
+    }
+
+    fun visibleNeighbors(id: Id): Pair<StoreItem?, StoreItem?> {
+        val node = nodesByStart[id] ?: return null to null
+        return previousUndeletedNode(node)?.item to nextUndeletedNode(node)?.item
     }
 
     fun refresh(id: Id) {

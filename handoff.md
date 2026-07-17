@@ -1261,3 +1261,53 @@ The full default 50-warmup/30-sample run then passed 33/33. Relevant medians:
 | apply 5,000 structs | 1.200 ms | 1.452 ms | 1.21x |
 | apply 5,000 structs into open roots | 1.101 ms | 1.577 ms | 1.43x |
 | 1,000 sequential standard updates | 2.149 ms | 1.066 ms | 0.50x |
+
+## 2026-07-17 advanced oracle, API governance, and high-level performance audit
+
+The Hocuspocus parity audit expanded YKS validation beyond the existing
+array/text/map differential suite:
+
+- 100 deterministic upstream-Yjs oracle seeds now cover XML, subdocuments,
+  relative positions, V2 merge/diff/conversion, and UndoManager sequences;
+- 1,000 deterministic malformed V1/V2 seeds verify the stable
+  `YksException` rejection boundary under a bounded timeout;
+- Kotlin explicit API mode, warnings-as-errors, strict JSR-305 handling, and
+  the built-in Kotlin ABI validator now guard the committed `api/yks.api`
+  baseline.
+
+The new oracle found and fixed two real engine defects:
+
+- relative-position `assoc` used zig-zag varint instead of lib0's signed
+  sign-bit varint, so upstream `-1` decoded as `-33`;
+- UndoManager lost or reordered packed text slices after partial
+  delete/restore cycles. Stack normalization now tracks current packed slices,
+  redo uses current sequence anchors, and packed restore chains use the
+  restored range end.
+
+Existing XML/nested-type restore semantics were retained and the complete unit
+and interop suites pass. Relative-position resolution now uses the maintained
+order-statistic sequence index: the measured 10,000-resolution workload moved
+from about 4.0x Yjs to 0.81x in the final 50/30 run. V2 merge/diff measured
+0.11x Yjs. The strict suite now passes 35/35 scenarios.
+
+One high-level CPU gap remains explicitly engine-owned and is measured with
+`npm run benchmark:performance:advanced`:
+
+- 1,000 undo plus 1,000 redo operations: reduced from about 13.4x to 6.66x
+  through indexed visible-neighbor lookup and single-item restore fast paths.
+
+The same final 50-warmup/30-sample advanced run measured XML build/render at
+0.96x Yjs, relative-position resolution at 1.10x, and V2 merge/diff at 0.12x.
+Those three high-level paths now pass the strict ratio and latency thresholds.
+
+JFR assigns the remaining UndoManager cost to transaction cleanup and virtual
+merge representative bookkeeping. Hocuspocus must not compensate for these
+gaps in its adapter; the same evidence is recorded in its `yks.todo.md`.
+
+Validation:
+
+- `./gradlew clean test interopTest checkLegacyAbi consumerSmokeTest
+  publicationMetadataTest jmhClasses --no-daemon`: passed;
+- `npm run benchmark:performance:check`: 35/35 strict scenarios passed;
+- advanced differential and malformed-input fuzz tests passed inside
+  `interopTest`.

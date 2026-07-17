@@ -1,0 +1,3308 @@
+public final class dev/yks/AbsolutePosition {
+	public fun <init> (Ldev/yks/AbstractYType;II)V
+	public synthetic fun <init> (Ldev/yks/AbstractYType;IIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ldev/yks/AbstractYType;
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun copy (Ldev/yks/AbstractYType;II)Ldev/yks/AbsolutePosition;
+	public static synthetic fun copy$default (Ldev/yks/AbsolutePosition;Ldev/yks/AbstractYType;IIILjava/lang/Object;)Ldev/yks/AbsolutePosition;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAssoc ()I
+	public final fun getIndex ()I
+	public final fun getType ()Ldev/yks/AbstractYType;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public class dev/yks/AbstractConnector : java/lang/AutoCloseable {
+	public fun <init> (Ldev/yks/YDoc;Ljava/lang/Object;)V
+	public fun close ()V
+	public final fun destroy ()V
+	public final fun emit (Ljava/lang/String;Ljava/lang/Object;)V
+	public static synthetic fun emit$default (Ldev/yks/AbstractConnector;Ljava/lang/String;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun getAwareness ()Ljava/lang/Object;
+	public final fun getDoc ()Ldev/yks/YDoc;
+	public final fun off (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)V
+	public final fun on (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun once (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+}
+
+public abstract class dev/yks/AbstractContent {
+	public fun <init> ()V
+	public abstract fun copy ()Ldev/yks/AbstractContent;
+	public abstract fun getContent ()Ljava/util/List;
+	public abstract fun getLength ()J
+	public abstract fun getRef ()I
+	public abstract fun isCountable ()Z
+	public fun mergeWith (Ldev/yks/AbstractContent;)Z
+	public fun splice (J)Ldev/yks/AbstractContent;
+	public abstract fun write (Ldev/yks/UpdateContentEncoder;JJ)Ldev/yks/UpdateContentEncoder;
+	public static synthetic fun write$default (Ldev/yks/AbstractContent;Ldev/yks/UpdateContentEncoder;JJILjava/lang/Object;)Ldev/yks/UpdateContentEncoder;
+}
+
+public abstract class dev/yks/AbstractRenderer {
+	public fun <init> ()V
+	public abstract fun contentLength (Ldev/yks/ItemStruct;)J
+	public fun destroy ()V
+	public final fun emit (Ldev/yks/RendererEvent;)V
+	public final fun emit (Ljava/lang/String;Ldev/yks/RendererEvent;)V
+	public static synthetic fun emit$default (Ldev/yks/AbstractRenderer;Ljava/lang/String;Ldev/yks/RendererEvent;ILjava/lang/Object;)V
+	public fun get$type ()Ljava/lang/String;
+	public fun getAttributed ()Ldev/yks/IdSet;
+	public fun getType ()Ljava/lang/String;
+	public fun hasItem (Ldev/yks/ItemStruct;)Z
+	public final fun off (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)V
+	public final fun on (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun once (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public abstract fun readContent (Ljava/util/List;JJZLdev/yks/AbstractContent;I)V
+}
+
+public class dev/yks/AbstractStruct {
+	public fun <init> (Ldev/yks/Id;J)V
+	public fun getDeleted ()Z
+	public final fun getEnd ()J
+	public fun getId ()Ldev/yks/Id;
+	public fun getLength ()J
+	public fun getRef ()Ljava/lang/Integer;
+	public fun isItem ()Z
+	public fun mergeWith (Ldev/yks/AbstractStruct;)Z
+	public fun setLength (J)V
+	public fun splice (J)Ldev/yks/AbstractStruct;
+}
+
+public abstract class dev/yks/AbstractYType {
+	public static final field Companion Ldev/yks/AbstractYType$Companion;
+	public synthetic fun <init> (Ldev/yks/YDoc;Ljava/lang/String;Ldev/yks/RootKind;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun clearCache ()V
+	public final fun destroy ()V
+	public final fun emit (Ldev/yks/YTypeEvent;)V
+	public final fun emit (Ljava/lang/String;Ldev/yks/YTypeEvent;)V
+	public static synthetic fun emit$default (Ldev/yks/AbstractYType;Ljava/lang/String;Ldev/yks/YTypeEvent;ILjava/lang/Object;)V
+	public final fun getDelta ()Ldev/yks/YDeepDelta;
+	public final fun getDoc ()Ldev/yks/YDoc;
+	public fun getLegacyTypeRef ()I
+	public final fun getName ()Ljava/lang/String;
+	public final fun getParent ()Ldev/yks/AbstractYType;
+	public final fun getPathTo (Ldev/yks/AbstractYType;Ldev/yks/AbstractRenderer;)Ljava/util/List;
+	public static synthetic fun getPathTo$default (Ldev/yks/AbstractYType;Ldev/yks/AbstractYType;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)Ljava/util/List;
+	public fun getTypeRef ()I
+	public final fun isDestroyed ()Z
+	public final fun observe (Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun observe (Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
+	public final fun observeDeep (Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun observeDeep (Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
+	public final fun observeDeepEvents (Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
+	public final fun off (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)V
+	public final fun on (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun once (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public fun toJSON ()Ljava/lang/Object;
+	public abstract fun toJson ()Ljava/lang/Object;
+	public final fun unobserve (Lkotlin/jvm/functions/Function1;)V
+	public final fun unobserve (Lkotlin/jvm/functions/Function2;)V
+	public final fun unobserveDeep (Lkotlin/jvm/functions/Function1;)V
+	public final fun unobserveDeep (Lkotlin/jvm/functions/Function2;)V
+	public final fun unobserveDeepEvents (Lkotlin/jvm/functions/Function2;)V
+	public final fun useRenderer (Ldev/yks/AbstractRenderer;)Ldev/yks/AbstractYType;
+}
+
+public final class dev/yks/AbstractYType$Companion {
+	public final fun from (Ldev/yks/YArrayDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YArray;
+	public final fun from (Ldev/yks/YMapDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YMap;
+	public final fun from (Ldev/yks/YMapDelta;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YMap;
+	public final fun from (Ldev/yks/YTextDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YText;
+	public final fun from (Ldev/yks/YTextDelta;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YText;
+	public final fun from (Ldev/yks/YXmlFragmentDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YXmlFragment;
+	public final fun from (Ljava/util/List;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YArray;
+	public static synthetic fun from$default (Ldev/yks/AbstractYType$Companion;Ldev/yks/YArrayDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YArray;
+	public static synthetic fun from$default (Ldev/yks/AbstractYType$Companion;Ldev/yks/YMapDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YMap;
+	public static synthetic fun from$default (Ldev/yks/AbstractYType$Companion;Ldev/yks/YMapDelta;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YMap;
+	public static synthetic fun from$default (Ldev/yks/AbstractYType$Companion;Ldev/yks/YTextDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YText;
+	public static synthetic fun from$default (Ldev/yks/AbstractYType$Companion;Ldev/yks/YTextDelta;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YText;
+	public static synthetic fun from$default (Ldev/yks/AbstractYType$Companion;Ldev/yks/YXmlFragmentDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YXmlFragment;
+	public static synthetic fun from$default (Ldev/yks/AbstractYType$Companion;Ljava/util/List;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YArray;
+}
+
+public final class dev/yks/ArraySearchMarker {
+	public fun <init> (Ldev/yks/ItemStruct;I)V
+	public final fun component1 ()Ldev/yks/ItemStruct;
+	public final fun component2 ()I
+	public final fun copy (Ldev/yks/ItemStruct;I)Ldev/yks/ArraySearchMarker;
+	public static synthetic fun copy$default (Ldev/yks/ArraySearchMarker;Ldev/yks/ItemStruct;IILjava/lang/Object;)Ldev/yks/ArraySearchMarker;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIndex ()I
+	public final fun getP ()Ldev/yks/ItemStruct;
+	public final fun getTimestamp ()J
+	public fun hashCode ()I
+	public final fun setIndex (I)V
+	public final fun setP (Ldev/yks/ItemStruct;)V
+	public final fun setTimestamp (J)V
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/AttrRange {
+	public fun <init> (JJLjava/util/List;)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun component3 ()Ljava/util/List;
+	public final fun copy (JJLjava/util/List;)Ldev/yks/AttrRange;
+	public static synthetic fun copy$default (Ldev/yks/AttrRange;JJLjava/util/List;ILjava/lang/Object;)Ldev/yks/AttrRange;
+	public final fun copyWith (JJ)Ldev/yks/AttrRange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttrs ()Ljava/util/List;
+	public final fun getClock ()J
+	public final fun getEnd ()J
+	public final fun getLen ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/AttrRanges {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun add (JJLjava/util/List;)V
+	public final fun copy ()Ldev/yks/AttrRanges;
+	public final fun getIds ()Ljava/util/List;
+}
+
+public final class dev/yks/AttributedContent {
+	public fun <init> (Ldev/yks/AbstractContent;JZLjava/util/List;I)V
+	public final fun component1 ()Ldev/yks/AbstractContent;
+	public final fun component2 ()J
+	public final fun component3 ()Z
+	public final fun component4 ()Ljava/util/List;
+	public final fun component5 ()I
+	public final fun copy (Ldev/yks/AbstractContent;JZLjava/util/List;I)Ldev/yks/AttributedContent;
+	public static synthetic fun copy$default (Ldev/yks/AttributedContent;Ldev/yks/AbstractContent;JZLjava/util/List;IILjava/lang/Object;)Ldev/yks/AttributedContent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttrs ()Ljava/util/List;
+	public final fun getClock ()J
+	public final fun getContent ()Ldev/yks/AbstractContent;
+	public final fun getDeleted ()Z
+	public final fun getFresh ()Z
+	public final fun getRender ()Z
+	public final fun getRenderBehavior ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/AttributionJsonSchema {
+	public final fun check (Ljava/lang/Object;)Z
+	public final fun getFields ()Ljava/util/Map;
+}
+
+public final class dev/yks/AttributionSchemaField {
+	public fun <init> (Ljava/lang/String;ZLjava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;ZLjava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Z
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;ZLjava/lang/String;Ljava/lang/String;)Ldev/yks/AttributionSchemaField;
+	public static synthetic fun copy$default (Ldev/yks/AttributionSchemaField;Ljava/lang/String;ZLjava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/AttributionSchemaField;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getItemType ()Ljava/lang/String;
+	public final fun getOptional ()Z
+	public final fun getType ()Ljava/lang/String;
+	public final fun getValueType ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/Attributions {
+	public fun <init> ()V
+	public fun <init> (Ldev/yks/IdMap;Ldev/yks/IdMap;)V
+	public synthetic fun <init> (Ldev/yks/IdMap;Ldev/yks/IdMap;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getDeletes ()Ldev/yks/IdMap;
+	public final fun getInserts ()Ldev/yks/IdMap;
+}
+
+public class dev/yks/BaseRenderer : dev/yks/AbstractRenderer {
+	public fun <init> ()V
+	public fun contentLength (Ldev/yks/ItemStruct;)J
+	public fun readContent (Ljava/util/List;JJZLdev/yks/AbstractContent;I)V
+}
+
+public final class dev/yks/BinaryDecoder {
+	public fun <init> ([B)V
+	public final fun hasRemaining ()Z
+	public final fun readBoolean ()Z
+	public final fun readByte ()I
+	public final fun readBytes ()[B
+	public final fun readFloat32 ()F
+	public final fun readFloat64 ()D
+	public final fun readInt64 ()J
+	public final fun readLib0VarInt ()J
+	public final fun readRemainingBytes ()[B
+	public final fun readString ()Ljava/lang/String;
+	public final fun readVarInt ()J
+	public final fun readVarUInt ()J
+}
+
+public final class dev/yks/BinaryEncoder {
+	public fun <init> ()V
+	public final fun toByteArray ()[B
+	public final fun writeBoolean (Z)V
+	public final fun writeByte (I)V
+	public final fun writeBytes ([B)V
+	public final fun writeFloat32 (F)V
+	public final fun writeFloat64 (D)V
+	public final fun writeInt64 (J)V
+	public final fun writeLib0VarInt (JZ)V
+	public static synthetic fun writeLib0VarInt$default (Ldev/yks/BinaryEncoder;JZILjava/lang/Object;)V
+	public final fun writeRawBytes ([B)V
+	public final fun writeString (Ljava/lang/String;)V
+	public final fun writeVarInt (J)V
+	public final fun writeVarUInt (J)V
+}
+
+public final class dev/yks/BlockRange {
+	public fun <init> (Ljava/util/List;I)V
+	public synthetic fun <init> (Ljava/util/List;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getI ()I
+	public final fun getRefs ()Ljava/util/List;
+	public final fun setI (I)V
+	public final fun setRefs (Ljava/util/List;)V
+}
+
+public final class dev/yks/BlockSet {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun exclude (Ldev/yks/IdSet;)V
+	public final fun getClients ()Ljava/util/Map;
+	public final fun insertInto (Ldev/yks/BlockSet;)V
+	public final fun toIdSet ()Ldev/yks/IdSet;
+}
+
+public final class dev/yks/BlockSetKt {
+	public static final fun readBlockSet (Ldev/yks/UpdateDecoderV1;)Ldev/yks/BlockSet;
+	public static final fun readBlockSet (Ldev/yks/UpdateDecoderV2;)Ldev/yks/BlockSet;
+	public static final fun sliceStruct (Ldev/yks/AbstractStruct;J)Ldev/yks/AbstractStruct;
+	public static final fun writeBlockSet (Ldev/yks/UpdateEncoderV1;Ldev/yks/BlockSet;)V
+	public static final fun writeBlockSet (Ldev/yks/UpdateEncoderV2;Ldev/yks/BlockSet;)V
+}
+
+public final class dev/yks/ContentAny : dev/yks/AbstractContent {
+	public fun <init> (Ljava/util/List;)V
+	public synthetic fun copy ()Ldev/yks/AbstractContent;
+	public fun copy ()Ldev/yks/ContentAny;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArr ()Ljava/util/List;
+	public fun getContent ()Ljava/util/List;
+	public fun getLength ()J
+	public fun getRef ()I
+	public fun hashCode ()I
+	public fun isCountable ()Z
+	public fun mergeWith (Ldev/yks/AbstractContent;)Z
+	public synthetic fun splice (J)Ldev/yks/AbstractContent;
+	public fun splice (J)Ldev/yks/ContentAny;
+	public fun toString ()Ljava/lang/String;
+	public fun write (Ldev/yks/UpdateContentEncoder;JJ)Ldev/yks/UpdateContentEncoder;
+}
+
+public final class dev/yks/ContentAttribute {
+	public fun <init> (Ljava/lang/String;Ldev/yks/YValue;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ldev/yks/YValue;
+	public final fun copy (Ljava/lang/String;Ldev/yks/YValue;)Ldev/yks/ContentAttribute;
+	public static synthetic fun copy$default (Ldev/yks/ContentAttribute;Ljava/lang/String;Ldev/yks/YValue;ILjava/lang/Object;)Ldev/yks/ContentAttribute;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getName ()Ljava/lang/String;
+	public final fun getVal ()Ljava/lang/Object;
+	public final fun getValue ()Ldev/yks/YValue;
+	public final fun hash ()Ljava/lang/String;
+	public fun hashCode ()I
+	public final fun toAny ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/ContentBinary : dev/yks/AbstractContent {
+	public fun <init> ([B)V
+	public synthetic fun copy ()Ldev/yks/AbstractContent;
+	public fun copy ()Ldev/yks/ContentBinary;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getContent ()Ljava/util/List;
+	public final fun getContent ()[B
+	public fun getLength ()J
+	public fun getRef ()I
+	public fun hashCode ()I
+	public fun isCountable ()Z
+	public fun mergeWith (Ldev/yks/AbstractContent;)Z
+	public fun toString ()Ljava/lang/String;
+	public fun write (Ldev/yks/UpdateContentEncoder;JJ)Ldev/yks/UpdateContentEncoder;
+}
+
+public final class dev/yks/ContentDeleted : dev/yks/AbstractContent {
+	public fun <init> (J)V
+	public synthetic fun copy ()Ldev/yks/AbstractContent;
+	public fun copy ()Ldev/yks/ContentDeleted;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getContent ()Ljava/util/List;
+	public final fun getLen ()J
+	public fun getLength ()J
+	public fun getRef ()I
+	public fun hashCode ()I
+	public fun isCountable ()Z
+	public fun mergeWith (Ldev/yks/AbstractContent;)Z
+	public final fun setLen (J)V
+	public synthetic fun splice (J)Ldev/yks/AbstractContent;
+	public fun splice (J)Ldev/yks/ContentDeleted;
+	public fun toString ()Ljava/lang/String;
+	public fun write (Ldev/yks/UpdateContentEncoder;JJ)Ldev/yks/UpdateContentEncoder;
+}
+
+public final class dev/yks/ContentDoc : dev/yks/AbstractContent {
+	public fun <init> (Ljava/lang/String;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public synthetic fun copy ()Ldev/yks/AbstractContent;
+	public fun copy ()Ldev/yks/ContentDoc;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getContent ()Ljava/util/List;
+	public final fun getDoc ()Ldev/yks/YDoc;
+	public final fun getGuid ()Ljava/lang/String;
+	public fun getLength ()J
+	public final fun getOpts ()Ljava/util/Map;
+	public fun getRef ()I
+	public fun hashCode ()I
+	public fun isCountable ()Z
+	public fun mergeWith (Ldev/yks/AbstractContent;)Z
+	public final fun setDoc (Ldev/yks/YDoc;)V
+	public fun toString ()Ljava/lang/String;
+	public fun write (Ldev/yks/UpdateContentEncoder;JJ)Ldev/yks/UpdateContentEncoder;
+}
+
+public final class dev/yks/ContentEmbed : dev/yks/AbstractContent {
+	public fun <init> (Ljava/lang/Object;)V
+	public synthetic fun copy ()Ldev/yks/AbstractContent;
+	public fun copy ()Ldev/yks/ContentEmbed;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getContent ()Ljava/util/List;
+	public final fun getEmbed ()Ljava/lang/Object;
+	public fun getLength ()J
+	public fun getRef ()I
+	public fun hashCode ()I
+	public fun isCountable ()Z
+	public fun mergeWith (Ldev/yks/AbstractContent;)Z
+	public fun toString ()Ljava/lang/String;
+	public fun write (Ldev/yks/UpdateContentEncoder;JJ)Ldev/yks/UpdateContentEncoder;
+}
+
+public final class dev/yks/ContentFormat : dev/yks/AbstractContent {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Object;)V
+	public synthetic fun copy ()Ldev/yks/AbstractContent;
+	public fun copy ()Ldev/yks/ContentFormat;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getContent ()Ljava/util/List;
+	public final fun getKey ()Ljava/lang/String;
+	public fun getLength ()J
+	public fun getRef ()I
+	public final fun getValue ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun isCountable ()Z
+	public fun mergeWith (Ldev/yks/AbstractContent;)Z
+	public fun toString ()Ljava/lang/String;
+	public fun write (Ldev/yks/UpdateContentEncoder;JJ)Ldev/yks/UpdateContentEncoder;
+}
+
+public final class dev/yks/ContentIds {
+	public fun <init> (Ldev/yks/IdSet;Ldev/yks/IdSet;)V
+	public final fun component1 ()Ldev/yks/IdSet;
+	public final fun component2 ()Ldev/yks/IdSet;
+	public final fun copy (Ldev/yks/IdSet;Ldev/yks/IdSet;)Ldev/yks/ContentIds;
+	public static synthetic fun copy$default (Ldev/yks/ContentIds;Ldev/yks/IdSet;Ldev/yks/IdSet;ILjava/lang/Object;)Ldev/yks/ContentIds;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDeletes ()Ldev/yks/IdSet;
+	public final fun getInserts ()Ldev/yks/IdSet;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/ContentJSON : dev/yks/AbstractContent {
+	public fun <init> (Ljava/util/List;)V
+	public synthetic fun copy ()Ldev/yks/AbstractContent;
+	public fun copy ()Ldev/yks/ContentJSON;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getArr ()Ljava/util/List;
+	public fun getContent ()Ljava/util/List;
+	public fun getLength ()J
+	public fun getRef ()I
+	public fun hashCode ()I
+	public fun isCountable ()Z
+	public fun mergeWith (Ldev/yks/AbstractContent;)Z
+	public synthetic fun splice (J)Ldev/yks/AbstractContent;
+	public fun splice (J)Ldev/yks/ContentJSON;
+	public fun toString ()Ljava/lang/String;
+	public fun write (Ldev/yks/UpdateContentEncoder;JJ)Ldev/yks/UpdateContentEncoder;
+}
+
+public final class dev/yks/ContentKt {
+	public static final field contentAnyRefNumber I
+	public static final field contentBinaryRefNumber I
+	public static final field contentDeletedRefNumber I
+	public static final field contentDocRefNumber I
+	public static final field contentEmbedRefNumber I
+	public static final field contentFormatRefNumber I
+	public static final field contentJSONRefNumber I
+	public static final field contentStringRefNumber I
+	public static final field contentTypeRefNumber I
+	public static final fun createContentDocFromDoc (Ldev/yks/YDoc;)Ldev/yks/ContentDoc;
+	public static final fun getContentRefs ()Ljava/util/List;
+	public static final fun readContentAny (Ldev/yks/UpdateContentDecoder;)Ldev/yks/ContentAny;
+	public static final fun readContentBinary (Ldev/yks/UpdateContentDecoder;)Ldev/yks/ContentBinary;
+	public static final fun readContentDeleted (Ldev/yks/UpdateContentDecoder;)Ldev/yks/ContentDeleted;
+	public static final fun readContentDoc (Ldev/yks/UpdateContentDecoder;)Ldev/yks/ContentDoc;
+	public static final fun readContentEmbed (Ldev/yks/UpdateContentDecoder;)Ldev/yks/ContentEmbed;
+	public static final fun readContentFormat (Ldev/yks/UpdateContentDecoder;)Ldev/yks/ContentFormat;
+	public static final fun readContentJSON (Ldev/yks/UpdateContentDecoder;)Ldev/yks/ContentJSON;
+	public static final fun readContentString (Ldev/yks/UpdateContentDecoder;)Ldev/yks/ContentString;
+	public static final fun readContentType (Ldev/yks/UpdateContentDecoder;)Ldev/yks/ContentType;
+	public static final fun readItemContent (Ldev/yks/UpdateContentDecoder;I)Ldev/yks/AbstractContent;
+	public static final fun readYType (Ldev/yks/UpdateContentDecoder;Ldev/yks/YDoc;)Ldev/yks/AbstractYType;
+	public static synthetic fun readYType$default (Ldev/yks/UpdateContentDecoder;Ldev/yks/YDoc;ILjava/lang/Object;)Ldev/yks/AbstractYType;
+	public static final fun writeItemContent (Ldev/yks/UpdateContentEncoder;Ldev/yks/AbstractContent;JJ)Ldev/yks/UpdateContentEncoder;
+	public static synthetic fun writeItemContent$default (Ldev/yks/UpdateContentEncoder;Ldev/yks/AbstractContent;JJILjava/lang/Object;)Ldev/yks/UpdateContentEncoder;
+	public static final fun writeYType (Ldev/yks/UpdateContentEncoder;Ldev/yks/AbstractYType;)Ldev/yks/UpdateContentEncoder;
+}
+
+public final class dev/yks/ContentMap {
+	public fun <init> (Ldev/yks/IdMap;Ldev/yks/IdMap;)V
+	public final fun component1 ()Ldev/yks/IdMap;
+	public final fun component2 ()Ldev/yks/IdMap;
+	public final fun copy (Ldev/yks/IdMap;Ldev/yks/IdMap;)Ldev/yks/ContentMap;
+	public static synthetic fun copy$default (Ldev/yks/ContentMap;Ldev/yks/IdMap;Ldev/yks/IdMap;ILjava/lang/Object;)Ldev/yks/ContentMap;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDeletes ()Ldev/yks/IdMap;
+	public final fun getInserts ()Ldev/yks/IdMap;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/ContentString : dev/yks/AbstractContent {
+	public fun <init> (Ljava/lang/String;)V
+	public synthetic fun copy ()Ldev/yks/AbstractContent;
+	public fun copy ()Ldev/yks/ContentString;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getContent ()Ljava/util/List;
+	public fun getLength ()J
+	public fun getRef ()I
+	public final fun getStr ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun isCountable ()Z
+	public fun mergeWith (Ldev/yks/AbstractContent;)Z
+	public final fun setStr (Ljava/lang/String;)V
+	public synthetic fun splice (J)Ldev/yks/AbstractContent;
+	public fun splice (J)Ldev/yks/ContentString;
+	public fun toString ()Ljava/lang/String;
+	public fun write (Ldev/yks/UpdateContentEncoder;JJ)Ldev/yks/UpdateContentEncoder;
+}
+
+public final class dev/yks/ContentTextFormatRange : dev/yks/AbstractContent {
+	public fun <init> (Ldev/yks/Id;JLjava/util/Map;Ljava/util/Map;Ljava/util/List;)V
+	public synthetic fun <init> (Ldev/yks/Id;JLjava/util/Map;Ljava/util/Map;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ldev/yks/Id;
+	public final fun component2 ()J
+	public final fun component3 ()Ljava/util/Map;
+	public final fun component4 ()Ljava/util/Map;
+	public final fun component5 ()Ljava/util/List;
+	public synthetic fun copy ()Ldev/yks/AbstractContent;
+	public fun copy ()Ldev/yks/ContentTextFormatRange;
+	public final fun copy (Ldev/yks/Id;JLjava/util/Map;Ljava/util/Map;Ljava/util/List;)Ldev/yks/ContentTextFormatRange;
+	public static synthetic fun copy$default (Ldev/yks/ContentTextFormatRange;Ldev/yks/Id;JLjava/util/Map;Ljava/util/Map;Ljava/util/List;ILjava/lang/Object;)Ldev/yks/ContentTextFormatRange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAfterAttributes ()Ljava/util/Map;
+	public final fun getAttributes ()Ljava/util/Map;
+	public final fun getBeforeAttributes ()Ljava/util/List;
+	public fun getContent ()Ljava/util/List;
+	public final fun getLen ()J
+	public fun getLength ()J
+	public fun getRef ()I
+	public final fun getTarget ()Ldev/yks/Id;
+	public fun hashCode ()I
+	public fun isCountable ()Z
+	public fun mergeWith (Ldev/yks/AbstractContent;)Z
+	public fun toString ()Ljava/lang/String;
+	public fun write (Ldev/yks/UpdateContentEncoder;JJ)Ldev/yks/UpdateContentEncoder;
+}
+
+public final class dev/yks/ContentType : dev/yks/AbstractContent {
+	public fun <init> (Ldev/yks/AbstractYType;)V
+	public synthetic fun copy ()Ldev/yks/AbstractContent;
+	public fun copy ()Ldev/yks/ContentType;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getContent ()Ljava/util/List;
+	public fun getLength ()J
+	public fun getRef ()I
+	public final fun getType ()Ldev/yks/AbstractYType;
+	public fun hashCode ()I
+	public fun isCountable ()Z
+	public fun mergeWith (Ldev/yks/AbstractContent;)Z
+	public fun toString ()Ljava/lang/String;
+	public fun write (Ldev/yks/UpdateContentEncoder;JJ)Ldev/yks/UpdateContentEncoder;
+}
+
+public final class dev/yks/DecodedUpdate {
+	public fun <init> (Ljava/util/List;Ldev/yks/DeleteSet;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Ldev/yks/DeleteSet;
+	public final fun copy (Ljava/util/List;Ldev/yks/DeleteSet;)Ldev/yks/DecodedUpdate;
+	public static synthetic fun copy$default (Ldev/yks/DecodedUpdate;Ljava/util/List;Ldev/yks/DeleteSet;ILjava/lang/Object;)Ldev/yks/DecodedUpdate;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDeleteSet ()Ldev/yks/DeleteSet;
+	public final fun getDs ()Ldev/yks/DeleteSet;
+	public final fun getStructs ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/DecodedUpdateStruct {
+	public fun <init> (Ldev/yks/Id;Ldev/yks/Id;Ldev/yks/Id;Ljava/lang/String;Ljava/lang/String;Ldev/yks/RootKind;ZJLdev/yks/AbstractContent;)V
+	public final fun component1 ()Ldev/yks/Id;
+	public final fun component2 ()Ldev/yks/Id;
+	public final fun component3 ()Ldev/yks/Id;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ldev/yks/RootKind;
+	public final fun component7 ()Z
+	public final fun component8 ()J
+	public final fun component9 ()Ldev/yks/AbstractContent;
+	public final fun copy (Ldev/yks/Id;Ldev/yks/Id;Ldev/yks/Id;Ljava/lang/String;Ljava/lang/String;Ldev/yks/RootKind;ZJLdev/yks/AbstractContent;)Ldev/yks/DecodedUpdateStruct;
+	public static synthetic fun copy$default (Ldev/yks/DecodedUpdateStruct;Ldev/yks/Id;Ldev/yks/Id;Ldev/yks/Id;Ljava/lang/String;Ljava/lang/String;Ldev/yks/RootKind;ZJLdev/yks/AbstractContent;ILjava/lang/Object;)Ldev/yks/DecodedUpdateStruct;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getContent ()Ldev/yks/AbstractContent;
+	public final fun getDeleted ()Z
+	public final fun getId ()Ldev/yks/Id;
+	public final fun getKind ()Ldev/yks/RootKind;
+	public final fun getLength ()J
+	public final fun getOrigin ()Ldev/yks/Id;
+	public final fun getParent ()Ljava/lang/String;
+	public final fun getParentSub ()Ljava/lang/String;
+	public final fun getRightOrigin ()Ldev/yks/Id;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/DeepDeltaKt {
+	public static final fun applyDeltaDeep (Ldev/yks/YDoc;Ldev/yks/YDocDeepDelta;Ljava/lang/Object;)V
+	public static synthetic fun applyDeltaDeep$default (Ldev/yks/YDoc;Ldev/yks/YDocDeepDelta;Ljava/lang/Object;ILjava/lang/Object;)V
+	public static final fun diffDocsToDelta (Ldev/yks/YDoc;Ldev/yks/YDoc;Ldev/yks/AbstractRenderer;)Ldev/yks/YDocDeepDelta;
+	public static synthetic fun diffDocsToDelta$default (Ldev/yks/YDoc;Ldev/yks/YDoc;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)Ldev/yks/YDocDeepDelta;
+	public static final fun toDeltaDeep (Ldev/yks/YDoc;Ldev/yks/AbstractRenderer;)Ldev/yks/YDocDeepDelta;
+	public static synthetic fun toDeltaDeep$default (Ldev/yks/YDoc;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)Ldev/yks/YDocDeepDelta;
+}
+
+public final class dev/yks/DeleteRange {
+	public fun <init> (JJ)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun contains (J)Z
+	public final fun copy (JJ)Ldev/yks/DeleteRange;
+	public static synthetic fun copy$default (Ldev/yks/DeleteRange;JJILjava/lang/Object;)Ldev/yks/DeleteRange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getClock ()J
+	public final fun getEnd ()J
+	public final fun getLen ()J
+	public final fun getLength ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/DeleteSet {
+	public static final field Companion Ldev/yks/DeleteSet$Companion;
+	public fun <init> ()V
+	public final fun add (Ldev/yks/Id;J)V
+	public static synthetic fun add$default (Ldev/yks/DeleteSet;Ldev/yks/Id;JILjava/lang/Object;)V
+	public final fun addAll (Ldev/yks/DeleteSet;)V
+	public final fun contains (Ldev/yks/Id;)Z
+	public final fun getClients ()Ljava/util/Map;
+	public final fun hasId (Ldev/yks/Id;)Z
+	public final fun isEmpty ()Z
+	public final fun ranges ()Ljava/util/List;
+	public final fun rangesFor (J)Ljava/util/List;
+	public final fun toIdSet ()Ldev/yks/IdSet;
+}
+
+public final class dev/yks/DeleteSet$Companion {
+	public final fun empty ()Ldev/yks/DeleteSet;
+}
+
+public final class dev/yks/DeleteSetKt {
+	public static final fun createDeleteSet ()Ldev/yks/DeleteSet;
+	public static final fun createDeleteSetFromStructStore (Ldev/yks/StructStore;)Ldev/yks/DeleteSet;
+	public static final fun createDeleteSetFromStructStore (Ldev/yks/YDoc;)Ldev/yks/DeleteSet;
+	public static final fun equalDeleteSets (Ldev/yks/DeleteSet;Ldev/yks/DeleteSet;)Z
+	public static final fun isDeleted (Ldev/yks/DeleteSet;JJ)Z
+	public static final fun isDeleted (Ldev/yks/DeleteSet;Ldev/yks/Id;)Z
+	public static final fun mergeDeleteSets (Ljava/util/List;)Ldev/yks/DeleteSet;
+	public static final fun toDeleteSet (Ldev/yks/IdSet;)Ldev/yks/DeleteSet;
+}
+
+public final class dev/yks/DiffRenderer : dev/yks/TwosetRenderer {
+	public fun <init> (Ldev/yks/YDoc;Ldev/yks/YDoc;Ldev/yks/DiffRendererOptions;)V
+	public synthetic fun <init> (Ldev/yks/YDoc;Ldev/yks/YDoc;Ldev/yks/DiffRendererOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun acceptAllChanges ()V
+	public final fun acceptChanges (Ldev/yks/Id;Ldev/yks/Id;)V
+	public static synthetic fun acceptChanges$default (Ldev/yks/DiffRenderer;Ldev/yks/Id;Ldev/yks/Id;ILjava/lang/Object;)V
+	public fun contentLength (Ldev/yks/ItemStruct;)J
+	public fun destroy ()V
+	public final fun getSuggestionMode ()Z
+	public final fun getSuggestionOrigins ()Ljava/util/List;
+	public fun readContent (Ljava/util/List;JJZLdev/yks/AbstractContent;I)V
+	public final fun rejectAllChanges ()V
+	public final fun rejectChanges (Ldev/yks/Id;Ldev/yks/Id;)V
+	public static synthetic fun rejectChanges$default (Ldev/yks/DiffRenderer;Ldev/yks/Id;Ldev/yks/Id;ILjava/lang/Object;)V
+	public final fun setSuggestionMode (Z)V
+	public final fun setSuggestionOrigins (Ljava/util/List;)V
+}
+
+public final class dev/yks/DiffRendererOptions {
+	public fun <init> ()V
+	public fun <init> (Ldev/yks/Attributions;)V
+	public synthetic fun <init> (Ldev/yks/Attributions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ldev/yks/Attributions;
+	public final fun copy (Ldev/yks/Attributions;)Ldev/yks/DiffRendererOptions;
+	public static synthetic fun copy$default (Ldev/yks/DiffRendererOptions;Ldev/yks/Attributions;ILjava/lang/Object;)Ldev/yks/DiffRendererOptions;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttrs ()Ldev/yks/Attributions;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/EventHandler {
+	public fun <init> ()V
+	public final fun getL ()Ljava/util/List;
+}
+
+public final class dev/yks/EventHandlerKt {
+	public static final fun addEventHandlerListener (Ldev/yks/EventHandler;Lkotlin/jvm/functions/Function2;)I
+	public static final fun callEventHandlerListeners (Ldev/yks/EventHandler;Ljava/lang/Object;Ljava/lang/Object;)V
+	public static final fun createEventHandler ()Ldev/yks/EventHandler;
+	public static final fun removeAllEventHandlerListeners (Ldev/yks/EventHandler;)V
+	public static final fun removeEventHandlerListener (Ldev/yks/EventHandler;Lkotlin/jvm/functions/Function2;)Z
+}
+
+public final class dev/yks/FollowRedoneResult {
+	public fun <init> (Ldev/yks/ItemStruct;J)V
+	public final fun component1 ()Ldev/yks/ItemStruct;
+	public final fun component2 ()J
+	public final fun copy (Ldev/yks/ItemStruct;J)Ldev/yks/FollowRedoneResult;
+	public static synthetic fun copy$default (Ldev/yks/FollowRedoneResult;Ldev/yks/ItemStruct;JILjava/lang/Object;)Ldev/yks/FollowRedoneResult;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDiff ()J
+	public final fun getItem ()Ldev/yks/ItemStruct;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/GC : dev/yks/AbstractStruct {
+	public fun <init> (Ldev/yks/Id;J)V
+	public fun getDeleted ()Z
+	public fun getId ()Ldev/yks/Id;
+	public fun getLength ()J
+	public fun getRef ()Ljava/lang/Integer;
+	public fun mergeWith (Ldev/yks/AbstractStruct;)Z
+	public fun setLength (J)V
+	public synthetic fun splice (J)Ldev/yks/AbstractStruct;
+	public fun splice (J)Ldev/yks/GC;
+}
+
+public final class dev/yks/Id : java/lang/Comparable {
+	public fun <init> (JJ)V
+	public fun compareTo (Ldev/yks/Id;)I
+	public synthetic fun compareTo (Ljava/lang/Object;)I
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun copy (JJ)Ldev/yks/Id;
+	public static synthetic fun copy$default (Ldev/yks/Id;JJILjava/lang/Object;)Ldev/yks/Id;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getClient ()J
+	public final fun getClock ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/IdKt {
+	public static final fun compareIDs (Ldev/yks/Id;Ldev/yks/Id;)Z
+	public static final fun createID (JJ)Ldev/yks/Id;
+	public static final fun readID (Ldev/yks/BinaryDecoder;)Ldev/yks/Id;
+	public static final fun readID (Ldev/yks/IdSetDecoderV1;)Ldev/yks/Id;
+	public static final fun writeID (Ldev/yks/BinaryEncoder;Ldev/yks/Id;)Ldev/yks/BinaryEncoder;
+	public static final fun writeID (Ldev/yks/IdSetEncoderV1;Ldev/yks/Id;)Ldev/yks/IdSetEncoderV1;
+}
+
+public final class dev/yks/IdMap {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Map;Ljava/util/Map;Ljava/util/Set;)V
+	public synthetic fun <init> (Ljava/util/Map;Ljava/util/Map;Ljava/util/Set;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun add (JJJLjava/util/List;)V
+	public final fun delete (JJJ)V
+	public final fun forEach (Lkotlin/jvm/functions/Function2;)V
+	public final fun getAttrs ()Ljava/util/Set;
+	public final fun getAttrsH ()Ljava/util/Map;
+	public final fun getClients ()Ljava/util/Map;
+	public final fun has (JJ)Z
+	public final fun hasId (Ldev/yks/Id;)Z
+	public final fun isEmpty ()Z
+	public final fun ranges ()Ljava/util/List;
+	public final fun ranges (J)Ljava/util/List;
+	public final fun slice (JJJ)Ljava/util/List;
+	public final fun sliceId (Ldev/yks/Id;J)Ljava/util/List;
+}
+
+public final class dev/yks/IdRange {
+	public fun <init> (JJ)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun contains (J)Z
+	public final fun copy (JJ)Ldev/yks/IdRange;
+	public static synthetic fun copy$default (Ldev/yks/IdRange;JJILjava/lang/Object;)Ldev/yks/IdRange;
+	public final fun copyWith (JJ)Ldev/yks/IdRange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttrs ()Ljava/util/List;
+	public final fun getClock ()J
+	public final fun getEnd ()J
+	public final fun getLen ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/IdRanges {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun add (JJ)V
+	public final fun copy ()Ldev/yks/IdRanges;
+	public final fun delete (JJ)V
+	public final fun getIds ()Ljava/util/List;
+}
+
+public final class dev/yks/IdSet {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun add (JJJ)V
+	public final fun add (Ldev/yks/Id;J)V
+	public static synthetic fun add$default (Ldev/yks/IdSet;Ldev/yks/Id;JILjava/lang/Object;)V
+	public final fun delete (JJJ)V
+	public final fun forEach (Lkotlin/jvm/functions/Function2;)V
+	public final fun getClients ()Ljava/util/Map;
+	public final fun has (JJ)Z
+	public final fun hasId (Ldev/yks/Id;)Z
+	public final fun intersects (JJJ)Z
+	public final fun intersects (Ldev/yks/Id;J)Z
+	public static synthetic fun intersects$default (Ldev/yks/IdSet;Ldev/yks/Id;JILjava/lang/Object;)Z
+	public final fun isEmpty ()Z
+	public final fun ranges ()Ljava/util/List;
+	public final fun ranges (J)Ljava/util/List;
+	public final fun slice (JJJ)Ljava/util/List;
+}
+
+public class dev/yks/IdSetDecoderV1 {
+	public fun <init> (Ldev/yks/BinaryDecoder;)V
+	public fun <init> ([B)V
+	public final fun getRestDecoder ()Ldev/yks/BinaryDecoder;
+	public final fun hasRemaining ()Z
+	public fun readDsClock ()J
+	public fun readDsLen ()J
+	public fun resetDsCurVal ()V
+}
+
+public class dev/yks/IdSetDecoderV2 : dev/yks/IdSetDecoderV1 {
+	public fun <init> (Ldev/yks/BinaryDecoder;)V
+	public fun <init> ([B)V
+	public fun readDsClock ()J
+	public fun readDsLen ()J
+	public fun resetDsCurVal ()V
+}
+
+public class dev/yks/IdSetEncoderV1 {
+	public fun <init> ()V
+	public fun <init> (Ldev/yks/BinaryEncoder;)V
+	public synthetic fun <init> (Ldev/yks/BinaryEncoder;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getRestEncoder ()Ldev/yks/BinaryEncoder;
+	public fun resetIdSetCurVal ()V
+	public fun toByteArray ()[B
+	public fun toUint8Array ()[B
+	public fun writeIdSetClock (J)V
+	public fun writeIdSetLen (J)V
+}
+
+public class dev/yks/IdSetEncoderV2 : dev/yks/IdSetEncoderV1 {
+	public fun <init> ()V
+	public fun <init> (Ldev/yks/BinaryEncoder;)V
+	public synthetic fun <init> (Ldev/yks/BinaryEncoder;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun resetIdSetCurVal ()V
+	public fun writeIdSetClock (J)V
+	public fun writeIdSetLen (J)V
+}
+
+public final class dev/yks/IdsKt {
+	public static final fun _deleteRangeFromIdSet (Ldev/yks/IdMap;JJJ)V
+	public static final fun _deleteRangeFromIdSet (Ldev/yks/IdSet;JJJ)V
+	public static final fun _diffSet (Ldev/yks/IdMap;Ldev/yks/IdMap;)Ldev/yks/IdMap;
+	public static final fun _diffSet (Ldev/yks/IdMap;Ldev/yks/IdSet;)Ldev/yks/IdMap;
+	public static final fun _diffSet (Ldev/yks/IdSet;Ldev/yks/IdMap;)Ldev/yks/IdSet;
+	public static final fun _diffSet (Ldev/yks/IdSet;Ldev/yks/IdSet;)Ldev/yks/IdSet;
+	public static final fun _intersectSets (Ldev/yks/IdMap;Ldev/yks/IdMap;)Ldev/yks/IdMap;
+	public static final fun _intersectSets (Ldev/yks/IdMap;Ldev/yks/IdSet;)Ldev/yks/IdMap;
+	public static final fun _intersectSets (Ldev/yks/IdSet;Ldev/yks/IdMap;)Ldev/yks/IdSet;
+	public static final fun _intersectSets (Ldev/yks/IdSet;Ldev/yks/IdSet;)Ldev/yks/IdSet;
+	public static final fun createContentAttribute (Ljava/lang/String;Ljava/lang/Object;)Ldev/yks/ContentAttribute;
+	public static final fun createIdMap ()Ldev/yks/IdMap;
+	public static final fun createIdMapFromIdSet (Ldev/yks/IdSet;Ljava/util/List;)Ldev/yks/IdMap;
+	public static final fun createIdSet ()Ldev/yks/IdSet;
+	public static final fun createIdSetFromIdMap (Ldev/yks/IdMap;)Ldev/yks/IdSet;
+	public static final fun createMaybeAttrRange (JJLjava/util/List;)Ldev/yks/MaybeAttrRange;
+	public static final fun createMaybeIdRange (JJZ)Ldev/yks/MaybeIdRange;
+	public static final fun decodeIdMap ([B)Ldev/yks/IdMap;
+	public static final fun decodeIdSet ([B)Ldev/yks/IdSet;
+	public static final fun diffIdMap (Ldev/yks/IdMap;Ldev/yks/IdMap;)Ldev/yks/IdMap;
+	public static final fun diffIdMap (Ldev/yks/IdMap;Ldev/yks/IdSet;)Ldev/yks/IdMap;
+	public static final fun diffIdSet (Ldev/yks/IdSet;Ldev/yks/IdMap;)Ldev/yks/IdSet;
+	public static final fun diffIdSet (Ldev/yks/IdSet;Ldev/yks/IdSet;)Ldev/yks/IdSet;
+	public static final fun encodeIdMap (Ldev/yks/IdMap;)[B
+	public static final fun encodeIdSet (Ldev/yks/IdSet;)[B
+	public static final fun equalIdMaps (Ldev/yks/IdMap;Ldev/yks/IdMap;)Z
+	public static final fun equalIdSets (Ldev/yks/IdSet;Ldev/yks/IdSet;)Z
+	public static final fun filterIdMap (Ldev/yks/IdMap;Lkotlin/jvm/functions/Function1;)Ldev/yks/IdMap;
+	public static final fun findIndexInIdRanges (Ljava/util/List;J)Ljava/lang/Integer;
+	public static final fun findRangeStartInIdRanges (Ljava/util/List;J)Ljava/lang/Integer;
+	public static final fun idmapAttrsEqual (Ljava/util/List;Ljava/util/List;)Z
+	public static final fun insertIntoIdMap (Ldev/yks/IdMap;Ldev/yks/IdMap;)V
+	public static final fun insertIntoIdMap (Ldev/yks/IdMap;Ldev/yks/IdSet;)V
+	public static final fun insertIntoIdSet (Ldev/yks/IdSet;Ldev/yks/IdSet;)V
+	public static final fun intersectMaps (Ldev/yks/IdMap;Ldev/yks/IdMap;)Ldev/yks/IdMap;
+	public static final fun intersectMaps (Ldev/yks/IdMap;Ldev/yks/IdSet;)Ldev/yks/IdMap;
+	public static final fun intersectSets (Ldev/yks/IdSet;Ldev/yks/IdMap;)Ldev/yks/IdSet;
+	public static final fun intersectSets (Ldev/yks/IdSet;Ldev/yks/IdSet;)Ldev/yks/IdSet;
+	public static final fun mergeIdMaps (Ljava/util/List;)Ldev/yks/IdMap;
+	public static final fun mergeIdSets (Ljava/util/List;)Ldev/yks/IdSet;
+	public static final fun readAndApplyDeleteSet (Ldev/yks/BinaryDecoder;Ldev/yks/YDoc;Ljava/lang/Object;)[B
+	public static final fun readAndApplyDeleteSet (Ldev/yks/IdSetDecoderV1;Ldev/yks/YDoc;Ljava/lang/Object;)[B
+	public static synthetic fun readAndApplyDeleteSet$default (Ldev/yks/BinaryDecoder;Ldev/yks/YDoc;Ljava/lang/Object;ILjava/lang/Object;)[B
+	public static synthetic fun readAndApplyDeleteSet$default (Ldev/yks/IdSetDecoderV1;Ldev/yks/YDoc;Ljava/lang/Object;ILjava/lang/Object;)[B
+	public static final fun readIdMap (Ldev/yks/BinaryDecoder;)Ldev/yks/IdMap;
+	public static final fun readIdMap (Ldev/yks/IdSetDecoderV1;)Ldev/yks/IdMap;
+	public static final fun readIdSet (Ldev/yks/BinaryDecoder;)Ldev/yks/IdSet;
+	public static final fun readIdSet (Ldev/yks/IdSetDecoderV1;)Ldev/yks/IdSet;
+	public static final fun writeIdMap (Ldev/yks/BinaryEncoder;Ldev/yks/IdMap;)V
+	public static final fun writeIdMap (Ldev/yks/IdSetEncoderV1;Ldev/yks/IdMap;)V
+	public static final fun writeIdSet (Ldev/yks/BinaryEncoder;Ldev/yks/IdSet;)V
+	public static final fun writeIdSet (Ldev/yks/IdSetEncoderV1;Ldev/yks/IdSet;)V
+}
+
+public final class dev/yks/ItemStruct : dev/yks/AbstractStruct {
+	public fun <init> (Ldev/yks/Id;JZLdev/yks/Id;Ldev/yks/Id;Ljava/lang/String;Ljava/lang/String;Ldev/yks/RootKind;Ldev/yks/AbstractContent;Z)V
+	public synthetic fun <init> (Ldev/yks/Id;JZLdev/yks/Id;Ldev/yks/Id;Ljava/lang/String;Ljava/lang/String;Ldev/yks/RootKind;Ldev/yks/AbstractContent;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ldev/yks/Id;
+	public final fun component10 ()Z
+	public final fun component2 ()J
+	public final fun component3 ()Z
+	public final fun component4 ()Ldev/yks/Id;
+	public final fun component5 ()Ldev/yks/Id;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun component8 ()Ldev/yks/RootKind;
+	public final fun component9 ()Ldev/yks/AbstractContent;
+	public final fun copy (Ldev/yks/Id;JZLdev/yks/Id;Ldev/yks/Id;Ljava/lang/String;Ljava/lang/String;Ldev/yks/RootKind;Ldev/yks/AbstractContent;Z)Ldev/yks/ItemStruct;
+	public static synthetic fun copy$default (Ldev/yks/ItemStruct;Ldev/yks/Id;JZLdev/yks/Id;Ldev/yks/Id;Ljava/lang/String;Ljava/lang/String;Ldev/yks/RootKind;Ldev/yks/AbstractContent;ZILjava/lang/Object;)Ldev/yks/ItemStruct;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getContent ()Ldev/yks/AbstractContent;
+	public final fun getCountable ()Z
+	public fun getDeleted ()Z
+	public fun getId ()Ldev/yks/Id;
+	public final fun getKind ()Ldev/yks/RootKind;
+	public fun getLength ()J
+	public final fun getOrigin ()Ldev/yks/Id;
+	public final fun getParent ()Ljava/lang/String;
+	public final fun getParentSub ()Ljava/lang/String;
+	public final fun getRightOrigin ()Ldev/yks/Id;
+	public fun hashCode ()I
+	public fun isItem ()Z
+	public fun setLength (J)V
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/ItemTextListPosition {
+	public fun <init> (Ldev/yks/ItemStruct;Ldev/yks/ItemStruct;ILjava/util/Map;Ldev/yks/AbstractRenderer;Ldev/yks/AbstractYType;)V
+	public synthetic fun <init> (Ldev/yks/ItemStruct;Ldev/yks/ItemStruct;ILjava/util/Map;Ldev/yks/AbstractRenderer;Ldev/yks/AbstractYType;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun formatText (Ldev/yks/YText;ILjava/util/Map;Ljava/lang/Object;)Ldev/yks/ItemTextListPosition;
+	public static synthetic fun formatText$default (Ldev/yks/ItemTextListPosition;Ldev/yks/YText;ILjava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)Ldev/yks/ItemTextListPosition;
+	public final fun forward ()Ldev/yks/ItemTextListPosition;
+	public final fun forward (Ldev/yks/AbstractYType;)Ldev/yks/ItemTextListPosition;
+	public final fun getCurrentFormats ()Ljava/util/Map;
+	public final fun getIndex ()I
+	public final fun getLeft ()Ldev/yks/ItemStruct;
+	public final fun getRenderer ()Ldev/yks/AbstractRenderer;
+	public final fun getRight ()Ldev/yks/ItemStruct;
+	public final fun getType ()Ldev/yks/AbstractYType;
+	public final fun setIndex (I)V
+	public final fun setLeft (Ldev/yks/ItemStruct;)V
+	public final fun setRight (Ldev/yks/ItemStruct;)V
+}
+
+public final class dev/yks/LazyStructReader {
+	public fun <init> (Ldev/yks/BinaryDecoder;Z)V
+	public synthetic fun <init> (Ldev/yks/BinaryDecoder;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ldev/yks/UpdateDecoderV1;Z)V
+	public synthetic fun <init> (Ldev/yks/UpdateDecoderV1;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ldev/yks/UpdateDecoderV2;Z)V
+	public synthetic fun <init> (Ldev/yks/UpdateDecoderV2;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> ([BZ)V
+	public synthetic fun <init> ([BZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getCurr ()Ldev/yks/AbstractStruct;
+	public final fun getDeleteSet ()Ldev/yks/DeleteSet;
+	public final fun getDone ()Z
+	public final fun getDs ()Ldev/yks/DeleteSet;
+	public final fun getFilterSkips ()Z
+	public final fun next ()Ldev/yks/AbstractStruct;
+}
+
+public final class dev/yks/LazyStructWriter {
+	public fun <init> ()V
+	public fun <init> (Ldev/yks/BinaryEncoder;)V
+	public synthetic fun <init> (Ldev/yks/BinaryEncoder;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ldev/yks/IdSetEncoderV1;)V
+	public final fun getClientStructs ()Ljava/util/List;
+	public final fun getCurrClient ()J
+	public final fun getEncoder ()Ldev/yks/BinaryEncoder;
+	public final fun getStartClock ()J
+	public final fun getWritten ()I
+	public final fun toByteArray ()[B
+	public final fun toUint8Array ()[B
+}
+
+public final class dev/yks/MapDeltaKt {
+	public static final fun yMapDelta ()Ldev/yks/YMapDelta;
+}
+
+public final class dev/yks/MaybeAttrRange {
+	public fun <init> (JJLjava/util/List;)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun component3 ()Ljava/util/List;
+	public final fun copy (JJLjava/util/List;)Ldev/yks/MaybeAttrRange;
+	public static synthetic fun copy$default (Ldev/yks/MaybeAttrRange;JJLjava/util/List;ILjava/lang/Object;)Ldev/yks/MaybeAttrRange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttrs ()Ljava/util/List;
+	public final fun getClock ()J
+	public final fun getLen ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/MaybeIdRange {
+	public fun <init> (JJZ)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun component3 ()Z
+	public final fun copy (JJZ)Ldev/yks/MaybeIdRange;
+	public static synthetic fun copy$default (Ldev/yks/MaybeIdRange;JJZILjava/lang/Object;)Ldev/yks/MaybeIdRange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getClock ()J
+	public final fun getExists ()Z
+	public final fun getLen ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/ObfuscatorOptions {
+	public fun <init> ()V
+	public fun <init> (ZZZZ)V
+	public synthetic fun <init> (ZZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Z
+	public final fun component2 ()Z
+	public final fun component3 ()Z
+	public final fun component4 ()Z
+	public final fun copy (ZZZZ)Ldev/yks/ObfuscatorOptions;
+	public static synthetic fun copy$default (Ldev/yks/ObfuscatorOptions;ZZZZILjava/lang/Object;)Ldev/yks/ObfuscatorOptions;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFormatting ()Z
+	public final fun getName ()Z
+	public final fun getSubdocs ()Z
+	public final fun getYxml ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/PendingStructs {
+	public fun <init> (Ljava/util/Map;[B)V
+	public final fun component1 ()Ljava/util/Map;
+	public final fun component2 ()[B
+	public final fun copy (Ljava/util/Map;[B)Ldev/yks/PendingStructs;
+	public static synthetic fun copy$default (Ldev/yks/PendingStructs;Ljava/util/Map;[BILjava/lang/Object;)Ldev/yks/PendingStructs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMissing ()Ljava/util/Map;
+	public final fun getUpdate ()[B
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/PermanentUserData : java/lang/AutoCloseable {
+	public static final field DELETE_SETS_KEY Ljava/lang/String;
+	public static final field IDS_KEY Ljava/lang/String;
+	public fun <init> (Ldev/yks/YDoc;Ldev/yks/YMap;)V
+	public synthetic fun <init> (Ldev/yks/YDoc;Ldev/yks/YMap;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun close ()V
+	public final fun getClients ()Ljava/util/Map;
+	public final fun getDoc ()Ldev/yks/YDoc;
+	public final fun getDss ()Ljava/util/Map;
+	public final fun getUserByClientId (J)Ljava/lang/String;
+	public final fun getUserByDeletedId (Ldev/yks/Id;)Ljava/lang/String;
+	public final fun getYusers ()Ldev/yks/YMap;
+	public final fun setUserMapping (Ldev/yks/YDoc;JLjava/lang/String;Lkotlin/jvm/functions/Function2;)V
+	public static synthetic fun setUserMapping$default (Ldev/yks/PermanentUserData;Ldev/yks/YDoc;JLjava/lang/String;Lkotlin/jvm/functions/Function2;ILjava/lang/Object;)V
+}
+
+public final class dev/yks/PublicApiKt {
+	public static final fun addChangedTypeToTransaction (Ldev/yks/YTransaction;Ldev/yks/AbstractYType;Ljava/lang/String;)V
+	public static synthetic fun addChangedTypeToTransaction$default (Ldev/yks/YTransaction;Ldev/yks/AbstractYType;Ljava/lang/String;ILjava/lang/Object;)V
+	public static final fun cleanupContextlessFormattingGap (Ldev/yks/YDoc;Ldev/yks/ItemStruct;)I
+	public static final fun cleanupContextlessFormattingGap (Ldev/yks/YTransaction;Ldev/yks/ItemStruct;)I
+	public static final fun cleanupContextlessFormattingGap (Ldev/yks/YTransactionEvent;Ldev/yks/ItemStruct;)I
+	public static final fun cleanupFormattingGap (Ldev/yks/YDoc;Ldev/yks/ItemStruct;Ldev/yks/ItemStruct;Ljava/util/Map;Ljava/util/Map;)I
+	public static final fun cleanupFormattingGap (Ldev/yks/YTransaction;Ldev/yks/ItemStruct;Ldev/yks/ItemStruct;Ljava/util/Map;Ljava/util/Map;)I
+	public static final fun cleanupFormattingGap (Ldev/yks/YTransactionEvent;Ldev/yks/ItemStruct;Ldev/yks/ItemStruct;Ljava/util/Map;Ljava/util/Map;)I
+	public static synthetic fun cleanupFormattingGap$default (Ldev/yks/YDoc;Ldev/yks/ItemStruct;Ldev/yks/ItemStruct;Ljava/util/Map;Ljava/util/Map;ILjava/lang/Object;)I
+	public static final fun cleanupYTextAfterTransaction (Ldev/yks/YTransaction;)I
+	public static final fun cleanupYTextAfterTransaction (Ldev/yks/YTransactionEvent;)I
+	public static final fun cleanupYTextFormatting (Ldev/yks/YText;)I
+	public static final fun computeModifiedFromItems (Ldev/yks/YDoc;Ldev/yks/IdSet;)Ljava/util/Map;
+	public static final fun deleteText (Ldev/yks/YText;IILjava/lang/Object;)V
+	public static synthetic fun deleteText$default (Ldev/yks/YText;IILjava/lang/Object;ILjava/lang/Object;)V
+	public static final fun findRootTypeKey (Ldev/yks/AbstractYType;)Ljava/lang/String;
+	public static final fun findTypeInOtherDoc (Ldev/yks/AbstractYType;Ldev/yks/YDoc;)Ldev/yks/AbstractYType;
+	public static final fun generateNewClientId ()J
+	public static final fun getPathTo (Ldev/yks/AbstractYType;Ldev/yks/AbstractYType;Ldev/yks/AbstractRenderer;)Ljava/util/List;
+	public static synthetic fun getPathTo$default (Ldev/yks/AbstractYType;Ldev/yks/AbstractYType;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)Ljava/util/List;
+	public static final fun getTypeChildSummaries (Ldev/yks/AbstractYType;)Ljava/util/List;
+	public static final fun getTypeChildTypes (Ldev/yks/AbstractYType;)Ljava/util/List;
+	public static final fun getTypeChildren (Ldev/yks/AbstractYType;)Ljava/util/List;
+	public static final fun isParentOf (Ldev/yks/AbstractYType;Ldev/yks/AbstractYType;)Z
+	public static final fun isParentOf (Ldev/yks/AbstractYType;Ldev/yks/ItemStruct;)Z
+	public static final fun logType (Ldev/yks/AbstractYType;)Ljava/lang/String;
+	public static final fun transact (Ldev/yks/YDoc;Ljava/lang/Object;ZLkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+	public static final fun transact (Ldev/yks/YDoc;Lkotlin/jvm/functions/Function1;Ljava/lang/Object;Z)Ljava/lang/Object;
+	public static synthetic fun transact$default (Ldev/yks/YDoc;Ljava/lang/Object;ZLkotlin/jvm/functions/Function0;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun transact$default (Ldev/yks/YDoc;Lkotlin/jvm/functions/Function1;Ljava/lang/Object;ZILjava/lang/Object;)Ljava/lang/Object;
+	public static final fun typeArrayToArraySnapshot (Ldev/yks/YArray;Ldev/yks/Snapshot;)Ljava/util/List;
+	public static final fun typeListToArraySnapshot (Ldev/yks/AbstractYType;Ldev/yks/Snapshot;)Ljava/util/List;
+	public static final fun typeMapGetAllSnapshot (Ldev/yks/YMap;Ldev/yks/Snapshot;)Ljava/util/Map;
+	public static final fun typeMapGetSnapshot (Ldev/yks/YMap;Ljava/lang/String;Ldev/yks/Snapshot;)Ljava/lang/Object;
+	public static final fun typeTextToArraySnapshot (Ldev/yks/YText;Ldev/yks/Snapshot;)Ljava/util/List;
+	public static final fun typeTextToDeltaSnapshot (Ldev/yks/YText;Ldev/yks/Snapshot;)Ldev/yks/YTextDelta;
+	public static final fun typeTextToStringSnapshot (Ldev/yks/YText;Ldev/yks/Snapshot;)Ljava/lang/String;
+	public static final fun typeXmlFragmentToArraySnapshot (Ldev/yks/YXmlFragment;Ldev/yks/Snapshot;)Ljava/util/List;
+	public static final fun typeXmlFragmentToDeltaSnapshot (Ldev/yks/YXmlFragment;Ldev/yks/Snapshot;)Ljava/util/List;
+	public static final fun typeXmlFragmentToJsonSnapshot (Ldev/yks/YXmlFragment;Ldev/yks/Snapshot;)Ljava/util/List;
+	public static final fun typeXmlFragmentToStringSnapshot (Ldev/yks/YXmlFragment;Ldev/yks/Snapshot;Z)Ljava/lang/String;
+	public static synthetic fun typeXmlFragmentToStringSnapshot$default (Ldev/yks/YXmlFragment;Ldev/yks/Snapshot;ZILjava/lang/Object;)Ljava/lang/String;
+}
+
+public final class dev/yks/RelativePosition {
+	public fun <init> ()V
+	public fun <init> (Ldev/yks/Id;Ljava/lang/String;Ldev/yks/Id;I)V
+	public synthetic fun <init> (Ldev/yks/Id;Ljava/lang/String;Ldev/yks/Id;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ldev/yks/Id;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ldev/yks/Id;
+	public final fun component4 ()I
+	public final fun copy (Ldev/yks/Id;Ljava/lang/String;Ldev/yks/Id;I)Ldev/yks/RelativePosition;
+	public static synthetic fun copy$default (Ldev/yks/RelativePosition;Ldev/yks/Id;Ljava/lang/String;Ldev/yks/Id;IILjava/lang/Object;)Ldev/yks/RelativePosition;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAssoc ()I
+	public final fun getItem ()Ldev/yks/Id;
+	public final fun getTname ()Ljava/lang/String;
+	public final fun getType ()Ldev/yks/Id;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/RelativePositionKt {
+	public static final fun compareRelativePositions (Ldev/yks/RelativePosition;Ldev/yks/RelativePosition;)Z
+	public static final fun createAbsolutePosition (Ldev/yks/AbstractYType;II)Ldev/yks/AbsolutePosition;
+	public static synthetic fun createAbsolutePosition$default (Ldev/yks/AbstractYType;IIILjava/lang/Object;)Ldev/yks/AbsolutePosition;
+	public static final fun createAbsolutePositionFromRelativePosition (Ldev/yks/RelativePosition;Ldev/yks/YDoc;ZLdev/yks/AbstractRenderer;)Ldev/yks/AbsolutePosition;
+	public static synthetic fun createAbsolutePositionFromRelativePosition$default (Ldev/yks/RelativePosition;Ldev/yks/YDoc;ZLdev/yks/AbstractRenderer;ILjava/lang/Object;)Ldev/yks/AbsolutePosition;
+	public static final fun createRelativePosition (Ldev/yks/AbstractYType;Ldev/yks/Id;I)Ldev/yks/RelativePosition;
+	public static synthetic fun createRelativePosition$default (Ldev/yks/AbstractYType;Ldev/yks/Id;IILjava/lang/Object;)Ldev/yks/RelativePosition;
+	public static final fun createRelativePositionFromJSON (Ljava/util/Map;)Ldev/yks/RelativePosition;
+	public static final fun createRelativePositionFromTypeIndex (Ldev/yks/AbstractYType;IILdev/yks/AbstractRenderer;)Ldev/yks/RelativePosition;
+	public static synthetic fun createRelativePositionFromTypeIndex$default (Ldev/yks/AbstractYType;IILdev/yks/AbstractRenderer;ILjava/lang/Object;)Ldev/yks/RelativePosition;
+	public static final fun decodeRelativePosition ([B)Ldev/yks/RelativePosition;
+	public static final fun encodeRelativePosition (Ldev/yks/RelativePosition;)[B
+	public static final fun readRelativePosition (Ldev/yks/BinaryDecoder;)Ldev/yks/RelativePosition;
+	public static final fun readRelativePosition (Ldev/yks/IdSetDecoderV1;)Ldev/yks/RelativePosition;
+	public static final fun relativePositionToJSON (Ldev/yks/RelativePosition;)Ljava/util/Map;
+	public static final fun writeRelativePosition (Ldev/yks/BinaryEncoder;Ldev/yks/RelativePosition;)Ldev/yks/BinaryEncoder;
+	public static final fun writeRelativePosition (Ldev/yks/IdSetEncoderV1;Ldev/yks/RelativePosition;)Ldev/yks/IdSetEncoderV1;
+}
+
+public final class dev/yks/RendererEvent {
+	public fun <init> (Ljava/lang/String;Ldev/yks/AbstractRenderer;Ldev/yks/IdSet;Ljava/lang/Object;Z)V
+	public synthetic fun <init> (Ljava/lang/String;Ldev/yks/AbstractRenderer;Ldev/yks/IdSet;Ljava/lang/Object;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ldev/yks/AbstractRenderer;
+	public final fun component3 ()Ldev/yks/IdSet;
+	public final fun component4 ()Ljava/lang/Object;
+	public final fun component5 ()Z
+	public final fun copy (Ljava/lang/String;Ldev/yks/AbstractRenderer;Ldev/yks/IdSet;Ljava/lang/Object;Z)Ldev/yks/RendererEvent;
+	public static synthetic fun copy$default (Ldev/yks/RendererEvent;Ljava/lang/String;Ldev/yks/AbstractRenderer;Ldev/yks/IdSet;Ljava/lang/Object;ZILjava/lang/Object;)Ldev/yks/RendererEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIdSet ()Ldev/yks/IdSet;
+	public final fun getLocal ()Z
+	public final fun getName ()Ljava/lang/String;
+	public final fun getOrigin ()Ljava/lang/Object;
+	public final fun getRenderer ()Ldev/yks/AbstractRenderer;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/RendererKt {
+	public static final field rendererType Ljava/lang/String;
+	public static final fun createDiffRenderer (Ldev/yks/YDoc;Ldev/yks/YDoc;Ldev/yks/DiffRendererOptions;)Ldev/yks/DiffRenderer;
+	public static synthetic fun createDiffRenderer$default (Ldev/yks/YDoc;Ldev/yks/YDoc;Ldev/yks/DiffRendererOptions;ILjava/lang/Object;)Ldev/yks/DiffRenderer;
+	public static final fun createSnapshotRenderer (Ldev/yks/Snapshot;Ldev/yks/Snapshot;)Ldev/yks/SnapshotRenderer;
+	public static synthetic fun createSnapshotRenderer$default (Ldev/yks/Snapshot;Ldev/yks/Snapshot;ILjava/lang/Object;)Ldev/yks/SnapshotRenderer;
+	public static final fun get$renderer ()Ljava/lang/String;
+	public static final fun getAttributionJsonSchema ()Ldev/yks/AttributionJsonSchema;
+	public static final fun getBaseRenderer ()Ldev/yks/BaseRenderer;
+	public static final fun rendererContentLength (Ldev/yks/AbstractRenderer;Ldev/yks/ItemStruct;)J
+}
+
+public final class dev/yks/RootKind : java/lang/Enum {
+	public static final field Array Ldev/yks/RootKind;
+	public static final field Map Ldev/yks/RootKind;
+	public static final field Text Ldev/yks/RootKind;
+	public static final field XmlElement Ldev/yks/RootKind;
+	public static final field XmlFragment Ldev/yks/RootKind;
+	public static final field XmlHook Ldev/yks/RootKind;
+	public static final field XmlText Ldev/yks/RootKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/yks/RootKind;
+	public static fun values ()[Ldev/yks/RootKind;
+}
+
+public final class dev/yks/Skip : dev/yks/AbstractStruct {
+	public fun <init> (Ldev/yks/Id;J)V
+	public fun getDeleted ()Z
+	public fun getId ()Ldev/yks/Id;
+	public fun getLength ()J
+	public fun getRef ()Ljava/lang/Integer;
+	public fun mergeWith (Ldev/yks/AbstractStruct;)Z
+	public fun setLength (J)V
+	public synthetic fun splice (J)Ldev/yks/AbstractStruct;
+	public fun splice (J)Ldev/yks/Skip;
+}
+
+public final class dev/yks/Snapshot {
+	public fun <init> (Ldev/yks/DeleteSet;Ljava/util/Map;Ljava/util/Map;)V
+	public synthetic fun <init> (Ldev/yks/DeleteSet;Ljava/util/Map;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ldev/yks/IdSet;Ljava/util/Map;)V
+	public final fun component1 ()Ldev/yks/DeleteSet;
+	public final fun component2 ()Ljava/util/Map;
+	public final fun component3 ()Ljava/util/Map;
+	public final fun copy (Ldev/yks/DeleteSet;Ljava/util/Map;Ljava/util/Map;)Ldev/yks/Snapshot;
+	public static synthetic fun copy$default (Ldev/yks/Snapshot;Ldev/yks/DeleteSet;Ljava/util/Map;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/Snapshot;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDeleteSet ()Ldev/yks/DeleteSet;
+	public final fun getDs ()Ldev/yks/DeleteSet;
+	public final fun getRoots ()Ljava/util/Map;
+	public final fun getSv ()Ljava/util/Map;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/SnapshotKt {
+	public static final fun createDocFromSnapshot (Ldev/yks/YDoc;Ldev/yks/Snapshot;Ldev/yks/YDoc;)Ldev/yks/YDoc;
+	public static synthetic fun createDocFromSnapshot$default (Ldev/yks/YDoc;Ldev/yks/Snapshot;Ldev/yks/YDoc;ILjava/lang/Object;)Ldev/yks/YDoc;
+	public static final fun createSnapshot (Ldev/yks/DeleteSet;Ljava/util/Map;)Ldev/yks/Snapshot;
+	public static final fun createSnapshot (Ldev/yks/IdSet;Ljava/util/Map;)Ldev/yks/Snapshot;
+	public static final fun decodeSnapshot (Ldev/yks/IdSetDecoderV1;)Ldev/yks/Snapshot;
+	public static final fun decodeSnapshot ([B)Ldev/yks/Snapshot;
+	public static final fun decodeSnapshotV2 (Ldev/yks/IdSetDecoderV1;)Ldev/yks/Snapshot;
+	public static final fun decodeSnapshotV2 ([B)Ldev/yks/Snapshot;
+	public static final fun encodeSnapshot (Ldev/yks/Snapshot;)[B
+	public static final fun encodeSnapshotV2 (Ldev/yks/Snapshot;Ldev/yks/IdSetEncoderV1;)[B
+	public static synthetic fun encodeSnapshotV2$default (Ldev/yks/Snapshot;Ldev/yks/IdSetEncoderV1;ILjava/lang/Object;)[B
+	public static final fun equalSnapshots (Ldev/yks/Snapshot;Ldev/yks/Snapshot;)Z
+	public static final fun getEmptySnapshot ()Ldev/yks/Snapshot;
+	public static final fun snapshot (Ldev/yks/YDoc;)Ldev/yks/Snapshot;
+	public static final fun snapshotContainsUpdate (Ldev/yks/Snapshot;[B)Z
+	public static final fun snapshotContainsUpdateV2 (Ldev/yks/Snapshot;[B)Z
+	public static final fun splitSnapshotAffectedStructs (Ldev/yks/YTransaction;Ldev/yks/Snapshot;)V
+}
+
+public final class dev/yks/SnapshotRenderer : dev/yks/AbstractRenderer {
+	public fun <init> (Ldev/yks/Snapshot;Ldev/yks/Snapshot;)V
+	public synthetic fun <init> (Ldev/yks/Snapshot;Ldev/yks/Snapshot;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun contentLength (Ldev/yks/ItemStruct;)J
+	public fun getAttributed ()Ldev/yks/IdSet;
+	public final fun getAttrs ()Ldev/yks/IdMap;
+	public final fun getNextSnapshot ()Ldev/yks/Snapshot;
+	public final fun getPrevSnapshot ()Ldev/yks/Snapshot;
+	public fun hasItem (Ldev/yks/ItemStruct;)Z
+	public fun readContent (Ljava/util/List;JJZLdev/yks/AbstractContent;I)V
+}
+
+public final class dev/yks/SnapshotRootType {
+	public fun <init> (Ldev/yks/RootKind;Ljava/lang/String;)V
+	public synthetic fun <init> (Ldev/yks/RootKind;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ldev/yks/RootKind;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ldev/yks/RootKind;Ljava/lang/String;)Ldev/yks/SnapshotRootType;
+	public static synthetic fun copy$default (Ldev/yks/SnapshotRootType;Ldev/yks/RootKind;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/SnapshotRootType;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getKind ()Ldev/yks/RootKind;
+	public final fun getXmlElementNodeName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/StackItem {
+	public fun <init> (Ldev/yks/IdSet;Ldev/yks/IdSet;)V
+	public final fun getDeletedCount ()I
+	public final fun getDeletes ()Ldev/yks/IdSet;
+	public final fun getInsertedCount ()I
+	public final fun getInserts ()Ldev/yks/IdSet;
+	public final fun getMeta ()Ljava/util/Map;
+	public final fun isEmpty ()Z
+}
+
+public final class dev/yks/StateVectorKt {
+	public static final fun decodeStateVector ([B)Ljava/util/Map;
+	public static final fun decodeStateVectorV2 ([B)Ljava/util/Map;
+	public static final fun encodeStateVector (Ljava/util/Map;)[B
+	public static final fun encodeStateVectorV2 (Ldev/yks/YDoc;Ldev/yks/IdSetEncoderV1;)[B
+	public static final fun encodeStateVectorV2 (Ljava/util/Map;Ldev/yks/IdSetEncoderV1;)[B
+	public static synthetic fun encodeStateVectorV2$default (Ldev/yks/YDoc;Ldev/yks/IdSetEncoderV1;ILjava/lang/Object;)[B
+	public static synthetic fun encodeStateVectorV2$default (Ljava/util/Map;Ldev/yks/IdSetEncoderV1;ILjava/lang/Object;)[B
+	public static final fun getState (Ldev/yks/StructStore;J)J
+	public static final fun getState (Ldev/yks/YDoc;J)J
+	public static final fun getStateVector (Ldev/yks/StructStore;)Ljava/util/Map;
+	public static final fun getStateVector (Ldev/yks/YDoc;)Ljava/util/Map;
+	public static final fun integrityCheck (Ldev/yks/StructStore;)V
+	public static final fun integrityCheck (Ldev/yks/YDoc;)V
+	public static final fun readStateVector (Ldev/yks/BinaryDecoder;)Ljava/util/Map;
+	public static final fun readStateVector (Ldev/yks/IdSetDecoderV1;)Ljava/util/Map;
+	public static final fun writeDocumentStateVector (Ldev/yks/BinaryEncoder;Ldev/yks/YDoc;)Ldev/yks/BinaryEncoder;
+	public static final fun writeDocumentStateVector (Ldev/yks/IdSetEncoderV1;Ldev/yks/YDoc;)Ldev/yks/IdSetEncoderV1;
+	public static final fun writeStateVector (Ldev/yks/BinaryEncoder;Ljava/util/Map;)Ldev/yks/BinaryEncoder;
+	public static final fun writeStateVector (Ldev/yks/IdSetEncoderV1;Ljava/util/Map;)Ldev/yks/IdSetEncoderV1;
+}
+
+public final class dev/yks/StructStore {
+	public fun <init> ()V
+	public fun <init> (Ldev/yks/YDoc;)V
+	public synthetic fun <init> (Ldev/yks/YDoc;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun deleteSet ()Ldev/yks/DeleteSet;
+	public final fun get (Ldev/yks/Id;)Ldev/yks/AbstractStruct;
+	public final fun getClients ()Ljava/util/Map;
+	public final fun getClock (J)J
+	public final fun getDs ()Ldev/yks/IdSet;
+	public final fun getIndex (Ldev/yks/Id;)Ldev/yks/StructStoreIndex;
+	public final fun getItem (Ldev/yks/Id;)Ldev/yks/ItemStruct;
+	public final fun getPendingDs ()[B
+	public final fun getPendingStructs ()Ldev/yks/PendingStructs;
+	public final fun getSkips ()Ldev/yks/IdSet;
+	public final fun integrityCheck ()V
+	public final fun setPendingDs ([B)V
+	public final fun setPendingStructs (Ldev/yks/PendingStructs;)V
+	public final fun stateVector ()Ljava/util/Map;
+}
+
+public final class dev/yks/StructStoreIndex {
+	public fun <init> (Ljava/util/List;I)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()I
+	public final fun copy (Ljava/util/List;I)Ldev/yks/StructStoreIndex;
+	public static synthetic fun copy$default (Ldev/yks/StructStoreIndex;Ljava/util/List;IILjava/lang/Object;)Ldev/yks/StructStoreIndex;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getIndex ()I
+	public final fun getStructs ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/StructsKt {
+	public static final field structGCRefNumber I
+	public static final field structSkipRefNumber I
+	public static final fun _createInsertSliceFromStructs (Ljava/util/List;Z)Ljava/util/List;
+	public static synthetic fun _createInsertSliceFromStructs$default (Ljava/util/List;ZILjava/lang/Object;)Ljava/util/List;
+	public static final fun addStructToIdSet (Ldev/yks/IdSet;Ldev/yks/AbstractStruct;)V
+	public static final fun createInsertSliceFromStructs (Ljava/util/List;Z)Ljava/util/List;
+	public static synthetic fun createInsertSliceFromStructs$default (Ljava/util/List;ZILjava/lang/Object;)Ljava/util/List;
+	public static final fun findIndexCleanStart (Ljava/util/List;J)I
+	public static final fun findIndexSS (Ljava/util/List;J)I
+	public static final fun followRedone (Ldev/yks/YDoc;Ldev/yks/Id;)Ldev/yks/FollowRedoneResult;
+	public static final fun gcIdSet (Ldev/yks/YDoc;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function1;)Ldev/yks/IdSet;
+	public static synthetic fun gcIdSet$default (Ldev/yks/YDoc;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ldev/yks/IdSet;
+	public static final fun getItem (Ldev/yks/StructStore;Ldev/yks/Id;)Ldev/yks/ItemStruct;
+	public static final fun getItemCleanEnd (Ldev/yks/YDoc;Ldev/yks/Id;)Ldev/yks/ItemStruct;
+	public static final fun getItemCleanEnd (Ldev/yks/YTransaction;Ldev/yks/Id;)Ldev/yks/ItemStruct;
+	public static final fun getItemCleanEnd (Ldev/yks/YTransaction;Ldev/yks/StructStore;Ldev/yks/Id;)Ldev/yks/ItemStruct;
+	public static final fun getItemCleanStart (Ldev/yks/YDoc;Ldev/yks/Id;)Ldev/yks/ItemStruct;
+	public static final fun getItemCleanStart (Ldev/yks/YTransaction;Ldev/yks/Id;)Ldev/yks/ItemStruct;
+	public static final fun getTypeStructs (Ldev/yks/AbstractYType;)Ljava/util/List;
+	public static final fun iterateDeletedStructs (Ldev/yks/YDoc;Ldev/yks/DeleteSet;Lkotlin/jvm/functions/Function1;)V
+	public static final fun iterateDeletedStructs (Ldev/yks/YTransaction;Ldev/yks/DeleteSet;Lkotlin/jvm/functions/Function1;)V
+	public static final fun iterateStructs (Ljava/util/List;JJLkotlin/jvm/functions/Function1;)V
+	public static final fun iterateStructsByIdSet (Ldev/yks/YDoc;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function3;)V
+	public static final fun iterateStructsByIdSet (Ldev/yks/YTransaction;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function3;)V
+	public static final fun iterateStructsByIdSetWithoutSplits (Ldev/yks/StructStore;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function3;)V
+	public static final fun iterateStructsByIdSetWithoutSplits (Ldev/yks/YDoc;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function3;)V
+	public static final fun iterateStructsByIdSetWithoutSplits (Ldev/yks/YTransaction;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function3;)V
+	public static final fun iterateStructsWithoutSplits (Ljava/util/List;JJLkotlin/jvm/functions/Function3;)V
+	public static final fun keepItem (Ldev/yks/YDoc;Ldev/yks/ItemStruct;Z)Ldev/yks/IdSet;
+	public static synthetic fun keepItem$default (Ldev/yks/YDoc;Ldev/yks/ItemStruct;ZILjava/lang/Object;)Ldev/yks/IdSet;
+	public static final fun nextID (Ldev/yks/YDoc;)Ldev/yks/Id;
+	public static final fun nextID (Ldev/yks/YTransaction;)Ldev/yks/Id;
+	public static final fun replaceStruct (Ldev/yks/BlockSet;Ldev/yks/AbstractStruct;Ldev/yks/AbstractStruct;)Ldev/yks/AbstractStruct;
+	public static final fun replaceStruct (Ljava/util/List;Ldev/yks/AbstractStruct;Ldev/yks/AbstractStruct;)Ldev/yks/AbstractStruct;
+	public static final fun splitStruct (Ldev/yks/AbstractStruct;J)Ldev/yks/AbstractStruct;
+	public static final fun tryGc (Ldev/yks/DeleteSet;Ldev/yks/StructStore;Lkotlin/jvm/functions/Function1;)V
+	public static final fun tryGc (Ldev/yks/YDoc;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function1;)Ldev/yks/IdSet;
+	public static final fun tryGc (Ldev/yks/YTransaction;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function1;)Ldev/yks/IdSet;
+	public static synthetic fun tryGc$default (Ldev/yks/YDoc;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ldev/yks/IdSet;
+	public static synthetic fun tryGc$default (Ldev/yks/YTransaction;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ldev/yks/IdSet;
+	public static final fun tryGcDeleteSet (Ldev/yks/YDoc;Ldev/yks/DeleteSet;Lkotlin/jvm/functions/Function1;)Ldev/yks/IdSet;
+	public static final fun tryGcDeleteSet (Ldev/yks/YDoc;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function1;)Ldev/yks/IdSet;
+	public static final fun tryGcDeleteSet (Ldev/yks/YTransaction;Ldev/yks/DeleteSet;Lkotlin/jvm/functions/Function1;)Ldev/yks/IdSet;
+	public static final fun tryGcDeleteSet (Ldev/yks/YTransaction;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function1;)Ldev/yks/IdSet;
+	public static synthetic fun tryGcDeleteSet$default (Ldev/yks/YDoc;Ldev/yks/DeleteSet;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ldev/yks/IdSet;
+	public static synthetic fun tryGcDeleteSet$default (Ldev/yks/YDoc;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ldev/yks/IdSet;
+	public static synthetic fun tryGcDeleteSet$default (Ldev/yks/YTransaction;Ldev/yks/DeleteSet;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ldev/yks/IdSet;
+	public static synthetic fun tryGcDeleteSet$default (Ldev/yks/YTransaction;Ldev/yks/IdSet;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ldev/yks/IdSet;
+	public static final fun tryMerge (Ldev/yks/IdSet;Ldev/yks/BlockSet;)I
+	public static final fun tryToMergeWithLefts (Ljava/util/List;I)I
+	public static final fun updateCurrentFormats (Ljava/util/Map;Ldev/yks/ContentFormat;)V
+}
+
+public final class dev/yks/Subscription : java/lang/AutoCloseable {
+	public fun close ()V
+}
+
+public final class dev/yks/TextDeltaKt {
+	public static final fun yTextDelta ()Ldev/yks/YTextDelta;
+}
+
+public class dev/yks/TwosetRenderer : dev/yks/AbstractRenderer {
+	public fun <init> (Ldev/yks/IdMap;Ldev/yks/IdMap;)V
+	public fun contentLength (Ldev/yks/ItemStruct;)J
+	public fun getAttributed ()Ldev/yks/IdSet;
+	public final fun getDeletes ()Ldev/yks/IdMap;
+	public final fun getInserts ()Ldev/yks/IdMap;
+	public fun readContent (Ljava/util/List;JJZLdev/yks/AbstractContent;I)V
+	protected fun setAttributed (Ldev/yks/IdSet;)V
+	public final fun setDeletes (Ldev/yks/IdMap;)V
+	public final fun setInserts (Ldev/yks/IdMap;)V
+}
+
+public final class dev/yks/UndoManager : java/lang/AutoCloseable {
+	public static final field Companion Ldev/yks/UndoManager$Companion;
+	public fun <init> (Ldev/yks/AbstractYType;Ldev/yks/UndoManagerOptions;)V
+	public synthetic fun <init> (Ldev/yks/AbstractYType;Ldev/yks/UndoManagerOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ldev/yks/YDoc;Ldev/yks/UndoManagerOptions;)V
+	public synthetic fun <init> (Ldev/yks/YDoc;Ldev/yks/UndoManagerOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/util/List;Ldev/yks/UndoManagerOptions;)V
+	public synthetic fun <init> (Ljava/util/List;Ldev/yks/UndoManagerOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun addToScope (Ldev/yks/AbstractYType;)V
+	public final fun addToScope (Ldev/yks/YDoc;)V
+	public final fun addToScope (Ljava/util/List;)V
+	public final fun addTrackedOrigin (Ljava/lang/Object;)V
+	public final fun canRedo ()Z
+	public final fun canUndo ()Z
+	public final fun clear (ZZ)V
+	public static synthetic fun clear$default (Ldev/yks/UndoManager;ZZILjava/lang/Object;)V
+	public fun close ()V
+	public final fun destroy ()V
+	public final fun getCanRedo ()Z
+	public final fun getCanUndo ()Z
+	public final fun getCurrStackItem ()Ldev/yks/StackItem;
+	public final fun getRedoStack ()Ljava/util/List;
+	public final fun getRedoStackSize ()I
+	public final fun getRedoing ()Z
+	public final fun getUndoStack ()Ljava/util/List;
+	public final fun getUndoStackSize ()I
+	public final fun getUndoing ()Z
+	public final fun off (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)V
+	public final fun on (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun once (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun redo ()Ldev/yks/StackItem;
+	public final fun removeTrackedOrigin (Ljava/lang/Object;)V
+	public final fun stopCapturing ()V
+	public final fun undo ()Ldev/yks/StackItem;
+}
+
+public final class dev/yks/UndoManager$Companion {
+}
+
+public final class dev/yks/UndoManagerEvent {
+	public fun <init> ()V
+	public fun <init> (Ldev/yks/StackItem;Ldev/yks/UndoStackItemType;Ljava/lang/Object;Ljava/util/Set;ZZ)V
+	public synthetic fun <init> (Ldev/yks/StackItem;Ldev/yks/UndoStackItemType;Ljava/lang/Object;Ljava/util/Set;ZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ldev/yks/StackItem;
+	public final fun component2 ()Ldev/yks/UndoStackItemType;
+	public final fun component3 ()Ljava/lang/Object;
+	public final fun component4 ()Ljava/util/Set;
+	public final fun component5 ()Z
+	public final fun component6 ()Z
+	public final fun copy (Ldev/yks/StackItem;Ldev/yks/UndoStackItemType;Ljava/lang/Object;Ljava/util/Set;ZZ)Ldev/yks/UndoManagerEvent;
+	public static synthetic fun copy$default (Ldev/yks/UndoManagerEvent;Ldev/yks/StackItem;Ldev/yks/UndoStackItemType;Ljava/lang/Object;Ljava/util/Set;ZZILjava/lang/Object;)Ldev/yks/UndoManagerEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getChangedParentTypes ()Ljava/util/Set;
+	public final fun getOrigin ()Ljava/lang/Object;
+	public final fun getRedoStackCleared ()Z
+	public final fun getStackItem ()Ldev/yks/StackItem;
+	public final fun getType ()Ldev/yks/UndoStackItemType;
+	public final fun getUndoStackCleared ()Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/UndoManagerKt {
+	public static final fun redoItem (Ldev/yks/YDoc;Ldev/yks/ItemStruct;Ljava/util/Set;Ldev/yks/IdSet;ZLdev/yks/UndoManager;)Ldev/yks/ItemStruct;
+	public static final fun redoItem (Ldev/yks/YTransaction;Ldev/yks/ItemStruct;Ljava/util/Set;Ldev/yks/IdSet;ZLdev/yks/UndoManager;)Ldev/yks/ItemStruct;
+	public static synthetic fun redoItem$default (Ldev/yks/YDoc;Ldev/yks/ItemStruct;Ljava/util/Set;Ldev/yks/IdSet;ZLdev/yks/UndoManager;ILjava/lang/Object;)Ldev/yks/ItemStruct;
+	public static synthetic fun redoItem$default (Ldev/yks/YTransaction;Ldev/yks/ItemStruct;Ljava/util/Set;Ldev/yks/IdSet;ZLdev/yks/UndoManager;ILjava/lang/Object;)Ldev/yks/ItemStruct;
+	public static final fun undoContentIds (Ldev/yks/YDoc;Ldev/yks/ContentIds;Ldev/yks/UndoManagerOptions;)Ldev/yks/StackItem;
+	public static synthetic fun undoContentIds$default (Ldev/yks/YDoc;Ldev/yks/ContentIds;Ldev/yks/UndoManagerOptions;ILjava/lang/Object;)Ldev/yks/StackItem;
+}
+
+public final class dev/yks/UndoManagerOptions {
+	public fun <init> ()V
+	public fun <init> (JLjava/lang/Long;Ljava/util/Set;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;ZZLdev/yks/YDoc;)V
+	public synthetic fun <init> (JLjava/lang/Long;Ljava/util/Set;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;ZZLdev/yks/YDoc;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()J
+	public final fun component2 ()Ljava/lang/Long;
+	public final fun component3 ()Ljava/util/Set;
+	public final fun component4 ()Lkotlin/jvm/functions/Function1;
+	public final fun component5 ()Lkotlin/jvm/functions/Function1;
+	public final fun component6 ()Z
+	public final fun component7 ()Z
+	public final fun component8 ()Ldev/yks/YDoc;
+	public final fun copy (JLjava/lang/Long;Ljava/util/Set;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;ZZLdev/yks/YDoc;)Ldev/yks/UndoManagerOptions;
+	public static synthetic fun copy$default (Ldev/yks/UndoManagerOptions;JLjava/lang/Long;Ljava/util/Set;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;ZZLdev/yks/YDoc;ILjava/lang/Object;)Ldev/yks/UndoManagerOptions;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCaptureTimeout ()Ljava/lang/Long;
+	public final fun getCaptureTimeoutMillis ()J
+	public final fun getCaptureTransaction ()Lkotlin/jvm/functions/Function1;
+	public final fun getDeleteFilter ()Lkotlin/jvm/functions/Function1;
+	public final fun getDoc ()Ldev/yks/YDoc;
+	public final fun getIgnoreRemoteAttributeChanges ()Z
+	public final fun getIgnoreRemoteMapChanges ()Z
+	public final fun getTrackedOrigins ()Ljava/util/Set;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/UndoStackItemType : java/lang/Enum {
+	public static final field Redo Ldev/yks/UndoStackItemType;
+	public static final field Undo Ldev/yks/UndoStackItemType;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/yks/UndoStackItemType;
+	public static fun values ()[Ldev/yks/UndoStackItemType;
+}
+
+public final class dev/yks/UnsupportedYjsStandardUpdateException : java/lang/IllegalArgumentException {
+	public final fun getFormat ()Ljava/lang/String;
+}
+
+public abstract interface class dev/yks/UpdateContentDecoder {
+	public abstract fun readAny ()Ljava/lang/Object;
+	public abstract fun readBuf ()[B
+	public abstract fun readJSON ()Ljava/lang/Object;
+	public abstract fun readKey ()Ljava/lang/String;
+	public abstract fun readLen ()J
+	public abstract fun readString ()Ljava/lang/String;
+	public abstract fun readTypeRef ()I
+}
+
+public abstract interface class dev/yks/UpdateContentEncoder {
+	public abstract fun writeAny (Ljava/lang/Object;)V
+	public abstract fun writeBuf ([B)V
+	public abstract fun writeJSON (Ljava/lang/Object;)V
+	public abstract fun writeKey (Ljava/lang/String;)V
+	public abstract fun writeLen (J)V
+	public abstract fun writeString (Ljava/lang/String;)V
+	public abstract fun writeTypeRef (I)V
+}
+
+public class dev/yks/UpdateDecoderV1 : dev/yks/IdSetDecoderV1, dev/yks/UpdateContentDecoder {
+	public fun <init> (Ldev/yks/BinaryDecoder;)V
+	public fun <init> ([B)V
+	public fun readAny ()Ljava/lang/Object;
+	public fun readBuf ()[B
+	public final fun readClient ()J
+	public final fun readInfo ()I
+	public fun readJSON ()Ljava/lang/Object;
+	public fun readKey ()Ljava/lang/String;
+	public final fun readLeftID ()Ldev/yks/Id;
+	public fun readLen ()J
+	public final fun readParentInfo ()Z
+	public final fun readRightID ()Ldev/yks/Id;
+	public fun readString ()Ljava/lang/String;
+	public fun readTypeRef ()I
+}
+
+public class dev/yks/UpdateDecoderV2 : dev/yks/IdSetDecoderV2, dev/yks/UpdateContentDecoder {
+	public fun <init> (Ldev/yks/BinaryDecoder;)V
+	public fun <init> ([B)V
+	public fun readAny ()Ljava/lang/Object;
+	public fun readBuf ()[B
+	public final fun readClient ()J
+	public final fun readInfo ()I
+	public fun readJSON ()Ljava/lang/Object;
+	public fun readKey ()Ljava/lang/String;
+	public final fun readLeftID ()Ldev/yks/Id;
+	public fun readLen ()J
+	public final fun readParentInfo ()Z
+	public final fun readRightID ()Ldev/yks/Id;
+	public fun readString ()Ljava/lang/String;
+	public fun readTypeRef ()I
+}
+
+public class dev/yks/UpdateEncoderV1 : dev/yks/IdSetEncoderV1, dev/yks/UpdateContentEncoder {
+	public fun <init> ()V
+	public fun <init> (Ldev/yks/BinaryEncoder;)V
+	public synthetic fun <init> (Ldev/yks/BinaryEncoder;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun writeAny (Ljava/lang/Object;)V
+	public fun writeBuf ([B)V
+	public final fun writeClient (J)V
+	public final fun writeInfo (I)V
+	public fun writeJSON (Ljava/lang/Object;)V
+	public fun writeKey (Ljava/lang/String;)V
+	public final fun writeLeftID (Ldev/yks/Id;)V
+	public fun writeLen (J)V
+	public final fun writeParentInfo (Z)V
+	public final fun writeRightID (Ldev/yks/Id;)V
+	public fun writeString (Ljava/lang/String;)V
+	public fun writeTypeRef (I)V
+}
+
+public class dev/yks/UpdateEncoderV2 : dev/yks/IdSetEncoderV2, dev/yks/UpdateContentEncoder {
+	public fun <init> ()V
+	public fun <init> (Ldev/yks/BinaryEncoder;)V
+	public synthetic fun <init> (Ldev/yks/BinaryEncoder;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun toByteArray ()[B
+	public fun toUint8Array ()[B
+	public fun writeAny (Ljava/lang/Object;)V
+	public fun writeBuf ([B)V
+	public final fun writeClient (J)V
+	public final fun writeInfo (I)V
+	public fun writeJSON (Ljava/lang/Object;)V
+	public fun writeKey (Ljava/lang/String;)V
+	public final fun writeLeftID (Ldev/yks/Id;)V
+	public fun writeLen (J)V
+	public final fun writeParentInfo (Z)V
+	public final fun writeRightID (Ldev/yks/Id;)V
+	public fun writeString (Ljava/lang/String;)V
+	public fun writeTypeRef (I)V
+}
+
+public final class dev/yks/UpdateMeta {
+	public fun <init> (Ljava/util/Map;Ljava/util/Map;)V
+	public final fun component1 ()Ljava/util/Map;
+	public final fun component2 ()Ljava/util/Map;
+	public final fun copy (Ljava/util/Map;Ljava/util/Map;)Ldev/yks/UpdateMeta;
+	public static synthetic fun copy$default (Ldev/yks/UpdateMeta;Ljava/util/Map;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/UpdateMeta;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFrom ()Ljava/util/Map;
+	public final fun getTo ()Ljava/util/Map;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/UpdateMetaKt {
+	public static final fun parseUpdateMeta ([B)Ldev/yks/UpdateMeta;
+	public static final fun parseUpdateMetaV2 ([B)Ldev/yks/UpdateMeta;
+}
+
+public final class dev/yks/UpdatesKt {
+	public static final fun applyUpdate (Ldev/yks/YDoc;[BLjava/lang/Object;)V
+	public static synthetic fun applyUpdate$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
+	public static final fun applyUpdateV2 (Ldev/yks/YDoc;[BLjava/lang/Object;)V
+	public static synthetic fun applyUpdateV2$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
+	public static final fun cloneDoc (Ldev/yks/YDoc;)Ldev/yks/YDoc;
+	public static final fun cloneDoc (Ldev/yks/YDoc;Ldev/yks/YDocOptions;)Ldev/yks/YDoc;
+	public static final fun convertUpdateFormat ([BLkotlin/jvm/functions/Function1;)[B
+	public static synthetic fun convertUpdateFormat$default ([BLkotlin/jvm/functions/Function1;ILjava/lang/Object;)[B
+	public static final fun convertUpdateFormatLossless ([BLkotlin/jvm/functions/Function1;)[B
+	public static synthetic fun convertUpdateFormatLossless$default ([BLkotlin/jvm/functions/Function1;ILjava/lang/Object;)[B
+	public static final fun convertUpdateFormatV1ToV2 ([B)[B
+	public static final fun convertUpdateFormatV1ToV2Lossless ([B)[B
+	public static final fun convertUpdateFormatV2ToV1 ([B)[B
+	public static final fun convertUpdateFormatV2ToV1Lossless ([B)[B
+	public static final fun createContentIds (Ldev/yks/IdSet;Ldev/yks/IdSet;)Ldev/yks/ContentIds;
+	public static synthetic fun createContentIds$default (Ldev/yks/IdSet;Ldev/yks/IdSet;ILjava/lang/Object;)Ldev/yks/ContentIds;
+	public static final fun createContentIdsFromContentMap (Ldev/yks/ContentMap;)Ldev/yks/ContentIds;
+	public static final fun createContentIdsFromDoc (Ldev/yks/YDoc;)Ldev/yks/ContentIds;
+	public static final fun createContentIdsFromDocDiff (Ldev/yks/YDoc;Ldev/yks/YDoc;)Ldev/yks/ContentIds;
+	public static final fun createContentIdsFromUpdate ([B)Ldev/yks/ContentIds;
+	public static final fun createContentIdsFromUpdateV2 ([B)Ldev/yks/ContentIds;
+	public static final fun createContentMap (Ldev/yks/IdMap;Ldev/yks/IdMap;)Ldev/yks/ContentMap;
+	public static synthetic fun createContentMap$default (Ldev/yks/IdMap;Ldev/yks/IdMap;ILjava/lang/Object;)Ldev/yks/ContentMap;
+	public static final fun createContentMapFromContentIds (Ldev/yks/ContentIds;Ljava/util/List;Ljava/util/List;)Ldev/yks/ContentMap;
+	public static synthetic fun createContentMapFromContentIds$default (Ldev/yks/ContentIds;Ljava/util/List;Ljava/util/List;ILjava/lang/Object;)Ldev/yks/ContentMap;
+	public static final fun createDeleteSetFromDoc (Ldev/yks/YDoc;)Ldev/yks/IdSet;
+	public static final fun createDocFromUpdate ([BLdev/yks/YDoc;)Ldev/yks/YDoc;
+	public static final fun createDocFromUpdate ([BLdev/yks/YDocOptions;)Ldev/yks/YDoc;
+	public static synthetic fun createDocFromUpdate$default ([BLdev/yks/YDoc;ILjava/lang/Object;)Ldev/yks/YDoc;
+	public static final fun createDocFromUpdateV2 ([BLdev/yks/YDoc;)Ldev/yks/YDoc;
+	public static final fun createDocFromUpdateV2 ([BLdev/yks/YDocOptions;)Ldev/yks/YDoc;
+	public static synthetic fun createDocFromUpdateV2$default ([BLdev/yks/YDoc;ILjava/lang/Object;)Ldev/yks/YDoc;
+	public static final fun createInsertSetFromDoc (Ldev/yks/YDoc;Z)Ldev/yks/IdSet;
+	public static synthetic fun createInsertSetFromDoc$default (Ldev/yks/YDoc;ZILjava/lang/Object;)Ldev/yks/IdSet;
+	public static final fun createInsertSetFromStructStore (Ldev/yks/StructStore;Z)Ldev/yks/IdSet;
+	public static final fun createInsertSetFromStructStore (Ldev/yks/YDoc;Z)Ldev/yks/IdSet;
+	public static synthetic fun createInsertSetFromStructStore$default (Ldev/yks/StructStore;ZILjava/lang/Object;)Ldev/yks/IdSet;
+	public static synthetic fun createInsertSetFromStructStore$default (Ldev/yks/YDoc;ZILjava/lang/Object;)Ldev/yks/IdSet;
+	public static final fun decodeContentIds ([B)Ldev/yks/ContentIds;
+	public static final fun decodeContentMap ([B)Ldev/yks/ContentMap;
+	public static final fun decodeUpdate ([B)Ldev/yks/DecodedUpdate;
+	public static final fun decodeUpdateV2 ([B)Ldev/yks/DecodedUpdate;
+	public static final fun diffUpdate ([B[B)[B
+	public static final fun diffUpdateLossless ([B[B)[B
+	public static final fun diffUpdateV2 ([B[B)[B
+	public static final fun diffUpdateV2Lossless ([B[B)[B
+	public static final fun encodeContentIds (Ldev/yks/ContentIds;)[B
+	public static final fun encodeContentMap (Ldev/yks/ContentMap;)[B
+	public static final fun encodeStateAsUpdate (Ldev/yks/YDoc;[B)[B
+	public static synthetic fun encodeStateAsUpdate$default (Ldev/yks/YDoc;[BILjava/lang/Object;)[B
+	public static final fun encodeStateAsUpdateLossless (Ldev/yks/YDoc;[B)[B
+	public static synthetic fun encodeStateAsUpdateLossless$default (Ldev/yks/YDoc;[BILjava/lang/Object;)[B
+	public static final fun encodeStateAsUpdateV2 (Ldev/yks/YDoc;[B)[B
+	public static synthetic fun encodeStateAsUpdateV2$default (Ldev/yks/YDoc;[BILjava/lang/Object;)[B
+	public static final fun encodeStateAsUpdateV2Lossless (Ldev/yks/YDoc;[B)[B
+	public static synthetic fun encodeStateAsUpdateV2Lossless$default (Ldev/yks/YDoc;[BILjava/lang/Object;)[B
+	public static final fun encodeStateVector (Ldev/yks/YDoc;)[B
+	public static final fun encodeStateVectorFromUpdate ([B)[B
+	public static final fun encodeStateVectorFromUpdateV2 ([B)[B
+	public static final fun encodeStructsFromIdSet (Ldev/yks/YDoc;Ldev/yks/IdSet;)[B
+	public static final fun encodeStructsFromIdSetLossless (Ldev/yks/YDoc;Ldev/yks/IdSet;)[B
+	public static final fun encodeStructsFromIdSetV2 (Ldev/yks/YDoc;Ldev/yks/IdSet;)[B
+	public static final fun encodeStructsFromIdSetV2Lossless (Ldev/yks/YDoc;Ldev/yks/IdSet;)[B
+	public static final fun encodeStructsFromTransaction (Ldev/yks/YTransactionEvent;)[B
+	public static final fun encodeStructsFromTransactionLossless (Ldev/yks/YTransactionEvent;)[B
+	public static final fun encodeStructsFromTransactionV2 (Ldev/yks/YTransactionEvent;)[B
+	public static final fun encodeStructsFromTransactionV2Lossless (Ldev/yks/YTransactionEvent;)[B
+	public static final fun encodeUpdateMessageFromTransaction (Ldev/yks/YTransactionEvent;)[B
+	public static final fun encodeUpdateMessageFromTransactionLossless (Ldev/yks/YTransactionEvent;)[B
+	public static final fun encodeUpdateMessageFromTransactionV2 (Ldev/yks/YTransactionEvent;)[B
+	public static final fun encodeUpdateMessageFromTransactionV2Lossless (Ldev/yks/YTransactionEvent;)[B
+	public static final fun excludeContentIds (Ldev/yks/ContentIds;Ldev/yks/ContentIds;)Ldev/yks/ContentIds;
+	public static final fun excludeContentMap (Ldev/yks/ContentMap;Ldev/yks/ContentIds;)Ldev/yks/ContentMap;
+	public static final fun excludeContentMap (Ldev/yks/ContentMap;Ldev/yks/ContentMap;)Ldev/yks/ContentMap;
+	public static final fun filterContentMap (Ldev/yks/ContentMap;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;)Ldev/yks/ContentMap;
+	public static synthetic fun filterContentMap$default (Ldev/yks/ContentMap;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ldev/yks/ContentMap;
+	public static final fun finishLazyStructWriting (Ldev/yks/LazyStructWriter;)Ldev/yks/BinaryEncoder;
+	public static final fun intersectContentIds (Ldev/yks/ContentIds;Ldev/yks/ContentIds;)Ldev/yks/ContentIds;
+	public static final fun intersectContentIds (Ldev/yks/ContentIds;Ldev/yks/ContentMap;)Ldev/yks/ContentIds;
+	public static final fun intersectContentMap (Ldev/yks/ContentMap;Ldev/yks/ContentIds;)Ldev/yks/ContentMap;
+	public static final fun intersectContentMap (Ldev/yks/ContentMap;Ldev/yks/ContentMap;)Ldev/yks/ContentMap;
+	public static final fun intersectUpdateWithContentIds ([BLdev/yks/ContentIds;)[B
+	public static final fun intersectUpdateWithContentIdsLossless ([BLdev/yks/ContentIds;)[B
+	public static final fun intersectUpdateWithContentIdsV2 ([BLdev/yks/ContentIds;)[B
+	public static final fun intersectUpdateWithContentIdsV2Lossless ([BLdev/yks/ContentIds;)[B
+	public static final fun logUpdate ([B)Ljava/lang/String;
+	public static final fun logUpdateV2 ([B)Ljava/lang/String;
+	public static final fun mergeContentIds (Ljava/util/List;)Ldev/yks/ContentIds;
+	public static final fun mergeContentMaps (Ljava/util/List;)Ldev/yks/ContentMap;
+	public static final fun mergeUpdates (Ljava/util/List;)[B
+	public static final fun mergeUpdatesLossless (Ljava/util/List;)[B
+	public static final fun mergeUpdatesV2 (Ljava/util/List;)[B
+	public static final fun mergeUpdatesV2Lossless (Ljava/util/List;)[B
+	public static final fun obfuscateUpdate ([BLdev/yks/ObfuscatorOptions;)[B
+	public static synthetic fun obfuscateUpdate$default ([BLdev/yks/ObfuscatorOptions;ILjava/lang/Object;)[B
+	public static final fun obfuscateUpdateLossless ([BLdev/yks/ObfuscatorOptions;)[B
+	public static synthetic fun obfuscateUpdateLossless$default ([BLdev/yks/ObfuscatorOptions;ILjava/lang/Object;)[B
+	public static final fun obfuscateUpdateV2 ([BLdev/yks/ObfuscatorOptions;)[B
+	public static synthetic fun obfuscateUpdateV2$default ([BLdev/yks/ObfuscatorOptions;ILjava/lang/Object;)[B
+	public static final fun obfuscateUpdateV2Lossless ([BLdev/yks/ObfuscatorOptions;)[B
+	public static synthetic fun obfuscateUpdateV2Lossless$default ([BLdev/yks/ObfuscatorOptions;ILjava/lang/Object;)[B
+	public static final fun readContentIds (Ldev/yks/BinaryDecoder;)Ldev/yks/ContentIds;
+	public static final fun readContentIds (Ldev/yks/IdSetDecoderV1;)Ldev/yks/ContentIds;
+	public static final fun readContentMap (Ldev/yks/BinaryDecoder;)Ldev/yks/ContentMap;
+	public static final fun readContentMap (Ldev/yks/IdSetDecoderV1;)Ldev/yks/ContentMap;
+	public static final fun readUpdate (Ldev/yks/BinaryDecoder;Ldev/yks/YDoc;Ljava/lang/Object;)V
+	public static final fun readUpdate (Ldev/yks/UpdateDecoderV1;Ldev/yks/YDoc;Ljava/lang/Object;)V
+	public static final fun readUpdate (Ldev/yks/YDoc;[BLjava/lang/Object;)V
+	public static synthetic fun readUpdate$default (Ldev/yks/BinaryDecoder;Ldev/yks/YDoc;Ljava/lang/Object;ILjava/lang/Object;)V
+	public static synthetic fun readUpdate$default (Ldev/yks/UpdateDecoderV1;Ldev/yks/YDoc;Ljava/lang/Object;ILjava/lang/Object;)V
+	public static synthetic fun readUpdate$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
+	public static final fun readUpdateV2 (Ldev/yks/BinaryDecoder;Ldev/yks/YDoc;Ljava/lang/Object;)V
+	public static final fun readUpdateV2 (Ldev/yks/UpdateDecoderV2;Ldev/yks/YDoc;Ljava/lang/Object;)V
+	public static final fun readUpdateV2 (Ldev/yks/YDoc;[BLjava/lang/Object;)V
+	public static synthetic fun readUpdateV2$default (Ldev/yks/BinaryDecoder;Ldev/yks/YDoc;Ljava/lang/Object;ILjava/lang/Object;)V
+	public static synthetic fun readUpdateV2$default (Ldev/yks/UpdateDecoderV2;Ldev/yks/YDoc;Ljava/lang/Object;ILjava/lang/Object;)V
+	public static synthetic fun readUpdateV2$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
+	public static final fun writeClientsStructs (Ldev/yks/BinaryEncoder;Ldev/yks/StructStore;Ljava/util/Map;)Ldev/yks/BinaryEncoder;
+	public static final fun writeClientsStructs (Ldev/yks/IdSetEncoderV1;Ldev/yks/StructStore;Ljava/util/Map;)Ldev/yks/IdSetEncoderV1;
+	public static final fun writeClientsStructs (Ldev/yks/UpdateEncoderV2;Ldev/yks/StructStore;Ljava/util/Map;)Ldev/yks/UpdateEncoderV2;
+	public static synthetic fun writeClientsStructs$default (Ldev/yks/BinaryEncoder;Ldev/yks/StructStore;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/BinaryEncoder;
+	public static synthetic fun writeClientsStructs$default (Ldev/yks/IdSetEncoderV1;Ldev/yks/StructStore;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/IdSetEncoderV1;
+	public static synthetic fun writeClientsStructs$default (Ldev/yks/UpdateEncoderV2;Ldev/yks/StructStore;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/UpdateEncoderV2;
+	public static final fun writeClientsStructsLossless (Ldev/yks/BinaryEncoder;Ldev/yks/StructStore;Ljava/util/Map;)Ldev/yks/BinaryEncoder;
+	public static final fun writeClientsStructsLossless (Ldev/yks/IdSetEncoderV1;Ldev/yks/StructStore;Ljava/util/Map;)Ldev/yks/IdSetEncoderV1;
+	public static final fun writeClientsStructsLossless (Ldev/yks/UpdateEncoderV2;Ldev/yks/StructStore;Ljava/util/Map;)Ldev/yks/UpdateEncoderV2;
+	public static synthetic fun writeClientsStructsLossless$default (Ldev/yks/BinaryEncoder;Ldev/yks/StructStore;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/BinaryEncoder;
+	public static synthetic fun writeClientsStructsLossless$default (Ldev/yks/IdSetEncoderV1;Ldev/yks/StructStore;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/IdSetEncoderV1;
+	public static synthetic fun writeClientsStructsLossless$default (Ldev/yks/UpdateEncoderV2;Ldev/yks/StructStore;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/UpdateEncoderV2;
+	public static final fun writeContentIds (Ldev/yks/BinaryEncoder;Ldev/yks/ContentIds;)V
+	public static final fun writeContentIds (Ldev/yks/IdSetEncoderV1;Ldev/yks/ContentIds;)V
+	public static final fun writeContentMap (Ldev/yks/BinaryEncoder;Ldev/yks/ContentMap;)V
+	public static final fun writeContentMap (Ldev/yks/IdSetEncoderV1;Ldev/yks/ContentMap;)V
+	public static final fun writeStateAsUpdate (Ldev/yks/BinaryEncoder;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/BinaryEncoder;
+	public static final fun writeStateAsUpdate (Ldev/yks/IdSetEncoderV1;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/IdSetEncoderV1;
+	public static synthetic fun writeStateAsUpdate$default (Ldev/yks/BinaryEncoder;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/BinaryEncoder;
+	public static synthetic fun writeStateAsUpdate$default (Ldev/yks/IdSetEncoderV1;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/IdSetEncoderV1;
+	public static final fun writeStateAsUpdateLossless (Ldev/yks/BinaryEncoder;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/BinaryEncoder;
+	public static final fun writeStateAsUpdateLossless (Ldev/yks/IdSetEncoderV1;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/IdSetEncoderV1;
+	public static synthetic fun writeStateAsUpdateLossless$default (Ldev/yks/BinaryEncoder;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/BinaryEncoder;
+	public static synthetic fun writeStateAsUpdateLossless$default (Ldev/yks/IdSetEncoderV1;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/IdSetEncoderV1;
+	public static final fun writeStateAsUpdateV2 (Ldev/yks/BinaryEncoder;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/BinaryEncoder;
+	public static final fun writeStateAsUpdateV2 (Ldev/yks/IdSetEncoderV1;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/IdSetEncoderV1;
+	public static final fun writeStateAsUpdateV2 (Ldev/yks/UpdateEncoderV2;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/UpdateEncoderV2;
+	public static synthetic fun writeStateAsUpdateV2$default (Ldev/yks/BinaryEncoder;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/BinaryEncoder;
+	public static synthetic fun writeStateAsUpdateV2$default (Ldev/yks/IdSetEncoderV1;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/IdSetEncoderV1;
+	public static synthetic fun writeStateAsUpdateV2$default (Ldev/yks/UpdateEncoderV2;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/UpdateEncoderV2;
+	public static final fun writeStateAsUpdateV2Lossless (Ldev/yks/BinaryEncoder;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/BinaryEncoder;
+	public static final fun writeStateAsUpdateV2Lossless (Ldev/yks/IdSetEncoderV1;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/IdSetEncoderV1;
+	public static final fun writeStateAsUpdateV2Lossless (Ldev/yks/UpdateEncoderV2;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/UpdateEncoderV2;
+	public static synthetic fun writeStateAsUpdateV2Lossless$default (Ldev/yks/BinaryEncoder;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/BinaryEncoder;
+	public static synthetic fun writeStateAsUpdateV2Lossless$default (Ldev/yks/IdSetEncoderV1;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/IdSetEncoderV1;
+	public static synthetic fun writeStateAsUpdateV2Lossless$default (Ldev/yks/UpdateEncoderV2;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/UpdateEncoderV2;
+	public static final fun writeStructToLazyStructWriter (Ldev/yks/LazyStructWriter;Ldev/yks/AbstractStruct;JJ)Ldev/yks/LazyStructWriter;
+	public static final fun writeStructToLazyStructWriter (Ldev/yks/LazyStructWriter;Ldev/yks/DecodedUpdateStruct;JJ)Ldev/yks/LazyStructWriter;
+	public static synthetic fun writeStructToLazyStructWriter$default (Ldev/yks/LazyStructWriter;Ldev/yks/AbstractStruct;JJILjava/lang/Object;)Ldev/yks/LazyStructWriter;
+	public static synthetic fun writeStructToLazyStructWriter$default (Ldev/yks/LazyStructWriter;Ldev/yks/DecodedUpdateStruct;JJILjava/lang/Object;)Ldev/yks/LazyStructWriter;
+	public static final fun writeStructs (Ldev/yks/YDoc;JLjava/util/List;)[B
+	public static final fun writeStructsFromIdSet (Ldev/yks/YDoc;Ldev/yks/IdSet;)[B
+	public static final fun writeStructsFromIdSetLossless (Ldev/yks/YDoc;Ldev/yks/IdSet;)[B
+	public static final fun writeStructsFromIdSetV2 (Ldev/yks/YDoc;Ldev/yks/IdSet;)[B
+	public static final fun writeStructsFromIdSetV2Lossless (Ldev/yks/YDoc;Ldev/yks/IdSet;)[B
+	public static final fun writeStructsFromTransaction (Ldev/yks/YTransactionEvent;)[B
+	public static final fun writeStructsFromTransactionLossless (Ldev/yks/YTransactionEvent;)[B
+	public static final fun writeStructsFromTransactionV2 (Ldev/yks/YTransactionEvent;)[B
+	public static final fun writeStructsFromTransactionV2Lossless (Ldev/yks/YTransactionEvent;)[B
+	public static final fun writeStructsLossless (Ldev/yks/YDoc;JLjava/util/List;)[B
+	public static final fun writeStructsV2 (Ldev/yks/YDoc;JLjava/util/List;)[B
+	public static final fun writeStructsV2Lossless (Ldev/yks/YDoc;JLjava/util/List;)[B
+	public static final fun writeUpdateMessageFromTransaction (Ldev/yks/YTransactionEvent;)[B
+	public static final fun writeUpdateMessageFromTransactionLossless (Ldev/yks/YTransactionEvent;)[B
+	public static final fun writeUpdateMessageFromTransactionV2 (Ldev/yks/YTransactionEvent;)[B
+	public static final fun writeUpdateMessageFromTransactionV2Lossless (Ldev/yks/YTransactionEvent;)[B
+}
+
+public final class dev/yks/YArray : dev/yks/AbstractYType, java/lang/Iterable, kotlin/jvm/internal/markers/KMappedMarker {
+	public static final field Companion Ldev/yks/YArray$Companion;
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/Iterable;)V
+	public fun <init> ([Ljava/lang/Object;)V
+	public final fun applyDelta (Ljava/util/List;Ljava/lang/Object;Ldev/yks/AbstractRenderer;)V
+	public static synthetic fun applyDelta$default (Ldev/yks/YArray;Ljava/util/List;Ljava/lang/Object;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)V
+	public final fun applyDeltaDeep (Ldev/yks/YArrayDeepDelta;Ljava/lang/Object;)V
+	public static synthetic fun applyDeltaDeep$default (Ldev/yks/YArray;Ldev/yks/YArrayDeepDelta;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun attrEntries ()Ljava/util/Set;
+	public final fun attrKeys ()Ljava/util/Set;
+	public final fun attrValues ()Ljava/util/Collection;
+	public final fun clear ()V
+	public final fun clearAttrs ()V
+	public final fun clone ()Ldev/yks/YArray;
+	public final fun clone (Ldev/yks/YDoc;)Ldev/yks/YArray;
+	public final fun delete (II)V
+	public static synthetic fun delete$default (Ldev/yks/YArray;IIILjava/lang/Object;)V
+	public final fun deleteAttr (Ljava/lang/String;)V
+	public final fun deleteAttribute (Ljava/lang/String;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function1;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function2;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function3;)V
+	public final fun forEachAttr (Lkotlin/jvm/functions/Function2;)V
+	public final fun forEachAttr (Lkotlin/jvm/functions/Function3;)V
+	public final fun forEachIndexed (Lkotlin/jvm/functions/Function2;)V
+	public final fun get (I)Ljava/lang/Object;
+	public final fun getAttr (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun getAttr (Ljava/lang/String;Ldev/yks/Snapshot;)Ljava/lang/Object;
+	public final fun getAttrSize ()I
+	public final fun getAttribute (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun getAttribute (Ljava/lang/String;Ldev/yks/Snapshot;)Ljava/lang/Object;
+	public final fun getAttrs ()Ljava/util/Map;
+	public final fun getAttrs (Ldev/yks/Snapshot;)Ljava/util/Map;
+	public final fun getLength ()I
+	public final fun getSize ()I
+	public final fun hasAttr (Ljava/lang/String;)Z
+	public final fun hasAttr (Ljava/lang/String;Ldev/yks/Snapshot;)Z
+	public final fun hasAttribute (Ljava/lang/String;)Z
+	public final fun hasAttribute (Ljava/lang/String;Ldev/yks/Snapshot;)Z
+	public final fun insert (ILjava/util/List;)V
+	public final fun insert (I[Ljava/lang/Object;)V
+	public fun iterator ()Ljava/util/Iterator;
+	public final fun map (Lkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public final fun map (Lkotlin/jvm/functions/Function2;)Ljava/util/List;
+	public final fun map (Lkotlin/jvm/functions/Function3;)Ljava/util/List;
+	public final fun mapAttrs (Lkotlin/jvm/functions/Function2;)Ljava/util/List;
+	public final fun mapAttrs (Lkotlin/jvm/functions/Function3;)Ljava/util/List;
+	public final fun push (Ljava/util/List;)V
+	public final fun push ([Ljava/lang/Object;)V
+	public final fun removeAttribute (Ljava/lang/String;)V
+	public final fun setAttr (Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;
+	public final fun setAttribute (Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;
+	public final fun setAttrs (Ljava/util/Map;)Ldev/yks/YArray;
+	public final fun slice (II)Ljava/util/List;
+	public static synthetic fun slice$default (Ldev/yks/YArray;IIILjava/lang/Object;)Ljava/util/List;
+	public final fun toArray ()Ljava/util/List;
+	public final fun toDelta ()Ljava/util/List;
+	public final fun toDeltaDeep (Ldev/yks/AbstractRenderer;)Ldev/yks/YArrayDeepDelta;
+	public static synthetic fun toDeltaDeep$default (Ldev/yks/YArray;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)Ldev/yks/YArrayDeepDelta;
+	public synthetic fun toJSON ()Ljava/lang/Object;
+	public fun toJSON ()Ljava/util/List;
+	public synthetic fun toJson ()Ljava/lang/Object;
+	public fun toJson ()Ljava/util/List;
+	public final fun toList ()Ljava/util/List;
+	public final fun unshift (Ljava/util/List;)V
+	public final fun unshift ([Ljava/lang/Object;)V
+}
+
+public final class dev/yks/YArray$Companion {
+	public final fun from (Ldev/yks/YArrayDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YArray;
+	public final fun from (Ljava/lang/Iterable;)Ldev/yks/YArray;
+	public final fun from (Ljava/lang/Iterable;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YArray;
+	public final fun from (Ljava/util/List;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YArray;
+	public static synthetic fun from$default (Ldev/yks/YArray$Companion;Ldev/yks/YArrayDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YArray;
+	public static synthetic fun from$default (Ldev/yks/YArray$Companion;Ljava/lang/Iterable;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YArray;
+	public static synthetic fun from$default (Ldev/yks/YArray$Companion;Ljava/util/List;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YArray;
+}
+
+public final class dev/yks/YArrayDeepDelta : dev/yks/YDeepDelta {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Map;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/util/Map;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/Map;
+	public final fun component2 ()Ljava/util/List;
+	public final fun copy (Ljava/util/Map;Ljava/util/List;)Ldev/yks/YArrayDeepDelta;
+	public static synthetic fun copy$default (Ldev/yks/YArrayDeepDelta;Ljava/util/Map;Ljava/util/List;ILjava/lang/Object;)Ldev/yks/YArrayDeepDelta;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getAttrs ()Ljava/util/Map;
+	public final fun getDelta ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YArrayDeltaOp {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/Integer;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/lang/Integer;
+	public final fun component4 ()Ljava/util/Map;
+	public final fun copy (Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Ljava/util/Map;)Ldev/yks/YArrayDeltaOp;
+	public static synthetic fun copy$default (Ldev/yks/YArrayDeltaOp;Ljava/lang/Integer;Ljava/util/List;Ljava/lang/Integer;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YArrayDeltaOp;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttributes ()Ljava/util/Map;
+	public final fun getDelete ()Ljava/lang/Integer;
+	public final fun getInsert ()Ljava/util/List;
+	public final fun getRetain ()Ljava/lang/Integer;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YArrayEvent : dev/yks/YTypedEvent {
+	public final fun getArrayDelta ()Ljava/util/List;
+	public final fun getChanges ()Ldev/yks/YEventChanges;
+	public final fun getChildListChanged ()Z
+	public final fun getDelta ()Ljava/util/List;
+	public synthetic fun getTarget ()Ldev/yks/AbstractYType;
+	public fun getTarget ()Ldev/yks/YArray;
+}
+
+public final class dev/yks/YAttributeDelta {
+	public fun <init> (Ljava/lang/Object;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/Object;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/Object;
+	public final fun component2 ()Ljava/util/Map;
+	public final fun copy (Ljava/lang/Object;Ljava/util/Map;)Ldev/yks/YAttributeDelta;
+	public static synthetic fun copy$default (Ldev/yks/YAttributeDelta;Ljava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YAttributeDelta;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttributes ()Ljava/util/Map;
+	public final fun getValue ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class dev/yks/YDeepDelta {
+	public abstract fun getAttrs ()Ljava/util/Map;
+}
+
+public final class dev/yks/YDoc {
+	public static final field Companion Ldev/yks/YDoc$Companion;
+	public fun <init> ()V
+	public fun <init> (JLjava/lang/String;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ljava/lang/Object;ZZZ)V
+	public synthetic fun <init> (JLjava/lang/String;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ljava/lang/Object;ZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ldev/yks/YDocOptions;)V
+	public fun <init> (Ldev/yks/YDocOptions;Ldev/yks/YDocRuntimeOptions;)V
+	public final fun applyUpdate ([BLjava/lang/Object;)V
+	public static synthetic fun applyUpdate$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
+	public final fun applyUpdateV2 ([BLjava/lang/Object;)V
+	public static synthetic fun applyUpdateV2$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
+	public final fun createArray ()Ldev/yks/YArray;
+	public final fun createMap ()Ldev/yks/YMap;
+	public final fun createText ()Ldev/yks/YText;
+	public final fun createXmlElement (Ljava/lang/String;)Ldev/yks/YXmlElementType;
+	public final fun createXmlFragment ()Ldev/yks/YXmlFragment;
+	public final fun createXmlHook (Ljava/lang/String;)Ldev/yks/YXmlHook;
+	public final fun createXmlText ()Ldev/yks/YXmlTextType;
+	public final fun destroy ()V
+	public final fun emit (Ldev/yks/YDocEvent;)V
+	public final fun emit (Ljava/lang/String;Ldev/yks/YDocEvent;)V
+	public static synthetic fun emit$default (Ldev/yks/YDoc;Ljava/lang/String;Ldev/yks/YDocEvent;ILjava/lang/Object;)V
+	public final fun encodeStateAsUpdate ([B)[B
+	public static synthetic fun encodeStateAsUpdate$default (Ldev/yks/YDoc;[BILjava/lang/Object;)[B
+	public final fun encodeStateAsUpdateLossless ([B)[B
+	public static synthetic fun encodeStateAsUpdateLossless$default (Ldev/yks/YDoc;[BILjava/lang/Object;)[B
+	public final fun encodeStateVector ()[B
+	public final fun get ()Ldev/yks/YArray;
+	public final fun get (Ljava/lang/String;)Ldev/yks/AbstractYType;
+	public final fun get (Ljava/lang/String;I)Ldev/yks/AbstractYType;
+	public final fun get (Ljava/lang/String;Ldev/yks/RootKind;)Ldev/yks/AbstractYType;
+	public final fun get$type ()Lkotlin/jvm/functions/Function1;
+	public final fun getArray (Ljava/lang/String;)Ldev/yks/YArray;
+	public static synthetic fun getArray$default (Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YArray;
+	public final fun getAutoLoad ()Z
+	public final fun getCleanupFormatting ()Z
+	public final fun getClientID ()J
+	public final fun getClientId ()J
+	public final fun getCollectionId ()Ljava/lang/String;
+	public final fun getCollectionid ()Ljava/lang/String;
+	public final fun getGc ()Z
+	public final fun getGcFilter ()Lkotlin/jvm/functions/Function1;
+	public final fun getGuid ()Ljava/lang/String;
+	public final fun getMap (Ljava/lang/String;)Ldev/yks/YMap;
+	public static synthetic fun getMap$default (Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YMap;
+	public final fun getMeta ()Ljava/lang/Object;
+	public final fun getOrNull (Ljava/lang/String;)Ldev/yks/AbstractYType;
+	public final fun getShare ()Ljava/util/Map;
+	public final fun getShouldLoad ()Z
+	public final fun getStandardUpdatePolicy ()Ldev/yks/YStandardUpdatePolicy;
+	public final fun getStore ()Ldev/yks/StructStore;
+	public final fun getSubdocGuids ()Ljava/util/Set;
+	public final fun getSubdocs ()Ljava/util/Set;
+	public final fun getSubdocsProperty ()Ljava/util/Set;
+	public final fun getText (Ljava/lang/String;)Ldev/yks/YText;
+	public static synthetic fun getText$default (Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YText;
+	public final fun getThreadAccessPolicy ()Ldev/yks/YThreadAccessPolicy;
+	public final fun getUpdateLimits ()Ldev/yks/YUpdateLimits;
+	public final fun getWhenLoaded ()Ljava/util/concurrent/CompletableFuture;
+	public final fun getWhenSynced ()Ljava/util/concurrent/CompletableFuture;
+	public final fun getXmlElement (Ljava/lang/String;Ljava/lang/String;)Ldev/yks/YXmlElementType;
+	public static synthetic fun getXmlElement$default (Ldev/yks/YDoc;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YXmlElementType;
+	public final fun getXmlFragment (Ljava/lang/String;)Ldev/yks/YXmlFragment;
+	public static synthetic fun getXmlFragment$default (Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YXmlFragment;
+	public final fun isDestroyed ()Z
+	public final fun isLoaded ()Z
+	public final fun isRootEmpty (Ljava/lang/String;)Z
+	public final fun isSuggestionDoc ()Z
+	public final fun isSynced ()Z
+	public final fun load ()V
+	public final fun observeAfterAllTransactions (Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun observeAfterTransactionCleanup (Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun observeAfterTransactions (Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun observeBeforeAllTransactions (Lkotlin/jvm/functions/Function0;)Ldev/yks/Subscription;
+	public final fun observeBeforeObserverCalls (Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun observeBeforeTransactions (Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun observeSubdocs (Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun observeUpdates (Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
+	public final fun observeUpdatesLossless (Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
+	public final fun off (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)V
+	public final fun off (Ljava/lang/String;Lkotlin/jvm/functions/Function2;)V
+	public final fun off (Ljava/lang/String;Lkotlin/jvm/functions/Function3;)V
+	public final fun off (Ljava/lang/String;Lkotlin/jvm/functions/Function4;)V
+	public final fun offAfterAllTransactions (Lkotlin/jvm/functions/Function2;)V
+	public final fun offDoc (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)V
+	public final fun offSync (Lkotlin/jvm/functions/Function2;)V
+	public final fun on (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun on (Ljava/lang/String;Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
+	public final fun on (Ljava/lang/String;Lkotlin/jvm/functions/Function3;)Ldev/yks/Subscription;
+	public final fun on (Ljava/lang/String;Lkotlin/jvm/functions/Function4;)Ldev/yks/Subscription;
+	public final fun onAfterAllTransactions (Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
+	public final fun onDoc (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun onSubdocs (Lkotlin/jvm/functions/Function3;)Ldev/yks/Subscription;
+	public final fun onSync (Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
+	public final fun onUpdate (Lkotlin/jvm/functions/Function4;)Ldev/yks/Subscription;
+	public final fun onUpdateLossless (Lkotlin/jvm/functions/Function4;)Ldev/yks/Subscription;
+	public final fun onUpdateV2 (Lkotlin/jvm/functions/Function4;)Ldev/yks/Subscription;
+	public final fun onUpdateV2Lossless (Lkotlin/jvm/functions/Function4;)Ldev/yks/Subscription;
+	public final fun once (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun once (Ljava/lang/String;Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
+	public final fun once (Ljava/lang/String;Lkotlin/jvm/functions/Function3;)Ldev/yks/Subscription;
+	public final fun once (Ljava/lang/String;Lkotlin/jvm/functions/Function4;)Ldev/yks/Subscription;
+	public final fun onceAfterAllTransactions (Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
+	public final fun onceDoc (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun onceSync (Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
+	public final fun rootNames ()Ljava/util/Set;
+	public final fun setAutoLoad (Z)V
+	public final fun setCleanupFormatting (Z)V
+	public final fun setClientID (J)V
+	public final fun setClientId (J)V
+	public final fun setCollectionId (Ljava/lang/String;)V
+	public final fun setCollectionid (Ljava/lang/String;)V
+	public final fun setGc (Z)V
+	public final fun setGcFilter (Lkotlin/jvm/functions/Function1;)V
+	public final fun setGuid (Ljava/lang/String;)V
+	public final fun setMeta (Ljava/lang/Object;)V
+	public final fun setSuggestionDoc (Z)V
+	public final fun sync (Z)V
+	public static synthetic fun sync$default (Ldev/yks/YDoc;ZILjava/lang/Object;)V
+	public final fun toJSON ()Ljava/util/Map;
+	public final fun toJson ()Ljava/util/Map;
+	public final fun transact (Ljava/lang/Object;ZLkotlin/jvm/functions/Function0;)Ljava/lang/Object;
+	public final fun transact (Lkotlin/jvm/functions/Function1;Ljava/lang/Object;Z)Ljava/lang/Object;
+	public static synthetic fun transact$default (Ldev/yks/YDoc;Ljava/lang/Object;ZLkotlin/jvm/functions/Function0;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun transact$default (Ldev/yks/YDoc;Lkotlin/jvm/functions/Function1;Ljava/lang/Object;ZILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class dev/yks/YDoc$Companion {
+	public final fun generateNewClientId ()J
+}
+
+public final class dev/yks/YDocDeepDelta {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/Map;
+	public final fun copy (Ljava/util/Map;)Ldev/yks/YDocDeepDelta;
+	public static synthetic fun copy$default (Ldev/yks/YDocDeepDelta;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YDocDeepDelta;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRoots ()Ljava/util/Map;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YDocEvent {
+	public fun <init> (Ljava/lang/String;[BLjava/lang/Object;Ldev/yks/YTransactionEvent;Ljava/util/List;Ldev/yks/YSubdocEvent;Ljava/lang/Boolean;)V
+	public synthetic fun <init> (Ljava/lang/String;[BLjava/lang/Object;Ldev/yks/YTransactionEvent;Ljava/util/List;Ldev/yks/YSubdocEvent;Ljava/lang/Boolean;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()[B
+	public final fun component3 ()Ljava/lang/Object;
+	public final fun component4 ()Ldev/yks/YTransactionEvent;
+	public final fun component5 ()Ljava/util/List;
+	public final fun component6 ()Ldev/yks/YSubdocEvent;
+	public final fun component7 ()Ljava/lang/Boolean;
+	public final fun copy (Ljava/lang/String;[BLjava/lang/Object;Ldev/yks/YTransactionEvent;Ljava/util/List;Ldev/yks/YSubdocEvent;Ljava/lang/Boolean;)Ldev/yks/YDocEvent;
+	public static synthetic fun copy$default (Ldev/yks/YDocEvent;Ljava/lang/String;[BLjava/lang/Object;Ldev/yks/YTransactionEvent;Ljava/util/List;Ldev/yks/YSubdocEvent;Ljava/lang/Boolean;ILjava/lang/Object;)Ldev/yks/YDocEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getName ()Ljava/lang/String;
+	public final fun getOrigin ()Ljava/lang/Object;
+	public final fun getSubdocs ()Ldev/yks/YSubdocEvent;
+	public final fun getSynced ()Ljava/lang/Boolean;
+	public final fun getTransaction ()Ldev/yks/YTransactionEvent;
+	public final fun getTransactions ()Ljava/util/List;
+	public final fun getUpdate ()[B
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YDocOptions {
+	public fun <init> ()V
+	public fun <init> (JLjava/lang/String;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ljava/lang/Object;ZZZ)V
+	public synthetic fun <init> (JLjava/lang/String;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ljava/lang/Object;ZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()J
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Z
+	public final fun component5 ()Lkotlin/jvm/functions/Function1;
+	public final fun component6 ()Ljava/lang/Object;
+	public final fun component7 ()Z
+	public final fun component8 ()Z
+	public final fun component9 ()Z
+	public final fun copy (JLjava/lang/String;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ljava/lang/Object;ZZZ)Ldev/yks/YDocOptions;
+	public static synthetic fun copy$default (Ldev/yks/YDocOptions;JLjava/lang/String;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ljava/lang/Object;ZZZILjava/lang/Object;)Ldev/yks/YDocOptions;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAutoLoad ()Z
+	public final fun getClientId ()J
+	public final fun getCollectionId ()Ljava/lang/String;
+	public final fun getCollectionid ()Ljava/lang/String;
+	public final fun getGc ()Z
+	public final fun getGcFilter ()Lkotlin/jvm/functions/Function1;
+	public final fun getGuid ()Ljava/lang/String;
+	public final fun getMeta ()Ljava/lang/Object;
+	public final fun getShouldLoad ()Z
+	public fun hashCode ()I
+	public final fun isSuggestionDoc ()Z
+	public final fun toDoc ()Ldev/yks/YDoc;
+	public final fun toDoc (Ldev/yks/YDocRuntimeOptions;)Ldev/yks/YDoc;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YDocRuntimeOptions {
+	public static final field Companion Ldev/yks/YDocRuntimeOptions$Companion;
+	public static final field DEFAULT Ldev/yks/YDocRuntimeOptions;
+	public fun <init> ()V
+	public fun <init> (Ldev/yks/YUpdateLimits;Ldev/yks/YThreadAccessPolicy;Ldev/yks/YStandardUpdatePolicy;)V
+	public synthetic fun <init> (Ldev/yks/YUpdateLimits;Ldev/yks/YThreadAccessPolicy;Ldev/yks/YStandardUpdatePolicy;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ldev/yks/YUpdateLimits;
+	public final fun component2 ()Ldev/yks/YThreadAccessPolicy;
+	public final fun component3 ()Ldev/yks/YStandardUpdatePolicy;
+	public final fun copy (Ldev/yks/YUpdateLimits;Ldev/yks/YThreadAccessPolicy;Ldev/yks/YStandardUpdatePolicy;)Ldev/yks/YDocRuntimeOptions;
+	public static synthetic fun copy$default (Ldev/yks/YDocRuntimeOptions;Ldev/yks/YUpdateLimits;Ldev/yks/YThreadAccessPolicy;Ldev/yks/YStandardUpdatePolicy;ILjava/lang/Object;)Ldev/yks/YDocRuntimeOptions;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getStandardUpdatePolicy ()Ldev/yks/YStandardUpdatePolicy;
+	public final fun getThreadAccessPolicy ()Ldev/yks/YThreadAccessPolicy;
+	public final fun getUpdateLimits ()Ldev/yks/YUpdateLimits;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YDocRuntimeOptions$Companion {
+}
+
+public final class dev/yks/YEvent {
+	public fun <init> (Ldev/yks/AbstractYType;Ljava/lang/Object;[BLdev/yks/IdSet;Ldev/yks/DeleteSet;Ldev/yks/YTransactionEvent;Ldev/yks/AbstractYType;ZLjava/util/Set;Ljava/util/Map;Ldev/yks/YMapDelta;Ljava/lang/String;Ljava/lang/Object;Ljava/util/List;Ldev/yks/YTextDelta;Ljava/util/List;Ldev/yks/AbstractYType;Ljava/util/List;)V
+	public synthetic fun <init> (Ldev/yks/AbstractYType;Ljava/lang/Object;[BLdev/yks/IdSet;Ldev/yks/DeleteSet;Ldev/yks/YTransactionEvent;Ldev/yks/AbstractYType;ZLjava/util/Set;Ljava/util/Map;Ldev/yks/YMapDelta;Ljava/lang/String;Ljava/lang/Object;Ljava/util/List;Ldev/yks/YTextDelta;Ljava/util/List;Ldev/yks/AbstractYType;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun adds (JJ)Z
+	public final fun adds (Ldev/yks/AbstractStruct;)Z
+	public final fun adds (Ldev/yks/DecodedUpdateStruct;)Z
+	public final fun adds (Ldev/yks/Id;)Z
+	public final fun deletes (JJ)Z
+	public final fun deletes (Ldev/yks/AbstractStruct;)Z
+	public final fun deletes (Ldev/yks/DecodedUpdateStruct;)Z
+	public final fun deletes (Ldev/yks/Id;)Z
+	public final fun getArrayDelta ()Ljava/util/List;
+	public final fun getChangedTarget ()Ldev/yks/AbstractYType;
+	public final fun getChildListChanged ()Z
+	public final fun getCurrentTarget ()Ldev/yks/AbstractYType;
+	public final fun getDeepEvents ()Ljava/util/List;
+	public final fun getDeleteSet ()Ldev/yks/DeleteSet;
+	public final fun getDelta (ZLdev/yks/AbstractRenderer;)Ljava/lang/Object;
+	public static synthetic fun getDelta$default (Ldev/yks/YEvent;ZLdev/yks/AbstractRenderer;ILjava/lang/Object;)Ljava/lang/Object;
+	public final fun getDeltaDeep ()Ljava/lang/Object;
+	public final fun getDeltaValue ()Ljava/lang/Object;
+	public final fun getInsertSet ()Ldev/yks/IdSet;
+	public final fun getKeysChanged ()Ljava/util/Set;
+	public final fun getMapChanges ()Ljava/util/Map;
+	public final fun getMapDelta ()Ldev/yks/YMapDelta;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getOrigin ()Ljava/lang/Object;
+	public final fun getPath ()Ljava/util/List;
+	public final fun getTarget ()Ldev/yks/AbstractYType;
+	public final fun getTextDelta ()Ldev/yks/YTextDelta;
+	public final fun getTransaction ()Ldev/yks/YTransactionEvent;
+	public final fun getUpdate ()[B
+	public final fun getValue ()Ljava/lang/Object;
+}
+
+public final class dev/yks/YEventChanges {
+	public fun <init> (Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/util/Map;)V
+	public final fun component1 ()Ldev/yks/IdSet;
+	public final fun component2 ()Ldev/yks/IdSet;
+	public final fun component3 ()Ljava/lang/Object;
+	public final fun component4 ()Ljava/util/Map;
+	public final fun copy (Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/util/Map;)Ldev/yks/YEventChanges;
+	public static synthetic fun copy$default (Ldev/yks/YEventChanges;Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YEventChanges;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAdded ()Ldev/yks/IdSet;
+	public final fun getDeleted ()Ldev/yks/IdSet;
+	public final fun getDelta ()Ljava/lang/Object;
+	public final fun getKeys ()Ljava/util/Map;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public class dev/yks/YMap : dev/yks/AbstractYType, java/lang/Iterable, kotlin/jvm/internal/markers/KMappedMarker {
+	public static final field Companion Ldev/yks/YMap$Companion;
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/Iterable;)V
+	public fun <init> (Ljava/util/Map;)V
+	public final fun applyDelta (Ldev/yks/YMapDelta;Ljava/lang/Object;)V
+	public static synthetic fun applyDelta$default (Ldev/yks/YMap;Ldev/yks/YMapDelta;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun applyDeltaDeep (Ldev/yks/YMapDeepDelta;Ljava/lang/Object;)V
+	public static synthetic fun applyDeltaDeep$default (Ldev/yks/YMap;Ldev/yks/YMapDeepDelta;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun attrEntries ()Ljava/util/Set;
+	public final fun attrKeys ()Ljava/util/Set;
+	public final fun attrValues ()Ljava/util/Collection;
+	public final fun clear ()V
+	public final fun clearAttrs ()V
+	public fun clone ()Ldev/yks/YMap;
+	public fun clone (Ldev/yks/YDoc;)Ldev/yks/YMap;
+	public final fun delete (Ljava/lang/String;)V
+	public final fun deleteAttr (Ljava/lang/String;)V
+	public final fun deleteAttribute (Ljava/lang/String;)V
+	public final fun entries ()Ljava/util/Set;
+	public final fun forEach (Lkotlin/jvm/functions/Function2;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function3;)V
+	public final fun forEachAttr (Lkotlin/jvm/functions/Function2;)V
+	public final fun forEachAttr (Lkotlin/jvm/functions/Function3;)V
+	public final fun get (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun get (Ljava/lang/String;Ldev/yks/Snapshot;)Ljava/lang/Object;
+	public final fun getAttr (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun getAttr (Ljava/lang/String;Ldev/yks/Snapshot;)Ljava/lang/Object;
+	public final fun getAttrSize ()I
+	public final fun getAttribute (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun getAttribute (Ljava/lang/String;Ldev/yks/Snapshot;)Ljava/lang/Object;
+	public final fun getAttrs ()Ljava/util/Map;
+	public final fun getAttrs (Ldev/yks/Snapshot;)Ljava/util/Map;
+	public final fun getSize ()I
+	public final fun has (Ljava/lang/String;)Z
+	public final fun has (Ljava/lang/String;Ldev/yks/Snapshot;)Z
+	public final fun hasAttr (Ljava/lang/String;)Z
+	public final fun hasAttr (Ljava/lang/String;Ldev/yks/Snapshot;)Z
+	public final fun hasAttribute (Ljava/lang/String;)Z
+	public final fun hasAttribute (Ljava/lang/String;Ldev/yks/Snapshot;)Z
+	public fun iterator ()Ljava/util/Iterator;
+	public final fun keys ()Ljava/util/Set;
+	public final fun mapAttrs (Lkotlin/jvm/functions/Function2;)Ljava/util/List;
+	public final fun mapAttrs (Lkotlin/jvm/functions/Function3;)Ljava/util/List;
+	public final fun removeAttribute (Ljava/lang/String;)V
+	public final fun set (Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;
+	public final fun setAttr (Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;
+	public final fun setAttribute (Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;
+	public final fun setAttrs (Ljava/util/Map;)Ldev/yks/YMap;
+	public final fun toDelta ()Ldev/yks/YMapDelta;
+	public final fun toDeltaDeep (Ldev/yks/AbstractRenderer;)Ldev/yks/YMapDeepDelta;
+	public static synthetic fun toDeltaDeep$default (Ldev/yks/YMap;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)Ldev/yks/YMapDeepDelta;
+	public synthetic fun toJSON ()Ljava/lang/Object;
+	public fun toJSON ()Ljava/util/Map;
+	public synthetic fun toJson ()Ljava/lang/Object;
+	public fun toJson ()Ljava/util/Map;
+	public final fun toMap ()Ljava/util/Map;
+	public final fun toMap (Ldev/yks/Snapshot;)Ljava/util/Map;
+	public final fun values ()Ljava/util/Collection;
+}
+
+public final class dev/yks/YMap$Companion {
+	public final fun from (Ldev/yks/YMapDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YMap;
+	public final fun from (Ldev/yks/YMapDelta;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YMap;
+	public static synthetic fun from$default (Ldev/yks/YMap$Companion;Ldev/yks/YMapDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YMap;
+	public static synthetic fun from$default (Ldev/yks/YMap$Companion;Ldev/yks/YMapDelta;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YMap;
+}
+
+public final class dev/yks/YMapChange {
+	public fun <init> (Ldev/yks/YMapChangeAction;Ljava/lang/Object;Ljava/lang/Object;)V
+	public final fun component1 ()Ldev/yks/YMapChangeAction;
+	public final fun component2 ()Ljava/lang/Object;
+	public final fun component3 ()Ljava/lang/Object;
+	public final fun copy (Ldev/yks/YMapChangeAction;Ljava/lang/Object;Ljava/lang/Object;)Ldev/yks/YMapChange;
+	public static synthetic fun copy$default (Ldev/yks/YMapChange;Ldev/yks/YMapChangeAction;Ljava/lang/Object;Ljava/lang/Object;ILjava/lang/Object;)Ldev/yks/YMapChange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAction ()Ldev/yks/YMapChangeAction;
+	public final fun getNewValue ()Ljava/lang/Object;
+	public final fun getOldValue ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YMapChangeAction : java/lang/Enum {
+	public static final field Add Ldev/yks/YMapChangeAction;
+	public static final field Delete Ldev/yks/YMapChangeAction;
+	public static final field Update Ldev/yks/YMapChangeAction;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/yks/YMapChangeAction;
+	public static fun values ()[Ldev/yks/YMapChangeAction;
+}
+
+public final class dev/yks/YMapDeepDelta : dev/yks/YDeepDelta {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/Map;
+	public final fun copy (Ljava/util/Map;)Ldev/yks/YMapDeepDelta;
+	public static synthetic fun copy$default (Ldev/yks/YMapDeepDelta;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YMapDeepDelta;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getAttrs ()Ljava/util/Map;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YMapDelta {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun deleteAttr (Ljava/lang/String;Ljava/lang/Object;)Ldev/yks/YMapDelta;
+	public static synthetic fun deleteAttr$default (Ldev/yks/YMapDelta;Ljava/lang/String;Ljava/lang/Object;ILjava/lang/Object;)Ldev/yks/YMapDelta;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOps ()Ljava/util/Map;
+	public fun hashCode ()I
+	public final fun isEmpty ()Z
+	public final fun setAttr (Ljava/lang/String;Ljava/lang/Object;Ljava/lang/Object;)Ldev/yks/YMapDelta;
+	public static synthetic fun setAttr$default (Ldev/yks/YMapDelta;Ljava/lang/String;Ljava/lang/Object;Ljava/lang/Object;ILjava/lang/Object;)Ldev/yks/YMapDelta;
+	public final fun setAttrs (Ljava/util/Map;Ljava/util/Map;)Ldev/yks/YMapDelta;
+	public static synthetic fun setAttrs$default (Ldev/yks/YMapDelta;Ljava/util/Map;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YMapDelta;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YMapDeltaAction : java/lang/Enum {
+	public static final field Delete Ldev/yks/YMapDeltaAction;
+	public static final field Set Ldev/yks/YMapDeltaAction;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/yks/YMapDeltaAction;
+	public static fun values ()[Ldev/yks/YMapDeltaAction;
+}
+
+public final class dev/yks/YMapDeltaOp {
+	public fun <init> (Ldev/yks/YMapDeltaAction;Ljava/lang/Object;Ljava/lang/Object;)V
+	public synthetic fun <init> (Ldev/yks/YMapDeltaAction;Ljava/lang/Object;Ljava/lang/Object;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ldev/yks/YMapDeltaAction;
+	public final fun component2 ()Ljava/lang/Object;
+	public final fun component3 ()Ljava/lang/Object;
+	public final fun copy (Ldev/yks/YMapDeltaAction;Ljava/lang/Object;Ljava/lang/Object;)Ldev/yks/YMapDeltaOp;
+	public static synthetic fun copy$default (Ldev/yks/YMapDeltaOp;Ldev/yks/YMapDeltaAction;Ljava/lang/Object;Ljava/lang/Object;ILjava/lang/Object;)Ldev/yks/YMapDeltaOp;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAction ()Ldev/yks/YMapDeltaAction;
+	public final fun getPreviousValue ()Ljava/lang/Object;
+	public final fun getValue ()Ljava/lang/Object;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YMapEvent : dev/yks/YTypedEvent {
+	public final fun getChanges ()Ldev/yks/YEventChanges;
+	public final fun getDelta ()Ldev/yks/YMapDelta;
+	public final fun getKeysChanged ()Ljava/util/Set;
+	public final fun getMapChanges ()Ljava/util/Map;
+	public synthetic fun getTarget ()Ldev/yks/AbstractYType;
+	public fun getTarget ()Ldev/yks/YMap;
+}
+
+public final class dev/yks/YStandardUpdatePolicy : java/lang/Enum {
+	public static final field ALLOW_LOSSLESS_EXTENSIONS Ldev/yks/YStandardUpdatePolicy;
+	public static final field REQUIRE_STANDARD Ldev/yks/YStandardUpdatePolicy;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/yks/YStandardUpdatePolicy;
+	public static fun values ()[Ldev/yks/YStandardUpdatePolicy;
+}
+
+public final class dev/yks/YSubdocEvent {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/List;Ljava/util/List;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/util/List;Ljava/util/List;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;Ljava/util/List;Ljava/util/List;)Ldev/yks/YSubdocEvent;
+	public static synthetic fun copy$default (Ldev/yks/YSubdocEvent;Ljava/util/List;Ljava/util/List;Ljava/util/List;ILjava/lang/Object;)Ldev/yks/YSubdocEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAdded ()Ljava/util/List;
+	public final fun getLoaded ()Ljava/util/List;
+	public final fun getRemoved ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public class dev/yks/YText : dev/yks/AbstractYType, java/lang/Iterable, kotlin/jvm/internal/markers/KMappedMarker {
+	public static final field Companion Ldev/yks/YText$Companion;
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/String;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun applyDelta (Ldev/yks/YTextDelta;Ljava/lang/Object;Ldev/yks/AbstractRenderer;Z)V
+	public final fun applyDelta (Ldev/yks/YTextDelta;Z)V
+	public static synthetic fun applyDelta$default (Ldev/yks/YText;Ldev/yks/YTextDelta;Ljava/lang/Object;Ldev/yks/AbstractRenderer;ZILjava/lang/Object;)V
+	public final fun applyDeltaDeep (Ldev/yks/YTextDeepDelta;Ljava/lang/Object;)V
+	public static synthetic fun applyDeltaDeep$default (Ldev/yks/YText;Ldev/yks/YTextDeepDelta;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun attrEntries ()Ljava/util/Set;
+	public final fun attrKeys ()Ljava/util/Set;
+	public final fun attrValues ()Ljava/util/Collection;
+	public final fun clear ()V
+	public final fun clearAttrs ()V
+	public fun clone ()Ldev/yks/YText;
+	public fun clone (Ldev/yks/YDoc;)Ldev/yks/YText;
+	public final fun delete (II)V
+	public static synthetic fun delete$default (Ldev/yks/YText;IIILjava/lang/Object;)V
+	public final fun deleteAttr (Ljava/lang/String;)V
+	public final fun deleteAttribute (Ljava/lang/String;)V
+	public final fun deleteText (IILjava/lang/Object;)V
+	public static synthetic fun deleteText$default (Ldev/yks/YText;IILjava/lang/Object;ILjava/lang/Object;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function1;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function2;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function3;)V
+	public final fun forEachAttr (Lkotlin/jvm/functions/Function2;)V
+	public final fun forEachAttr (Lkotlin/jvm/functions/Function3;)V
+	public final fun forEachIndexed (Lkotlin/jvm/functions/Function2;)V
+	public final fun format (IILjava/util/Map;)V
+	public final fun formatText (IILjava/util/Map;Ljava/lang/Object;)V
+	public static synthetic fun formatText$default (Ldev/yks/YText;IILjava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun get (I)Ljava/lang/Object;
+	public final fun getAttr (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun getAttr (Ljava/lang/String;Ldev/yks/Snapshot;)Ljava/lang/Object;
+	public final fun getAttrSize ()I
+	public final fun getAttribute (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun getAttribute (Ljava/lang/String;Ldev/yks/Snapshot;)Ljava/lang/Object;
+	public final fun getAttributes ()Ljava/util/Map;
+	public final fun getAttrs ()Ljava/util/Map;
+	public final fun getAttrs (Ldev/yks/Snapshot;)Ljava/util/Map;
+	public final fun getLength ()I
+	public final fun hasAttr (Ljava/lang/String;)Z
+	public final fun hasAttr (Ljava/lang/String;Ldev/yks/Snapshot;)Z
+	public final fun hasAttribute (Ljava/lang/String;)Z
+	public final fun hasAttribute (Ljava/lang/String;Ldev/yks/Snapshot;)Z
+	public final fun insert (ILjava/lang/String;Ljava/util/Map;)V
+	public final fun insert (ILjava/util/List;Ljava/util/Map;)V
+	public static synthetic fun insert$default (Ldev/yks/YText;ILjava/lang/String;Ljava/util/Map;ILjava/lang/Object;)V
+	public static synthetic fun insert$default (Ldev/yks/YText;ILjava/util/List;Ljava/util/Map;ILjava/lang/Object;)V
+	public final fun insertEmbed (ILjava/lang/Object;Ljava/util/Map;)V
+	public final fun insertEmbed (ILjava/lang/Object;Ljava/util/Map;Ljava/lang/Object;)V
+	public static synthetic fun insertEmbed$default (Ldev/yks/YText;ILjava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)V
+	public static synthetic fun insertEmbed$default (Ldev/yks/YText;ILjava/lang/Object;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun insertText (ILjava/lang/String;Ljava/util/Map;Ljava/lang/Object;)V
+	public static synthetic fun insertText$default (Ldev/yks/YText;ILjava/lang/String;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
+	public fun iterator ()Ljava/util/Iterator;
+	public final fun map (Lkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public final fun map (Lkotlin/jvm/functions/Function2;)Ljava/util/List;
+	public final fun map (Lkotlin/jvm/functions/Function3;)Ljava/util/List;
+	public final fun mapAttrs (Lkotlin/jvm/functions/Function2;)Ljava/util/List;
+	public final fun mapAttrs (Lkotlin/jvm/functions/Function3;)Ljava/util/List;
+	public final fun push (Ljava/lang/String;Ljava/util/Map;)V
+	public final fun push (Ljava/util/List;Ljava/util/Map;)V
+	public final fun push ([Ljava/lang/Object;)V
+	public static synthetic fun push$default (Ldev/yks/YText;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)V
+	public static synthetic fun push$default (Ldev/yks/YText;Ljava/util/List;Ljava/util/Map;ILjava/lang/Object;)V
+	public final fun removeAttribute (Ljava/lang/String;)V
+	public final fun setAttr (Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;
+	public final fun setAttribute (Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;
+	public final fun setAttrs (Ljava/util/Map;)Ldev/yks/YText;
+	public final fun slice (II)Ljava/util/List;
+	public static synthetic fun slice$default (Ldev/yks/YText;IIILjava/lang/Object;)Ljava/util/List;
+	public final fun toArray ()Ljava/util/List;
+	public final fun toDelta ()Ldev/yks/YTextDelta;
+	public final fun toDelta (Ldev/yks/Snapshot;Ldev/yks/Snapshot;Lkotlin/jvm/functions/Function2;)Ldev/yks/YTextDelta;
+	public static synthetic fun toDelta$default (Ldev/yks/YText;Ldev/yks/Snapshot;Ldev/yks/Snapshot;Lkotlin/jvm/functions/Function2;ILjava/lang/Object;)Ldev/yks/YTextDelta;
+	public final fun toDeltaDeep (Ldev/yks/AbstractRenderer;)Ldev/yks/YTextDeepDelta;
+	public static synthetic fun toDeltaDeep$default (Ldev/yks/YText;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)Ldev/yks/YTextDeepDelta;
+	public synthetic fun toJson ()Ljava/lang/Object;
+	public fun toJson ()Ljava/lang/String;
+	public final fun toList ()Ljava/util/List;
+	public fun toString ()Ljava/lang/String;
+	public final fun unshift (Ljava/lang/String;Ljava/util/Map;)V
+	public final fun unshift (Ljava/util/List;Ljava/util/Map;)V
+	public final fun unshift ([Ljava/lang/Object;)V
+	public static synthetic fun unshift$default (Ldev/yks/YText;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)V
+	public static synthetic fun unshift$default (Ldev/yks/YText;Ljava/util/List;Ljava/util/Map;ILjava/lang/Object;)V
+}
+
+public final class dev/yks/YText$Companion {
+	public final fun from (Ldev/yks/YTextDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YText;
+	public final fun from (Ldev/yks/YTextDelta;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YText;
+	public static synthetic fun from$default (Ldev/yks/YText$Companion;Ldev/yks/YTextDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YText;
+	public static synthetic fun from$default (Ldev/yks/YText$Companion;Ldev/yks/YTextDelta;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YText;
+}
+
+public final class dev/yks/YTextDeepDelta : dev/yks/YDeepDelta {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Map;Ldev/yks/YTextDelta;)V
+	public synthetic fun <init> (Ljava/util/Map;Ldev/yks/YTextDelta;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/Map;
+	public final fun component2 ()Ldev/yks/YTextDelta;
+	public final fun copy (Ljava/util/Map;Ldev/yks/YTextDelta;)Ldev/yks/YTextDeepDelta;
+	public static synthetic fun copy$default (Ldev/yks/YTextDeepDelta;Ljava/util/Map;Ldev/yks/YTextDelta;ILjava/lang/Object;)Ldev/yks/YTextDeepDelta;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getAttrs ()Ljava/util/Map;
+	public final fun getDelta ()Ldev/yks/YTextDelta;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YTextDelta {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun delete (I)Ldev/yks/YTextDelta;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOps ()Ljava/util/List;
+	public fun hashCode ()I
+	public final fun insert (Ljava/lang/String;Ljava/util/Map;)Ldev/yks/YTextDelta;
+	public final fun insert (Ljava/util/List;Ljava/util/Map;)Ldev/yks/YTextDelta;
+	public static synthetic fun insert$default (Ldev/yks/YTextDelta;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YTextDelta;
+	public static synthetic fun insert$default (Ldev/yks/YTextDelta;Ljava/util/List;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YTextDelta;
+	public final fun insertEmbed (Ljava/lang/Object;Ljava/util/Map;)Ldev/yks/YTextDelta;
+	public static synthetic fun insertEmbed$default (Ldev/yks/YTextDelta;Ljava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YTextDelta;
+	public final fun retain (ILjava/util/Map;)Ldev/yks/YTextDelta;
+	public static synthetic fun retain$default (Ldev/yks/YTextDelta;ILjava/util/Map;ILjava/lang/Object;)Ldev/yks/YTextDelta;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YTextDeltaOp {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/Object;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/Object;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/Object;
+	public final fun component2 ()Ljava/lang/Integer;
+	public final fun component3 ()Ljava/lang/Integer;
+	public final fun component4 ()Ljava/util/Map;
+	public final fun copy (Ljava/lang/Object;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/util/Map;)Ldev/yks/YTextDeltaOp;
+	public static synthetic fun copy$default (Ldev/yks/YTextDeltaOp;Ljava/lang/Object;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YTextDeltaOp;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttributes ()Ljava/util/Map;
+	public final fun getDelete ()Ljava/lang/Integer;
+	public final fun getInsert ()Ljava/lang/Object;
+	public final fun getRetain ()Ljava/lang/Integer;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YTextEvent : dev/yks/YTypedEvent {
+	public final fun getChanges ()Ldev/yks/YEventChanges;
+	public final fun getChildListChanged ()Z
+	public final fun getDelta ()Ldev/yks/YTextDelta;
+	public final fun getKeysChanged ()Ljava/util/Set;
+	public synthetic fun getTarget ()Ldev/yks/AbstractYType;
+	public fun getTarget ()Ldev/yks/YText;
+	public final fun getTextDelta ()Ldev/yks/YTextDelta;
+}
+
+public final class dev/yks/YThreadAccessPolicy : java/lang/Enum {
+	public static final field ENFORCED Ldev/yks/YThreadAccessPolicy;
+	public static final field EXTERNALLY_SERIALIZED Ldev/yks/YThreadAccessPolicy;
+	public static final field UNCHECKED Ldev/yks/YThreadAccessPolicy;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Ldev/yks/YThreadAccessPolicy;
+	public static fun values ()[Ldev/yks/YThreadAccessPolicy;
+}
+
+public final class dev/yks/YTransaction {
+	public final fun adds (JJ)Z
+	public final fun adds (Ldev/yks/Id;)Z
+	public final fun deletes (JJ)Z
+	public final fun deletes (Ldev/yks/Id;)Z
+	public final fun getAddedItemCount ()I
+	public final fun getAfterState ()Ljava/util/Map;
+	public final fun getBeforeState ()Ljava/util/Map;
+	public final fun getChangedParents ()Ljava/util/Set;
+	public final fun getChangedTypes ()Ljava/util/Set;
+	public final fun getCleanUps ()Ldev/yks/IdSet;
+	public final fun getDeleteSet ()Ldev/yks/DeleteSet;
+	public final fun getDeletedItemCount ()I
+	public final fun getDoc ()Ldev/yks/YDoc;
+	public final fun getInsertSet ()Ldev/yks/IdSet;
+	public final fun getLocal ()Z
+	public final fun getMeta ()Ljava/util/Map;
+	public final fun getOrigin ()Ljava/lang/Object;
+	public final fun getUpdate ()[B
+}
+
+public final class dev/yks/YTransactionEvent {
+	public final fun adds (JJ)Z
+	public final fun adds (Ldev/yks/AbstractStruct;)Z
+	public final fun adds (Ldev/yks/Id;)Z
+	public final fun deletes (JJ)Z
+	public final fun deletes (Ldev/yks/AbstractStruct;)Z
+	public final fun deletes (Ldev/yks/Id;)Z
+	public final fun getAddedItemCount ()I
+	public final fun getAddedStructs ()Ljava/util/List;
+	public final fun getAfterState ()Ljava/util/Map;
+	public final fun getBeforeState ()Ljava/util/Map;
+	public final fun getChangedParentTypes ()Ljava/util/Set;
+	public final fun getChangedParents ()Ljava/util/Set;
+	public final fun getChangedTypes ()Ljava/util/Set;
+	public final fun getCleanUps ()Ldev/yks/IdSet;
+	public final fun getDeleteIdSet ()Ldev/yks/IdSet;
+	public final fun getDeleteSet ()Ldev/yks/DeleteSet;
+	public final fun getDeletedItemCount ()I
+	public final fun getDeletedStructs ()Ljava/util/List;
+	public final fun getDoc ()Ldev/yks/YDoc;
+	public final fun getInsertSet ()Ldev/yks/IdSet;
+	public final fun getLocal ()Z
+	public final fun getMeta ()Ljava/util/Map;
+	public final fun getOrigin ()Ljava/lang/Object;
+	public final fun getSubdocsAdded ()Ljava/util/Set;
+	public final fun getSubdocsLoaded ()Ljava/util/Set;
+	public final fun getSubdocsRemoved ()Ljava/util/Set;
+	public final fun getUpdate ()[B
+}
+
+public final class dev/yks/YTypeChild {
+	public fun <init> (Ldev/yks/Id;Ldev/yks/Id;Ldev/yks/Id;Ljava/lang/String;Ljava/lang/String;Ldev/yks/RootKind;ZJ)V
+	public final fun component1 ()Ldev/yks/Id;
+	public final fun component2 ()Ldev/yks/Id;
+	public final fun component3 ()Ldev/yks/Id;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ldev/yks/RootKind;
+	public final fun component7 ()Z
+	public final fun component8 ()J
+	public final fun copy (Ldev/yks/Id;Ldev/yks/Id;Ldev/yks/Id;Ljava/lang/String;Ljava/lang/String;Ldev/yks/RootKind;ZJ)Ldev/yks/YTypeChild;
+	public static synthetic fun copy$default (Ldev/yks/YTypeChild;Ldev/yks/Id;Ldev/yks/Id;Ldev/yks/Id;Ljava/lang/String;Ljava/lang/String;Ldev/yks/RootKind;ZJILjava/lang/Object;)Ldev/yks/YTypeChild;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDeleted ()Z
+	public final fun getId ()Ldev/yks/Id;
+	public final fun getKind ()Ldev/yks/RootKind;
+	public final fun getLength ()J
+	public final fun getOrigin ()Ldev/yks/Id;
+	public final fun getParent ()Ljava/lang/String;
+	public final fun getParentSub ()Ljava/lang/String;
+	public final fun getRightOrigin ()Ldev/yks/Id;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YTypeEvent {
+	public fun <init> (Ljava/lang/String;Ldev/yks/AbstractYType;Ljava/lang/Object;Ljava/lang/Object;Ldev/yks/YTransactionEvent;Ldev/yks/YEvent;)V
+	public synthetic fun <init> (Ljava/lang/String;Ldev/yks/AbstractYType;Ljava/lang/Object;Ljava/lang/Object;Ldev/yks/YTransactionEvent;Ldev/yks/YEvent;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ldev/yks/AbstractYType;
+	public final fun component3 ()Ljava/lang/Object;
+	public final fun component4 ()Ljava/lang/Object;
+	public final fun component5 ()Ldev/yks/YTransactionEvent;
+	public final fun component6 ()Ldev/yks/YEvent;
+	public final fun copy (Ljava/lang/String;Ldev/yks/AbstractYType;Ljava/lang/Object;Ljava/lang/Object;Ldev/yks/YTransactionEvent;Ldev/yks/YEvent;)Ldev/yks/YTypeEvent;
+	public static synthetic fun copy$default (Ldev/yks/YTypeEvent;Ljava/lang/String;Ldev/yks/AbstractYType;Ljava/lang/Object;Ljava/lang/Object;Ldev/yks/YTransactionEvent;Ldev/yks/YEvent;ILjava/lang/Object;)Ldev/yks/YTypeEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDelta ()Ljava/lang/Object;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getOrigin ()Ljava/lang/Object;
+	public final fun getTarget ()Ldev/yks/AbstractYType;
+	public final fun getTransaction ()Ldev/yks/YTransactionEvent;
+	public final fun getYEvent ()Ldev/yks/YEvent;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YTypeHelpersKt {
+	public static final fun callTypeObservers (Ldev/yks/AbstractYType;Ldev/yks/YEvent;)V
+	public static final fun callTypeObservers (Ldev/yks/AbstractYType;Ldev/yks/YTransactionEvent;Ldev/yks/YEvent;)V
+	public static final fun createItemTextListPosition (Ldev/yks/AbstractYType;ILjava/util/Map;Ldev/yks/AbstractRenderer;)Ldev/yks/ItemTextListPosition;
+	public static synthetic fun createItemTextListPosition$default (Ldev/yks/AbstractYType;ILjava/util/Map;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)Ldev/yks/ItemTextListPosition;
+	public static final fun createMapIterator (Ldev/yks/AbstractYType;)Ljava/util/Iterator;
+	public static final fun equalFormats (Ljava/lang/Object;Ljava/lang/Object;)Z
+	public static final fun findMarker (Ldev/yks/AbstractYType;I)Ldev/yks/ArraySearchMarker;
+	public static final fun insertContent (Ldev/yks/YText;ILdev/yks/AbstractContent;Ljava/util/Map;Ljava/lang/Object;)Ldev/yks/ItemTextListPosition;
+	public static final fun insertContent (Ldev/yks/YText;Ldev/yks/ItemTextListPosition;Ldev/yks/AbstractContent;Ljava/util/Map;Ljava/lang/Object;)Ldev/yks/ItemTextListPosition;
+	public static synthetic fun insertContent$default (Ldev/yks/YText;ILdev/yks/AbstractContent;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)Ldev/yks/ItemTextListPosition;
+	public static synthetic fun insertContent$default (Ldev/yks/YText;Ldev/yks/ItemTextListPosition;Ldev/yks/AbstractContent;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)Ldev/yks/ItemTextListPosition;
+	public static final fun insertContentHelper (Ldev/yks/YText;ILjava/lang/Object;Ljava/util/Map;Ljava/lang/Object;)Ldev/yks/ItemTextListPosition;
+	public static final fun insertContentHelper (Ldev/yks/YText;Ldev/yks/ItemTextListPosition;Ljava/lang/Object;Ljava/util/Map;Ljava/lang/Object;)Ldev/yks/ItemTextListPosition;
+	public static synthetic fun insertContentHelper$default (Ldev/yks/YText;ILjava/lang/Object;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)Ldev/yks/ItemTextListPosition;
+	public static synthetic fun insertContentHelper$default (Ldev/yks/YText;Ldev/yks/ItemTextListPosition;Ljava/lang/Object;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)Ldev/yks/ItemTextListPosition;
+	public static final fun isVisible (Ldev/yks/ItemStruct;Ldev/yks/Snapshot;)Z
+	public static synthetic fun isVisible$default (Ldev/yks/ItemStruct;Ldev/yks/Snapshot;ILjava/lang/Object;)Z
+	public static final fun typeListDelete (Ldev/yks/AbstractYType;II)V
+	public static final fun typeListGet (Ldev/yks/AbstractYType;I)Ljava/lang/Object;
+	public static final fun typeListInsertGenerics (Ldev/yks/AbstractYType;ILjava/util/List;)V
+	public static final fun typeListInsertGenericsAfter (Ldev/yks/AbstractYType;Ldev/yks/ItemStruct;Ljava/util/List;)V
+	public static final fun typeListLength (Ldev/yks/AbstractYType;)I
+	public static final fun typeListPushGenerics (Ldev/yks/AbstractYType;Ljava/util/List;)V
+	public static final fun typeListSlice (Ldev/yks/AbstractYType;II)Ljava/util/List;
+	public static synthetic fun typeListSlice$default (Ldev/yks/AbstractYType;IIILjava/lang/Object;)Ljava/util/List;
+	public static final fun typeMapDelete (Ldev/yks/AbstractYType;Ljava/lang/String;)V
+	public static final fun typeMapGet (Ldev/yks/AbstractYType;Ljava/lang/String;)Ljava/lang/Object;
+	public static final fun typeMapGetAll (Ldev/yks/AbstractYType;)Ljava/util/Map;
+	public static final fun typeMapGetAllSnapshot (Ldev/yks/AbstractYType;Ldev/yks/Snapshot;)Ljava/util/Map;
+	public static final fun typeMapGetDelta (Ldev/yks/AbstractYType;Ljava/util/Set;)Ldev/yks/YMapDelta;
+	public static final fun typeMapGetDelta (Ldev/yks/YMapDelta;Ldev/yks/AbstractYType;Ljava/util/Set;Ldev/yks/AbstractRenderer;ZLjava/util/Set;Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/lang/Object;)Ldev/yks/YMapDelta;
+	public static synthetic fun typeMapGetDelta$default (Ldev/yks/AbstractYType;Ljava/util/Set;ILjava/lang/Object;)Ldev/yks/YMapDelta;
+	public static synthetic fun typeMapGetDelta$default (Ldev/yks/YMapDelta;Ldev/yks/AbstractYType;Ljava/util/Set;Ldev/yks/AbstractRenderer;ZLjava/util/Set;Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/lang/Object;ILjava/lang/Object;)Ldev/yks/YMapDelta;
+	public static final fun typeMapGetSnapshot (Ldev/yks/AbstractYType;Ljava/lang/String;Ldev/yks/Snapshot;)Ljava/lang/Object;
+	public static final fun typeMapHas (Ldev/yks/AbstractYType;Ljava/lang/String;)Z
+	public static final fun typeMapSet (Ldev/yks/AbstractYType;Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;
+	public static final fun updateMarkerChanges (Ljava/util/List;II)V
+}
+
+public abstract class dev/yks/YTypedEvent {
+	public synthetic fun <init> (Ldev/yks/YEvent;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun adds (Ldev/yks/Id;)Z
+	public final fun deletes (Ldev/yks/Id;)Z
+	public final fun getChangedTarget ()Ldev/yks/AbstractYType;
+	public final fun getCurrentTarget ()Ldev/yks/AbstractYType;
+	public final fun getDeepEvents ()Ljava/util/List;
+	public final fun getDeleteSet ()Ldev/yks/DeleteSet;
+	public final fun getDelta (ZLdev/yks/AbstractRenderer;)Ljava/lang/Object;
+	public static synthetic fun getDelta$default (Ldev/yks/YTypedEvent;ZLdev/yks/AbstractRenderer;ILjava/lang/Object;)Ljava/lang/Object;
+	public final fun getDeltaDeep ()Ljava/lang/Object;
+	public final fun getInsertSet ()Ldev/yks/IdSet;
+	public final fun getOrigin ()Ljava/lang/Object;
+	public final fun getPath ()Ljava/util/List;
+	public final fun getRawEvent ()Ldev/yks/YEvent;
+	public abstract fun getTarget ()Ldev/yks/AbstractYType;
+	public final fun getTransaction ()Ldev/yks/YTransactionEvent;
+	public final fun getUpdate ()[B
+}
+
+public final class dev/yks/YTypedEventsKt {
+	public static final fun asArrayEvent (Ldev/yks/YEvent;)Ldev/yks/YArrayEvent;
+	public static final fun asMapEvent (Ldev/yks/YEvent;)Ldev/yks/YMapEvent;
+	public static final fun asTextEvent (Ldev/yks/YEvent;)Ldev/yks/YTextEvent;
+	public static final fun asTypedEvent (Ldev/yks/YEvent;)Ldev/yks/YTypedEvent;
+	public static final fun asXmlEvent (Ldev/yks/YEvent;)Ldev/yks/YXmlEvent;
+	public static final fun getChanges (Ldev/yks/YEvent;)Ldev/yks/YEventChanges;
+	public static final fun getKeys (Ldev/yks/YEvent;)Ljava/util/Map;
+	public static final fun observeDeepTyped (Ldev/yks/AbstractYType;Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
+	public static final fun observeTyped (Ldev/yks/YArray;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public static final fun observeTyped (Ldev/yks/YMap;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public static final fun observeTyped (Ldev/yks/YText;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public static final fun observeTyped (Ldev/yks/YXmlElementType;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public static final fun observeTyped (Ldev/yks/YXmlFragment;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+}
+
+public final class dev/yks/YTypesKt {
+	public static final field YArrayRefID I
+	public static final field YMapRefID I
+	public static final field YTextRefID I
+	public static final field YXmlElementRefID I
+	public static final field YXmlFragmentRefID I
+	public static final field YXmlHookRefID I
+	public static final field YXmlTextRefID I
+	public static final fun $ytype ()Lkotlin/jvm/functions/Function1;
+	public static final fun createAttributionFromAttributionItems (Ljava/util/List;Z)Ljava/util/Map;
+	public static final fun get$ydoc ()Lkotlin/jvm/functions/Function1;
+	public static final fun get$ytypeAny ()Lkotlin/jvm/functions/Function1;
+	public static final fun rootKindFromTypeRefId (I)Ldev/yks/RootKind;
+	public static final fun toTypeRefId (Ldev/yks/RootKind;)I
+	public static final fun typeRefId (Ldev/yks/AbstractYType;)I
+	public static final fun warnPrematureAccess ()V
+}
+
+public final class dev/yks/YUnopenedRoot : dev/yks/AbstractYType {
+	public fun getLegacyTypeRef ()I
+	public fun getTypeRef ()I
+	public fun toJSON ()Ljava/lang/Object;
+	public fun toJson ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YUpdateLimits {
+	public static final field Companion Ldev/yks/YUpdateLimits$Companion;
+	public static final field DEFAULT Ldev/yks/YUpdateLimits;
+	public fun <init> ()V
+	public fun <init> (III)V
+	public synthetic fun <init> (IIIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun component3 ()I
+	public final fun copy (III)Ldev/yks/YUpdateLimits;
+	public static synthetic fun copy$default (Ldev/yks/YUpdateLimits;IIIILjava/lang/Object;)Ldev/yks/YUpdateLimits;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMaxDeleteRanges ()I
+	public final fun getMaxEncodedBytes ()I
+	public final fun getMaxStructs ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YUpdateLimits$Companion {
+}
+
+public abstract interface class dev/yks/YValue {
+	public static final field Companion Ldev/yks/YValue$Companion;
+	public abstract fun toAny ()Ljava/lang/Object;
+}
+
+public final class dev/yks/YValue$BigIntNumber : dev/yks/YValue {
+	public fun <init> (Ljava/math/BigInteger;)V
+	public final fun component1 ()Ljava/math/BigInteger;
+	public final fun copy (Ljava/math/BigInteger;)Ldev/yks/YValue$BigIntNumber;
+	public static synthetic fun copy$default (Ldev/yks/YValue$BigIntNumber;Ljava/math/BigInteger;ILjava/lang/Object;)Ldev/yks/YValue$BigIntNumber;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ljava/math/BigInteger;
+	public fun hashCode ()I
+	public fun toAny ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YValue$BinaryValue : dev/yks/YValue {
+	public fun <init> ([B)V
+	public final fun bytes ()[B
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toAny ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YValue$Bool : dev/yks/YValue {
+	public fun <init> (Z)V
+	public final fun component1 ()Z
+	public final fun copy (Z)Ldev/yks/YValue$Bool;
+	public static synthetic fun copy$default (Ldev/yks/YValue$Bool;ZILjava/lang/Object;)Ldev/yks/YValue$Bool;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Z
+	public fun hashCode ()I
+	public fun toAny ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YValue$Companion {
+	public final fun from (Ljava/lang/Object;)Ldev/yks/YValue;
+}
+
+public final class dev/yks/YValue$DoubleNumber : dev/yks/YValue {
+	public fun <init> (D)V
+	public final fun component1 ()D
+	public final fun copy (D)Ldev/yks/YValue$DoubleNumber;
+	public static synthetic fun copy$default (Ldev/yks/YValue$DoubleNumber;DILjava/lang/Object;)Ldev/yks/YValue$DoubleNumber;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()D
+	public fun hashCode ()I
+	public fun toAny ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YValue$ListValue : dev/yks/YValue {
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Ldev/yks/YValue$ListValue;
+	public static synthetic fun copy$default (Ldev/yks/YValue$ListValue;Ljava/util/List;ILjava/lang/Object;)Ldev/yks/YValue$ListValue;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toAny ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YValue$LongNumber : dev/yks/YValue {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Ldev/yks/YValue$LongNumber;
+	public static synthetic fun copy$default (Ldev/yks/YValue$LongNumber;JILjava/lang/Object;)Ldev/yks/YValue$LongNumber;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()J
+	public fun hashCode ()I
+	public fun toAny ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YValue$MapValue : dev/yks/YValue {
+	public fun <init> (Ljava/util/Map;)V
+	public final fun component1 ()Ljava/util/Map;
+	public final fun copy (Ljava/util/Map;)Ldev/yks/YValue$MapValue;
+	public static synthetic fun copy$default (Ldev/yks/YValue$MapValue;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YValue$MapValue;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ljava/util/Map;
+	public fun hashCode ()I
+	public fun toAny ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YValue$Null : dev/yks/YValue {
+	public static final field INSTANCE Ldev/yks/YValue$Null;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toAny ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YValue$StringValue : dev/yks/YValue {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Ldev/yks/YValue$StringValue;
+	public static synthetic fun copy$default (Ldev/yks/YValue$StringValue;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YValue$StringValue;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toAny ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YValue$SubdocRef : dev/yks/YValue {
+	public fun <init> (Ljava/lang/String;ZZZLjava/lang/String;Ljava/lang/String;Ldev/yks/YValue;Z)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Z
+	public final fun component3 ()Z
+	public final fun component4 ()Z
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ldev/yks/YValue;
+	public final fun component8 ()Z
+	public final fun copy (Ljava/lang/String;ZZZLjava/lang/String;Ljava/lang/String;Ldev/yks/YValue;Z)Ldev/yks/YValue$SubdocRef;
+	public static synthetic fun copy$default (Ldev/yks/YValue$SubdocRef;Ljava/lang/String;ZZZLjava/lang/String;Ljava/lang/String;Ldev/yks/YValue;ZILjava/lang/Object;)Ldev/yks/YValue$SubdocRef;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAutoLoad ()Z
+	public final fun getCollectionId ()Ljava/lang/String;
+	public final fun getGc ()Z
+	public final fun getGuid ()Ljava/lang/String;
+	public final fun getInstanceId ()Ljava/lang/String;
+	public final fun getMeta ()Ldev/yks/YValue;
+	public final fun getShouldLoad ()Z
+	public fun hashCode ()I
+	public final fun isSuggestionDoc ()Z
+	public fun toAny ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YValue$TypeRef : dev/yks/YValue {
+	public fun <init> (Ldev/yks/RootKind;Ljava/lang/String;)V
+	public final fun component1 ()Ldev/yks/RootKind;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ldev/yks/RootKind;Ljava/lang/String;)Ldev/yks/YValue$TypeRef;
+	public static synthetic fun copy$default (Ldev/yks/YValue$TypeRef;Ldev/yks/RootKind;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YValue$TypeRef;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getKind ()Ldev/yks/RootKind;
+	public final fun getName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toAny ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YValue$Undefined : dev/yks/YValue {
+	public static final field INSTANCE Ldev/yks/YValue$Undefined;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toAny ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YValueKt {
+	public static final fun readYValue (Ldev/yks/BinaryDecoder;)Ldev/yks/YValue;
+	public static final fun writeYValue (Ldev/yks/BinaryEncoder;Ldev/yks/YValue;)V
+}
+
+public final class dev/yks/YXmlElement : dev/yks/YXmlNode, java/lang/Iterable, kotlin/jvm/internal/markers/KMappedMarker {
+	public static final field Companion Ldev/yks/YXmlElement$Companion;
+	public fun <init> (Ljava/lang/String;)V
+	public final fun applyDelta (Ljava/util/List;)V
+	public final fun applyDeltaDeep (Ldev/yks/YXmlElementDeepDelta;Ldev/yks/YDoc;)V
+	public static synthetic fun applyDeltaDeep$default (Ldev/yks/YXmlElement;Ldev/yks/YXmlElementDeepDelta;Ldev/yks/YDoc;ILjava/lang/Object;)V
+	public final fun attrEntries ()Ljava/util/Set;
+	public final fun attrKeys ()Ljava/util/Set;
+	public final fun attrValues ()Ljava/util/Collection;
+	public final fun clear ()V
+	public final fun clearAttrs ()V
+	public fun clone ()Ldev/yks/YXmlElement;
+	public synthetic fun clone ()Ldev/yks/YXmlNode;
+	public final fun createTreeWalker (Lkotlin/jvm/functions/Function1;)Lkotlin/sequences/Sequence;
+	public static synthetic fun createTreeWalker$default (Ldev/yks/YXmlElement;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lkotlin/sequences/Sequence;
+	public final fun delete (II)V
+	public static synthetic fun delete$default (Ldev/yks/YXmlElement;IIILjava/lang/Object;)V
+	public final fun deleteAttr (Ljava/lang/String;)V
+	public final fun deleteAttribute (Ljava/lang/String;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function1;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function2;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function3;)V
+	public final fun forEachAttr (Lkotlin/jvm/functions/Function2;)V
+	public final fun forEachAttr (Lkotlin/jvm/functions/Function3;)V
+	public final fun forEachIndexed (Lkotlin/jvm/functions/Function2;)V
+	public final fun get (I)Ldev/yks/YXmlNode;
+	public final fun getAttr (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun getAttrSize ()I
+	public final fun getAttribute (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun getAttributes ()Ljava/util/Map;
+	public final fun getAttrs ()Ljava/util/Map;
+	public final fun getFirstChild ()Ldev/yks/YXmlNode;
+	public final fun getLegacyTypeRef ()I
+	public final fun getLength ()I
+	public final fun getNodeName ()Ljava/lang/String;
+	public final fun getTypeRef ()I
+	public final fun hasAttr (Ljava/lang/String;)Z
+	public final fun hasAttribute (Ljava/lang/String;)Z
+	public final fun insert (ILjava/util/List;)V
+	public fun iterator ()Ljava/util/Iterator;
+	public final fun map (Lkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public final fun map (Lkotlin/jvm/functions/Function2;)Ljava/util/List;
+	public final fun map (Lkotlin/jvm/functions/Function3;)Ljava/util/List;
+	public final fun mapAttrs (Lkotlin/jvm/functions/Function2;)Ljava/util/List;
+	public final fun mapAttrs (Lkotlin/jvm/functions/Function3;)Ljava/util/List;
+	public final fun push (Ljava/util/List;)V
+	public final fun push ([Ldev/yks/YXmlNode;)V
+	public final fun removeAttribute (Ljava/lang/String;)V
+	public final fun setAttr (Ljava/lang/String;Ljava/lang/Object;)V
+	public final fun setAttribute (Ljava/lang/String;Ljava/lang/Object;)V
+	public final fun setAttrs (Ljava/util/Map;)Ldev/yks/YXmlElement;
+	public final fun slice (II)Ljava/util/List;
+	public static synthetic fun slice$default (Ldev/yks/YXmlElement;IIILjava/lang/Object;)Ljava/util/List;
+	public final fun toArray ()Ljava/util/List;
+	public final fun toDelta ()Ljava/util/List;
+	public final fun toDeltaDeep ()Ldev/yks/YXmlElementDeepDelta;
+	public synthetic fun toJSON ()Ljava/lang/Object;
+	public fun toJSON ()Ljava/util/Map;
+	public synthetic fun toJson ()Ljava/lang/Object;
+	public fun toJson ()Ljava/util/Map;
+	public final fun toList ()Ljava/util/List;
+	public fun toString ()Ljava/lang/String;
+	public final fun toString (Z)Ljava/lang/String;
+	public final fun unshift (Ljava/util/List;)V
+	public final fun unshift ([Ldev/yks/YXmlNode;)V
+}
+
+public final class dev/yks/YXmlElement$Companion {
+	public final fun from (Ldev/yks/YXmlElementDeepDelta;)Ldev/yks/YXmlElement;
+	public final fun from (Ljava/lang/String;Ljava/util/List;)Ldev/yks/YXmlElement;
+}
+
+public final class dev/yks/YXmlElementDeepDelta : dev/yks/YDeepDelta {
+	public fun <init> (Ljava/lang/String;Ljava/util/Map;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/Map;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/Map;
+	public final fun component3 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;Ljava/util/Map;Ljava/util/List;)Ldev/yks/YXmlElementDeepDelta;
+	public static synthetic fun copy$default (Ldev/yks/YXmlElementDeepDelta;Ljava/lang/String;Ljava/util/Map;Ljava/util/List;ILjava/lang/Object;)Ldev/yks/YXmlElementDeepDelta;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getAttrs ()Ljava/util/Map;
+	public final fun getChildren ()Ljava/util/List;
+	public final fun getNodeName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YXmlElementType : dev/yks/YXmlSharedType, java/lang/Iterable, kotlin/jvm/internal/markers/KMappedMarker {
+	public fun <init> (Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun applyDelta (Ljava/util/List;Ljava/lang/Object;)V
+	public static synthetic fun applyDelta$default (Ldev/yks/YXmlElementType;Ljava/util/List;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun applyDeltaDeep (Ldev/yks/YXmlElementDeepDelta;Ljava/lang/Object;)V
+	public static synthetic fun applyDeltaDeep$default (Ldev/yks/YXmlElementType;Ldev/yks/YXmlElementDeepDelta;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun attrEntries ()Ljava/util/Set;
+	public final fun attrKeys ()Ljava/util/Set;
+	public final fun attrValues ()Ljava/util/Collection;
+	public final fun clear ()V
+	public final fun clearAttrs ()V
+	public final fun clone ()Ldev/yks/YXmlElementType;
+	public final fun clone (Ldev/yks/YDoc;)Ldev/yks/YXmlElementType;
+	public final fun createTreeWalker (Lkotlin/jvm/functions/Function1;)Lkotlin/sequences/Sequence;
+	public static synthetic fun createTreeWalker$default (Ldev/yks/YXmlElementType;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lkotlin/sequences/Sequence;
+	public final fun delete (II)V
+	public static synthetic fun delete$default (Ldev/yks/YXmlElementType;IIILjava/lang/Object;)V
+	public final fun deleteAttr (Ljava/lang/String;)V
+	public final fun deleteAttribute (Ljava/lang/String;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function1;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function2;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function3;)V
+	public final fun forEachAttr (Lkotlin/jvm/functions/Function2;)V
+	public final fun forEachAttr (Lkotlin/jvm/functions/Function3;)V
+	public final fun forEachIndexed (Lkotlin/jvm/functions/Function2;)V
+	public final fun get (I)Ljava/lang/Object;
+	public final fun getAttr (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun getAttr (Ljava/lang/String;Ldev/yks/Snapshot;)Ljava/lang/Object;
+	public final fun getAttrSize ()I
+	public final fun getAttribute (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun getAttribute (Ljava/lang/String;Ldev/yks/Snapshot;)Ljava/lang/Object;
+	public final fun getAttributes ()Ljava/util/Map;
+	public final fun getAttributes (Ldev/yks/Snapshot;)Ljava/util/Map;
+	public final fun getAttrs ()Ljava/util/Map;
+	public final fun getAttrs (Ldev/yks/Snapshot;)Ljava/util/Map;
+	public final fun getFirstChild ()Ljava/lang/Object;
+	public final fun getLength ()I
+	public final fun getNextSibling ()Ljava/lang/Object;
+	public final fun getNodeName ()Ljava/lang/String;
+	public final fun getPrevSibling ()Ljava/lang/Object;
+	public final fun getType (I)Ldev/yks/AbstractYType;
+	public final fun hasAttr (Ljava/lang/String;)Z
+	public final fun hasAttr (Ljava/lang/String;Ldev/yks/Snapshot;)Z
+	public final fun hasAttribute (Ljava/lang/String;)Z
+	public final fun hasAttribute (Ljava/lang/String;Ldev/yks/Snapshot;)Z
+	public final fun insert (ILjava/util/List;)V
+	public final fun insertAfter (Ljava/lang/Object;Ljava/util/List;)V
+	public final fun insertType (ILdev/yks/AbstractYType;)V
+	public final fun insertTypes (ILjava/util/List;)V
+	public fun iterator ()Ljava/util/Iterator;
+	public final fun map (Lkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public final fun map (Lkotlin/jvm/functions/Function2;)Ljava/util/List;
+	public final fun map (Lkotlin/jvm/functions/Function3;)Ljava/util/List;
+	public final fun mapAttrs (Lkotlin/jvm/functions/Function2;)Ljava/util/List;
+	public final fun mapAttrs (Lkotlin/jvm/functions/Function3;)Ljava/util/List;
+	public final fun push (Ljava/util/List;)V
+	public final fun push ([Ldev/yks/AbstractYType;)V
+	public final fun push ([Ldev/yks/YXmlNode;)V
+	public final fun pushTypes (Ljava/util/List;)V
+	public final fun querySelector (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun querySelectorAll (Ljava/lang/String;)Ljava/util/List;
+	public final fun removeAttribute (Ljava/lang/String;)V
+	public final fun setAttr (Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;
+	public final fun setAttribute (Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;
+	public final fun setAttrs (Ljava/util/Map;)Ldev/yks/YXmlElementType;
+	public final fun slice (II)Ljava/util/List;
+	public static synthetic fun slice$default (Ldev/yks/YXmlElementType;IIILjava/lang/Object;)Ljava/util/List;
+	public final fun toArray ()Ljava/util/List;
+	public final fun toDelta ()Ljava/util/List;
+	public final fun toDeltaDeep (Ldev/yks/AbstractRenderer;)Ldev/yks/YXmlElementDeepDelta;
+	public static synthetic fun toDeltaDeep$default (Ldev/yks/YXmlElementType;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)Ldev/yks/YXmlElementDeepDelta;
+	public synthetic fun toJSON ()Ljava/lang/Object;
+	public fun toJSON ()Ljava/lang/String;
+	public synthetic fun toJson ()Ljava/lang/Object;
+	public fun toJson ()Ljava/util/Map;
+	public final fun toList ()Ljava/util/List;
+	public fun toString ()Ljava/lang/String;
+	public final fun toString (Z)Ljava/lang/String;
+	public final fun unshift (Ljava/util/List;)V
+	public final fun unshift ([Ldev/yks/AbstractYType;)V
+	public final fun unshift ([Ldev/yks/YXmlNode;)V
+	public final fun unshiftTypes (Ljava/util/List;)V
+}
+
+public final class dev/yks/YXmlEvent : dev/yks/YTypedEvent {
+	public final fun getArrayDelta ()Ljava/util/List;
+	public final fun getAttributesChanged ()Ljava/util/Set;
+	public final fun getChanges ()Ldev/yks/YEventChanges;
+	public final fun getChildListChanged ()Z
+	public final fun getDelta ()Ljava/util/List;
+	public synthetic fun getTarget ()Ldev/yks/AbstractYType;
+	public fun getTarget ()Ldev/yks/YXmlSharedType;
+}
+
+public final class dev/yks/YXmlFragment : dev/yks/YXmlSharedType, java/lang/Iterable, kotlin/jvm/internal/markers/KMappedMarker {
+	public static final field Companion Ldev/yks/YXmlFragment$Companion;
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Collection;)V
+	public fun <init> ([Ldev/yks/YXmlNode;)V
+	public final fun applyDelta (Ljava/util/List;Ljava/lang/Object;Ldev/yks/AbstractRenderer;)V
+	public static synthetic fun applyDelta$default (Ldev/yks/YXmlFragment;Ljava/util/List;Ljava/lang/Object;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)V
+	public final fun applyDeltaDeep (Ldev/yks/YXmlFragmentDeepDelta;Ljava/lang/Object;)V
+	public static synthetic fun applyDeltaDeep$default (Ldev/yks/YXmlFragment;Ldev/yks/YXmlFragmentDeepDelta;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun attrEntries ()Ljava/util/Set;
+	public final fun attrKeys ()Ljava/util/Set;
+	public final fun attrValues ()Ljava/util/Collection;
+	public final fun clear ()V
+	public final fun clearAttrs ()V
+	public final fun clone ()Ldev/yks/YXmlFragment;
+	public final fun clone (Ldev/yks/YDoc;)Ldev/yks/YXmlFragment;
+	public final fun createTreeWalker (Lkotlin/jvm/functions/Function1;)Lkotlin/sequences/Sequence;
+	public static synthetic fun createTreeWalker$default (Ldev/yks/YXmlFragment;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lkotlin/sequences/Sequence;
+	public final fun delete (II)V
+	public static synthetic fun delete$default (Ldev/yks/YXmlFragment;IIILjava/lang/Object;)V
+	public final fun deleteAttr (Ljava/lang/String;)V
+	public final fun deleteAttribute (Ljava/lang/String;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function1;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function2;)V
+	public final fun forEach (Lkotlin/jvm/functions/Function3;)V
+	public final fun forEachAttr (Lkotlin/jvm/functions/Function2;)V
+	public final fun forEachAttr (Lkotlin/jvm/functions/Function3;)V
+	public final fun forEachIndexed (Lkotlin/jvm/functions/Function2;)V
+	public final fun get (I)Ljava/lang/Object;
+	public final fun getAttr (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun getAttr (Ljava/lang/String;Ldev/yks/Snapshot;)Ljava/lang/Object;
+	public final fun getAttrSize ()I
+	public final fun getAttribute (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun getAttribute (Ljava/lang/String;Ldev/yks/Snapshot;)Ljava/lang/Object;
+	public final fun getAttributes ()Ljava/util/Map;
+	public final fun getAttrs ()Ljava/util/Map;
+	public final fun getAttrs (Ldev/yks/Snapshot;)Ljava/util/Map;
+	public final fun getFirstChild ()Ljava/lang/Object;
+	public final fun getLength ()I
+	public final fun getType (I)Ldev/yks/AbstractYType;
+	public final fun hasAttr (Ljava/lang/String;)Z
+	public final fun hasAttr (Ljava/lang/String;Ldev/yks/Snapshot;)Z
+	public final fun hasAttribute (Ljava/lang/String;)Z
+	public final fun hasAttribute (Ljava/lang/String;Ldev/yks/Snapshot;)Z
+	public final fun insert (ILjava/util/List;)V
+	public final fun insertAfter (Ljava/lang/Object;Ljava/util/List;)V
+	public final fun insertType (ILdev/yks/AbstractYType;)V
+	public final fun insertTypes (ILjava/util/List;)V
+	public fun iterator ()Ljava/util/Iterator;
+	public final fun map (Lkotlin/jvm/functions/Function1;)Ljava/util/List;
+	public final fun map (Lkotlin/jvm/functions/Function2;)Ljava/util/List;
+	public final fun map (Lkotlin/jvm/functions/Function3;)Ljava/util/List;
+	public final fun mapAttrs (Lkotlin/jvm/functions/Function2;)Ljava/util/List;
+	public final fun mapAttrs (Lkotlin/jvm/functions/Function3;)Ljava/util/List;
+	public final fun push (Ljava/util/List;)V
+	public final fun push ([Ldev/yks/AbstractYType;)V
+	public final fun push ([Ldev/yks/YXmlNode;)V
+	public final fun pushTypes (Ljava/util/List;)V
+	public final fun querySelector (Ljava/lang/String;)Ljava/lang/Object;
+	public final fun querySelectorAll (Ljava/lang/String;)Ljava/util/List;
+	public final fun removeAttribute (Ljava/lang/String;)V
+	public final fun setAttr (Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;
+	public final fun setAttribute (Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;
+	public final fun setAttrs (Ljava/util/Map;)Ldev/yks/YXmlFragment;
+	public final fun slice (II)Ljava/util/List;
+	public static synthetic fun slice$default (Ldev/yks/YXmlFragment;IIILjava/lang/Object;)Ljava/util/List;
+	public final fun toArray ()Ljava/util/List;
+	public final fun toDelta ()Ljava/util/List;
+	public final fun toDeltaDeep (Ldev/yks/AbstractRenderer;)Ldev/yks/YXmlFragmentDeepDelta;
+	public static synthetic fun toDeltaDeep$default (Ldev/yks/YXmlFragment;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)Ldev/yks/YXmlFragmentDeepDelta;
+	public synthetic fun toJSON ()Ljava/lang/Object;
+	public fun toJSON ()Ljava/lang/String;
+	public synthetic fun toJson ()Ljava/lang/Object;
+	public fun toJson ()Ljava/util/List;
+	public final fun toList ()Ljava/util/List;
+	public fun toString ()Ljava/lang/String;
+	public final fun toString (Z)Ljava/lang/String;
+	public final fun unshift (Ljava/util/List;)V
+	public final fun unshift ([Ldev/yks/AbstractYType;)V
+	public final fun unshift ([Ldev/yks/YXmlNode;)V
+	public final fun unshiftTypes (Ljava/util/List;)V
+}
+
+public final class dev/yks/YXmlFragment$Companion {
+	public final fun from (Ldev/yks/YXmlFragmentDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YXmlFragment;
+	public final fun from (Ljava/util/List;Ldev/yks/YDoc;Ljava/lang/String;)Ldev/yks/YXmlFragment;
+	public static synthetic fun from$default (Ldev/yks/YXmlFragment$Companion;Ldev/yks/YXmlFragmentDeepDelta;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YXmlFragment;
+	public static synthetic fun from$default (Ldev/yks/YXmlFragment$Companion;Ljava/util/List;Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YXmlFragment;
+}
+
+public final class dev/yks/YXmlFragmentDeepDelta : dev/yks/YDeepDelta {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Map;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/util/Map;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/Map;
+	public final fun component2 ()Ljava/util/List;
+	public final fun copy (Ljava/util/Map;Ljava/util/List;)Ldev/yks/YXmlFragmentDeepDelta;
+	public static synthetic fun copy$default (Ldev/yks/YXmlFragmentDeepDelta;Ljava/util/Map;Ljava/util/List;ILjava/lang/Object;)Ldev/yks/YXmlFragmentDeepDelta;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getAttrs ()Ljava/util/Map;
+	public final fun getDelta ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YXmlHook : dev/yks/YMap {
+	public fun <init> (Ljava/lang/String;)V
+	public synthetic fun clone ()Ldev/yks/YMap;
+	public fun clone ()Ldev/yks/YXmlHook;
+	public synthetic fun clone (Ldev/yks/YDoc;)Ldev/yks/YMap;
+	public fun clone (Ldev/yks/YDoc;)Ldev/yks/YXmlHook;
+	public final fun getHookName ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract class dev/yks/YXmlNode {
+	public abstract fun clone ()Ldev/yks/YXmlNode;
+	public fun toJSON ()Ljava/lang/Object;
+	public abstract fun toJson ()Ljava/lang/Object;
+	public abstract fun toString ()Ljava/lang/String;
+}
+
+public abstract class dev/yks/YXmlSharedType : dev/yks/AbstractYType {
+	public synthetic fun <init> (Ldev/yks/YDoc;Ljava/lang/String;Ldev/yks/RootKind;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+
+public final class dev/yks/YXmlText : dev/yks/YXmlNode {
+	public fun <init> (Ljava/lang/String;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public synthetic fun clone ()Ldev/yks/YXmlNode;
+	public fun clone ()Ldev/yks/YXmlText;
+	public final fun getLegacyTypeRef ()I
+	public final fun getLength ()I
+	public final fun getTypeRef ()I
+	public final fun toDeltaDeep ()Ljava/lang/String;
+	public synthetic fun toJson ()Ljava/lang/Object;
+	public fun toJson ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YXmlTextType : dev/yks/YText {
+	public fun <init> (Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public synthetic fun clone ()Ldev/yks/YText;
+	public fun clone ()Ldev/yks/YXmlTextType;
+	public synthetic fun clone (Ldev/yks/YDoc;)Ldev/yks/YText;
+	public fun clone (Ldev/yks/YDoc;)Ldev/yks/YXmlTextType;
+	public final fun getNextSibling ()Ljava/lang/Object;
+	public final fun getPrevSibling ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YksConcurrentAccessException : dev/yks/YksException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun getActiveThreadName ()Ljava/lang/String;
+	public final fun getCurrentThreadName ()Ljava/lang/String;
+}
+
+public final class dev/yks/YksDecodingException : dev/yks/YksException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public final fun getFormat ()Ljava/lang/String;
+}
+
+public class dev/yks/YksException : java/lang/IllegalStateException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+
+public final class dev/yks/YksThreadConfinementException : dev/yks/YksException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun getCurrentThreadName ()Ljava/lang/String;
+	public final fun getOwnerThreadName ()Ljava/lang/String;
+}
+
+public final class dev/yks/YksUpdateLimitException : dev/yks/YksException {
+	public fun <init> (Ljava/lang/String;JJ)V
+	public final fun getActual ()J
+	public final fun getLimit ()Ljava/lang/String;
+	public final fun getMaximum ()J
+}
+

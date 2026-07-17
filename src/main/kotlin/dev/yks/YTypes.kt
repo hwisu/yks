@@ -1,6 +1,6 @@
 package dev.yks
 
-enum class RootKind {
+public enum class RootKind {
     Array,
     Map,
     Text,
@@ -10,21 +10,21 @@ enum class RootKind {
     XmlText,
 }
 
-const val YArrayRefID: Int = 0
-const val YMapRefID: Int = 1
-const val YTextRefID: Int = 2
-const val YXmlElementRefID: Int = 3
-const val YXmlFragmentRefID: Int = 4
-const val YXmlHookRefID: Int = 5
-const val YXmlTextRefID: Int = 6
+public const val YArrayRefID: Int = 0
+public const val YMapRefID: Int = 1
+public const val YTextRefID: Int = 2
+public const val YXmlElementRefID: Int = 3
+public const val YXmlFragmentRefID: Int = 4
+public const val YXmlHookRefID: Int = 5
+public const val YXmlTextRefID: Int = 6
 
-val `$ytypeAny`: (Any?) -> Boolean = { value -> value is AbstractYType }
+public val `$ytypeAny`: (Any?) -> Boolean = { value -> value is AbstractYType }
 
-fun `$ytype`(): (Any?) -> Boolean = `$ytypeAny`
+public fun `$ytype`(): (Any?) -> Boolean = `$ytypeAny`
 
-val `$ydoc`: (Any?) -> Boolean = { value -> value is YDoc }
+public val `$ydoc`: (Any?) -> Boolean = { value -> value is YDoc }
 
-typealias Attribution = Map<String, Any?>
+public typealias Attribution = Map<String, Any?>
 
 /**
  * Distinguishes an omitted Y.Text attribute argument from an explicitly supplied empty map.
@@ -35,7 +35,7 @@ typealias Attribution = Map<String, Any?>
  */
 private object UnspecifiedTextAttributes : Map<String, Any?> by emptyMap()
 
-fun warnPrematureAccess() {
+public fun warnPrematureAccess() {
     System.err.println("Invalid access: Add Yjs type to a document before reading data.")
 }
 
@@ -59,7 +59,7 @@ internal data class YTypeMutableState(
     val preliminaryOperationValues: List<Any?>,
 )
 
-fun createAttributionFromAttributionItems(attrs: List<ContentAttribute>?, deleted: Boolean): Attribution? {
+public fun createAttributionFromAttributionItems(attrs: List<ContentAttribute>?, deleted: Boolean): Attribution? {
     if (attrs == null) return null
     val attribution = linkedMapOf<String, Any?>()
     val by = mutableListOf<Any?>()
@@ -76,14 +76,14 @@ fun createAttributionFromAttributionItems(attrs: List<ContentAttribute>?, delete
     }
 }
 
-sealed class AbstractYType protected constructor(
+public sealed class AbstractYType protected constructor(
     doc: YDoc,
     name: String,
     internal val kind: RootKind,
 ) {
-    var doc: YDoc = doc
+    public var doc: YDoc = doc
         private set
-    var name: String = name
+    public var name: String = name
         internal set
     internal var binding: YTypeBinding = YTypeBinding.Root(doc, name)
         private set
@@ -250,26 +250,26 @@ sealed class AbstractYType protected constructor(
         }
     }
 
-    companion object {
-        fun from(delta: List<YArrayDeltaOp>, doc: YDoc = YDoc(), name: String = ""): YArray =
+    public companion object {
+        public fun from(delta: List<YArrayDeltaOp>, doc: YDoc = YDoc(), name: String = ""): YArray =
             YArray.from(delta, doc, name)
 
-        fun from(delta: YArrayDeepDelta, doc: YDoc = YDoc(), name: String = ""): YArray =
+        public fun from(delta: YArrayDeepDelta, doc: YDoc = YDoc(), name: String = ""): YArray =
             YArray.from(delta, doc, name)
 
-        fun from(delta: YMapDelta, doc: YDoc = YDoc(), name: String = ""): YMap =
+        public fun from(delta: YMapDelta, doc: YDoc = YDoc(), name: String = ""): YMap =
             YMap.from(delta, doc, name)
 
-        fun from(delta: YMapDeepDelta, doc: YDoc = YDoc(), name: String = ""): YMap =
+        public fun from(delta: YMapDeepDelta, doc: YDoc = YDoc(), name: String = ""): YMap =
             YMap.from(delta, doc, name)
 
-        fun from(delta: YTextDelta, doc: YDoc = YDoc(), name: String = ""): YText =
+        public fun from(delta: YTextDelta, doc: YDoc = YDoc(), name: String = ""): YText =
             YText.from(delta, doc, name)
 
-        fun from(delta: YTextDeepDelta, doc: YDoc = YDoc(), name: String = ""): YText =
+        public fun from(delta: YTextDeepDelta, doc: YDoc = YDoc(), name: String = ""): YText =
             YText.from(delta, doc, name)
 
-        fun from(delta: YXmlFragmentDeepDelta, doc: YDoc = YDoc(), name: String = ""): YXmlFragment =
+        public fun from(delta: YXmlFragmentDeepDelta, doc: YDoc = YDoc(), name: String = ""): YXmlFragment =
             YXmlFragment.from(delta, doc, name)
     }
 
@@ -283,10 +283,10 @@ sealed class AbstractYType protected constructor(
     private var rendererChangeSubscription: Subscription? = null
     internal var activeRenderer: AbstractRenderer = baseRenderer
         private set
-    var isDestroyed: Boolean = false
+    public var isDestroyed: Boolean = false
         private set
 
-    fun observe(listener: (YEvent) -> Unit): Subscription {
+    public fun observe(listener: (YEvent) -> Unit): Subscription {
         (observers ?: mutableListOf<(YEvent) -> Unit>().also { observers = it }).add(listener)
         doc.refreshTypeSnapshotInterest(this)
         return Subscription {
@@ -295,7 +295,7 @@ sealed class AbstractYType protected constructor(
         }
     }
 
-    fun observe(listener: (YEvent, YTransactionEvent?) -> Unit): Subscription {
+    public fun observe(listener: (YEvent, YTransactionEvent?) -> Unit): Subscription {
         (
             transactionObservers
                 ?: mutableListOf<(YEvent, YTransactionEvent?) -> Unit>().also { transactionObservers = it }
@@ -307,7 +307,7 @@ sealed class AbstractYType protected constructor(
         }
     }
 
-    fun observeDeep(listener: (YEvent) -> Unit): Subscription {
+    public fun observeDeep(listener: (YEvent) -> Unit): Subscription {
         (deepObservers ?: mutableListOf<(YEvent) -> Unit>().also { deepObservers = it }).add(listener)
         doc.refreshTypeSnapshotInterest(this)
         return Subscription {
@@ -316,7 +316,7 @@ sealed class AbstractYType protected constructor(
         }
     }
 
-    fun observeDeep(listener: (YEvent, YTransactionEvent?) -> Unit): Subscription {
+    public fun observeDeep(listener: (YEvent, YTransactionEvent?) -> Unit): Subscription {
         (
             deepTransactionObservers
                 ?: mutableListOf<(YEvent, YTransactionEvent?) -> Unit>().also { deepTransactionObservers = it }
@@ -334,7 +334,7 @@ sealed class AbstractYType protected constructor(
      * The existing [observeDeep] overloads intentionally keep their aggregate-event ABI. This
      * opt-in form exposes the Yjs callback shape without changing existing Kotlin callers.
      */
-    fun observeDeepEvents(listener: (List<YEvent>, YTransactionEvent?) -> Unit): Subscription {
+    public fun observeDeepEvents(listener: (List<YEvent>, YTransactionEvent?) -> Unit): Subscription {
         (
             deepEventListObservers
                 ?: mutableListOf<(List<YEvent>, YTransactionEvent?) -> Unit>()
@@ -347,39 +347,39 @@ sealed class AbstractYType protected constructor(
         }
     }
 
-    fun unobserve(listener: (YEvent) -> Unit) {
+    public fun unobserve(listener: (YEvent) -> Unit) {
         observers?.remove(listener)
         doc.refreshTypeSnapshotInterest(this)
     }
 
-    fun unobserve(listener: (YEvent, YTransactionEvent?) -> Unit) {
+    public fun unobserve(listener: (YEvent, YTransactionEvent?) -> Unit) {
         transactionObservers?.remove(listener)
         doc.refreshTypeSnapshotInterest(this)
     }
 
-    fun unobserveDeep(listener: (YEvent) -> Unit) {
+    public fun unobserveDeep(listener: (YEvent) -> Unit) {
         deepObservers?.remove(listener)
         doc.refreshTypeSnapshotInterest(this)
     }
 
-    fun unobserveDeep(listener: (YEvent, YTransactionEvent?) -> Unit) {
+    public fun unobserveDeep(listener: (YEvent, YTransactionEvent?) -> Unit) {
         deepTransactionObservers?.remove(listener)
         doc.refreshTypeSnapshotInterest(this)
     }
 
-    fun unobserveDeepEvents(listener: (List<YEvent>, YTransactionEvent?) -> Unit) {
+    public fun unobserveDeepEvents(listener: (List<YEvent>, YTransactionEvent?) -> Unit) {
         deepEventListObservers?.remove(listener)
         doc.refreshTypeSnapshotInterest(this)
     }
 
-    fun on(eventName: String, listener: (YTypeEvent) -> Unit): Subscription {
+    public fun on(eventName: String, listener: (YTypeEvent) -> Unit): Subscription {
         val listeners = eventListeners.getOrCreateMap().getOrPut(eventName) { mutableListOf() }
         listeners.add(listener)
         doc.refreshTypeSnapshotInterest(this)
         return Subscription { off(eventName, listener) }
     }
 
-    fun once(eventName: String, listener: (YTypeEvent) -> Unit): Subscription {
+    public fun once(eventName: String, listener: (YTypeEvent) -> Unit): Subscription {
         lateinit var subscription: Subscription
         val onceListener: (YTypeEvent) -> Unit = { event ->
             subscription.close()
@@ -389,7 +389,7 @@ sealed class AbstractYType protected constructor(
         return subscription
     }
 
-    fun off(eventName: String, listener: (YTypeEvent) -> Unit) {
+    public fun off(eventName: String, listener: (YTypeEvent) -> Unit) {
         val listeners = eventListeners?.get(eventName) ?: return
         listeners.remove(listener)
         if (listeners.isEmpty()) {
@@ -398,15 +398,15 @@ sealed class AbstractYType protected constructor(
         doc.refreshTypeSnapshotInterest(this)
     }
 
-    fun emit(eventName: String, event: YTypeEvent = YTypeEvent(name = eventName, target = this)) {
+    public fun emit(eventName: String, event: YTypeEvent = YTypeEvent(name = eventName, target = this)) {
         emitTypeEvent(if (event.name == eventName && event.target === this) event else event.copy(name = eventName, target = this))
     }
 
-    fun emit(event: YTypeEvent) {
+    public fun emit(event: YTypeEvent) {
         emitTypeEvent(if (event.target === this) event else event.copy(target = this))
     }
 
-    fun destroy() {
+    public fun destroy() {
         if (isDestroyed) return
         isDestroyed = true
         rendererChangeSubscription?.close()
@@ -492,29 +492,29 @@ sealed class AbstractYType protected constructor(
         MutableMap<String, MutableList<(YTypeEvent) -> Unit>> =
         this ?: linkedMapOf<String, MutableList<(YTypeEvent) -> Unit>>().also { eventListeners = it }
 
-    fun getPathTo(child: AbstractYType, renderer: AbstractRenderer = baseRenderer): List<Any> {
+    public fun getPathTo(child: AbstractYType, renderer: AbstractRenderer = baseRenderer): List<Any> {
         require(child.doc === doc) { "child must belong to the same document" }
         return doc.pathBetween(name, child.name, renderer) ?: error("target type is not a visible descendant")
     }
 
-    abstract fun toJson(): Any?
+    public abstract fun toJson(): Any?
 
-    open fun toJSON(): Any? = toJson()
+    public open fun toJSON(): Any? = toJson()
 
-    val delta: YDeepDelta
+    public val delta: YDeepDelta
         get() = deltaCache ?: renderDeepDelta().also {
             deltaCache = it
             doc.refreshTypeSnapshotInterest(this)
         }
 
-    fun clearCache() {
+    public fun clearCache() {
         deltaCache = null
         doc.refreshTypeSnapshotInterest(this)
     }
 
     internal open fun adjustVisibleLength(changedKind: RootKind, delta: Long) = Unit
 
-    fun useRenderer(renderer: AbstractRenderer): AbstractYType {
+    public fun useRenderer(renderer: AbstractRenderer): AbstractYType {
         if (activeRenderer === renderer && renderer === baseRenderer) {
             return this
         }
@@ -564,18 +564,18 @@ sealed class AbstractYType protected constructor(
         }
     }
 
-    val parent: AbstractYType? get() = doc.parentOf(this)
+    public val parent: AbstractYType? get() = doc.parentOf(this)
 
-    open val typeRef: Int get() = kind.toTypeRefId()
+    public open val typeRef: Int get() = kind.toTypeRefId()
 
-    open val legacyTypeRef: Int get() = typeRef
+    public open val legacyTypeRef: Int get() = typeRef
 }
 
 /**
  * Upstream keeps remotely discovered roots as an undecided AbstractType until a concrete
  * getter is called. This placeholder intentionally exposes no guessed RootKind/type ref.
  */
-class YUnopenedRoot internal constructor(doc: YDoc, name: String) :
+public class YUnopenedRoot internal constructor(doc: YDoc, name: String) :
     AbstractYType(doc, name, RootKind.Array) {
     override val typeRef: Int
         get() = error("unopened root '$name' has no concrete type ref")
@@ -590,7 +590,7 @@ class YUnopenedRoot internal constructor(doc: YDoc, name: String) :
     override fun toString(): String = "YUnopenedRoot(name=$name)"
 }
 
-data class YTypeEvent(
+public data class YTypeEvent(
     val name: String,
     val target: AbstractYType,
     val delta: Any? = null,
@@ -599,7 +599,7 @@ data class YTypeEvent(
     val yEvent: YEvent? = null,
 )
 
-fun RootKind.toTypeRefId(): Int = when (this) {
+public fun RootKind.toTypeRefId(): Int = when (this) {
     RootKind.Array -> YArrayRefID
     RootKind.Map -> YMapRefID
     RootKind.Text -> YTextRefID
@@ -609,7 +609,7 @@ fun RootKind.toTypeRefId(): Int = when (this) {
     RootKind.XmlText -> YXmlTextRefID
 }
 
-fun rootKindFromTypeRefId(typeRef: Int): RootKind = when (typeRef) {
+public fun rootKindFromTypeRefId(typeRef: Int): RootKind = when (typeRef) {
     YArrayRefID -> RootKind.Array
     YMapRefID -> RootKind.Map
     YTextRefID -> RootKind.Text
@@ -620,7 +620,7 @@ fun rootKindFromTypeRefId(typeRef: Int): RootKind = when (typeRef) {
     else -> error("unknown type ref: $typeRef")
 }
 
-fun typeRefId(type: AbstractYType): Int = type.typeRef
+public fun typeRefId(type: AbstractYType): Int = type.typeRef
 
 /** Matches upstream AbstractType._copy(): preserve the concrete type, not its content. */
 internal fun AbstractYType.emptyContentTypeCopy(): AbstractYType = when (this) {
@@ -634,16 +634,16 @@ internal fun AbstractYType.emptyContentTypeCopy(): AbstractYType = when (this) {
     is YText -> YText()
 }
 
-class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, name, RootKind.Array), Iterable<Any?> {
-    constructor() : this(YDoc(), "") {
+public class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, name, RootKind.Array), Iterable<Any?> {
+    public constructor() : this(YDoc(), "") {
         markDetached()
     }
 
-    constructor(values: Iterable<Any?>) : this() {
+    public constructor(values: Iterable<Any?>) : this() {
         push(values.toList())
     }
 
-    constructor(vararg values: Any?) : this(values.toList())
+    public constructor(vararg values: Any?) : this(values.toList())
 
     private var maintainedLengthInitialized = false
     private var maintainedLength = 0
@@ -653,7 +653,7 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
     private var firstVisibleScalarCached = false
     private var firstVisibleScalar: Any? = null
 
-    val size: Int
+    public val size: Int
         get() {
             if (maintainedLengthInitialized && cachedAccessUnchecked) return maintainedLength
             if (warnIfPreliminary()) return 0
@@ -667,7 +667,7 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
             return maintainedLength
         }
 
-    val length: Int get() = size
+    public val length: Int get() = size
 
     internal override fun adjustVisibleLength(changedKind: RootKind, delta: Long) {
         if (changedKind != RootKind.Array) return
@@ -683,9 +683,9 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         }.toNonNegativeInt("maintained array length")
     }
 
-    val attrSize: Int get() = getAttrs().size
+    public val attrSize: Int get() = getAttrs().size
 
-    fun insert(index: Int, values: List<Any?>) {
+    public fun insert(index: Int, values: List<Any?>) {
         if (isPreliminary) {
             if (values.isEmpty()) return
             require(values.none { value -> value === this }) { "shared type cannot contain itself" }
@@ -748,11 +748,11 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         }
     }
 
-    fun insert(index: Int, vararg values: Any?) {
+    public fun insert(index: Int, vararg values: Any?) {
         insert(index, values.toList())
     }
 
-    fun push(values: List<Any?>) {
+    public fun push(values: List<Any?>) {
         require(values.none { it === this }) { "A shared type cannot contain itself" }
         if (isPreliminary) {
             preliminaryList.addAll(values)
@@ -761,19 +761,19 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         insert(size, values)
     }
 
-    fun push(vararg values: Any?) {
+    public fun push(vararg values: Any?) {
         push(values.toList())
     }
 
-    fun unshift(values: List<Any?>) {
+    public fun unshift(values: List<Any?>) {
         insert(0, values)
     }
 
-    fun unshift(vararg values: Any?) {
+    public fun unshift(vararg values: Any?) {
         unshift(values.toList())
     }
 
-    fun delete(index: Int, length: Int = 1) {
+    public fun delete(index: Int, length: Int = 1) {
         if (isPreliminary) {
             if (length <= 0 || preliminaryList.isEmpty()) return
             val start = index.coerceIn(0, preliminaryList.size)
@@ -784,11 +784,11 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         doc.deleteVisible(name, index, length)
     }
 
-    fun clear() {
+    public fun clear() {
         delete(0, size)
     }
 
-    fun setAttr(key: String, value: Any?): Any? {
+    public fun setAttr(key: String, value: Any?): Any? {
         if (isPreliminary) {
             preliminaryMap[key] = value
             return value
@@ -796,9 +796,9 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         return doc.setTypeAttribute(name, key, value)
     }
 
-    fun setAttribute(key: String, value: Any?): Any? = setAttr(key, value)
+    public fun setAttribute(key: String, value: Any?): Any? = setAttr(key, value)
 
-    fun setAttrs(values: Map<String, Any?>): YArray {
+    public fun setAttrs(values: Map<String, Any?>): YArray {
         if (isPreliminary) {
             values.forEach { (key, value) -> preliminaryMap[key] = value }
             return this
@@ -810,61 +810,61 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         return this
     }
 
-    fun getAttr(key: String): Any? {
+    public fun getAttr(key: String): Any? {
         if (warnIfPreliminary()) return null
         return doc.typeAttribute(name, key)
     }
 
-    fun getAttr(key: String, snapshot: Snapshot): Any? =
+    public fun getAttr(key: String, snapshot: Snapshot): Any? =
         doc.mapValueAtSnapshot(this, key, snapshot)?.let(doc::valueToAny)
 
-    fun getAttribute(key: String): Any? = getAttr(key)
+    public fun getAttribute(key: String): Any? = getAttr(key)
 
-    fun getAttribute(key: String, snapshot: Snapshot): Any? = getAttr(key, snapshot)
+    public fun getAttribute(key: String, snapshot: Snapshot): Any? = getAttr(key, snapshot)
 
-    fun getAttrs(): Map<String, Any?> {
+    public fun getAttrs(): Map<String, Any?> {
         if (warnIfPreliminary()) return emptyMap()
         return doc.typeAttributes(name)
     }
 
-    fun getAttrs(snapshot: Snapshot): Map<String, Any?> =
+    public fun getAttrs(snapshot: Snapshot): Map<String, Any?> =
         doc.mapAtSnapshot(this, snapshot).mapValues { (_, value) -> doc.valueToAny(value) }
 
-    fun attrKeys(): Set<String> = getAttrs().keys
+    public fun attrKeys(): Set<String> = getAttrs().keys
 
-    fun attrValues(): Collection<Any?> = getAttrs().values
+    public fun attrValues(): Collection<Any?> = getAttrs().values
 
-    fun attrEntries(): Set<Map.Entry<String, Any?>> = getAttrs().entries
+    public fun attrEntries(): Set<Map.Entry<String, Any?>> = getAttrs().entries
 
-    fun <T> mapAttrs(transform: (value: Any?, key: String) -> T): List<T> {
+    public fun <T> mapAttrs(transform: (value: Any?, key: String) -> T): List<T> {
         return getAttrs().map { (key, value) -> transform(value, key) }
     }
 
-    fun <T> mapAttrs(transform: (value: Any?, key: String, type: YArray) -> T): List<T> {
+    public fun <T> mapAttrs(transform: (value: Any?, key: String, type: YArray) -> T): List<T> {
         return getAttrs().map { (key, value) -> transform(value, key, this) }
     }
 
-    fun forEachAttr(action: (value: Any?, key: String) -> Unit) {
+    public fun forEachAttr(action: (value: Any?, key: String) -> Unit) {
         getAttrs().forEach { (key, value) -> action(value, key) }
     }
 
-    fun forEachAttr(action: (value: Any?, key: String, type: YArray) -> Unit) {
+    public fun forEachAttr(action: (value: Any?, key: String, type: YArray) -> Unit) {
         getAttrs().forEach { (key, value) -> action(value, key, this) }
     }
 
-    fun hasAttr(key: String): Boolean {
+    public fun hasAttr(key: String): Boolean {
         if (warnIfPreliminary()) return false
         return doc.hasTypeAttribute(name, key)
     }
 
-    fun hasAttr(key: String, snapshot: Snapshot): Boolean =
+    public fun hasAttr(key: String, snapshot: Snapshot): Boolean =
         doc.mapValueAtSnapshot(this, key, snapshot) != null
 
-    fun hasAttribute(key: String): Boolean = hasAttr(key)
+    public fun hasAttribute(key: String): Boolean = hasAttr(key)
 
-    fun hasAttribute(key: String, snapshot: Snapshot): Boolean = hasAttr(key, snapshot)
+    public fun hasAttribute(key: String, snapshot: Snapshot): Boolean = hasAttr(key, snapshot)
 
-    fun deleteAttr(key: String) {
+    public fun deleteAttr(key: String) {
         if (isPreliminary) {
             preliminaryMap.remove(key)
             return
@@ -872,15 +872,15 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         doc.deleteTypeAttribute(name, key)
     }
 
-    fun deleteAttribute(key: String) {
+    public fun deleteAttribute(key: String) {
         deleteAttr(key)
     }
 
-    fun removeAttribute(key: String) {
+    public fun removeAttribute(key: String) {
         deleteAttr(key)
     }
 
-    fun clearAttrs() {
+    public fun clearAttrs() {
         if (isPreliminary) {
             preliminaryMap.clear()
             return
@@ -890,7 +890,7 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         }
     }
 
-    fun get(index: Int): Any? {
+    public fun get(index: Int): Any? {
         if (index < 0) return null
         if (index == 0) {
             if (firstVisibleScalarCached && cachedAccessUnchecked) return firstVisibleScalar
@@ -931,7 +931,7 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         }
     }
 
-    fun slice(start: Int = 0, end: Int = size): List<Any?> {
+    public fun slice(start: Int = 0, end: Int = size): List<Any?> {
         val values = toList()
         val normalizedStart = normalizeSliceIndex(start, values.size)
         val normalizedEnd = normalizeSliceIndex(end, values.size)
@@ -939,7 +939,7 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         return values.subList(normalizedStart, normalizedEnd)
     }
 
-    fun toList(): List<Any?> {
+    public fun toList(): List<Any?> {
         if (warnIfPreliminary()) return emptyList()
         return doc.visibleSequence(name)
             .filter { item ->
@@ -957,31 +957,31 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
             }
     }
 
-    fun toArray(): List<Any?> = toList()
+    public fun toArray(): List<Any?> = toList()
 
-    fun clone(): YArray {
+    public fun clone(): YArray {
         return YArray().also { cloned ->
             cloned.push(toList().map { it.cloneValueDetached() })
             cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueDetached() })
         }
     }
 
-    fun clone(targetDoc: YDoc): YArray {
+    public fun clone(targetDoc: YDoc): YArray {
         return targetDoc.createArray().also { cloned ->
             cloned.push(toList().map { it.cloneValueInto(targetDoc) })
             cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
         }
     }
 
-    fun toDelta(): List<YArrayDeltaOp> {
+    public fun toDelta(): List<YArrayDeltaOp> {
         val values = toList()
         return if (values.isEmpty()) emptyList() else listOf(YArrayDeltaOp(insert = values))
     }
 
-    fun toDeltaDeep(renderer: AbstractRenderer = activeRenderer): YArrayDeepDelta =
+    public fun toDeltaDeep(renderer: AbstractRenderer = activeRenderer): YArrayDeepDelta =
         renderArrayDeepDelta(this, DeepDeltaRenderOptions(renderer = renderer))
 
-    fun applyDelta(
+    public fun applyDelta(
         delta: List<YArrayDeltaOp>,
         origin: Any? = null,
         renderer: AbstractRenderer = activeRenderer,
@@ -1016,7 +1016,7 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         }, origin = origin)
     }
 
-    fun applyDeltaDeep(delta: YArrayDeepDelta, origin: Any? = null) {
+    public fun applyDeltaDeep(delta: YArrayDeepDelta, origin: Any? = null) {
         doc.transact(origin = origin) {
             clear()
             clearAttrs()
@@ -1025,27 +1025,27 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         }
     }
 
-    fun <T> map(transform: (Any?) -> T): List<T> = toList().map(transform)
+    public fun <T> map(transform: (Any?) -> T): List<T> = toList().map(transform)
 
-    fun <T> map(transform: (value: Any?, index: Int) -> T): List<T> =
+    public fun <T> map(transform: (value: Any?, index: Int) -> T): List<T> =
         toList().mapIndexed { index, value -> transform(value, index) }
 
-    fun <T> map(transform: (value: Any?, index: Int, type: YArray) -> T): List<T> =
+    public fun <T> map(transform: (value: Any?, index: Int, type: YArray) -> T): List<T> =
         toList().mapIndexed { index, value -> transform(value, index, this) }
 
-    fun forEach(action: (Any?) -> Unit) {
+    public fun forEach(action: (Any?) -> Unit) {
         toList().forEach(action)
     }
 
-    fun forEach(action: (value: Any?, index: Int) -> Unit) {
+    public fun forEach(action: (value: Any?, index: Int) -> Unit) {
         toList().forEachIndexed { index, value -> action(value, index) }
     }
 
-    fun forEach(action: (value: Any?, index: Int, type: YArray) -> Unit) {
+    public fun forEach(action: (value: Any?, index: Int, type: YArray) -> Unit) {
         toList().forEachIndexed { index, value -> action(value, index, this) }
     }
 
-    fun forEachIndexed(action: (Int, Any?) -> Unit) {
+    public fun forEachIndexed(action: (Int, Any?) -> Unit) {
         toList().forEachIndexed(action)
     }
 
@@ -1071,18 +1071,18 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
 
     override fun toJSON(): List<Any?> = toList().map(::toYTypeJsonValue)
 
-    companion object {
-        fun from(values: Iterable<Any?>): YArray = YArray(values)
+    public companion object {
+        public fun from(values: Iterable<Any?>): YArray = YArray(values)
 
-        fun from(values: Iterable<Any?>, doc: YDoc, name: String = ""): YArray {
+        public fun from(values: Iterable<Any?>, doc: YDoc, name: String = ""): YArray {
             return doc.getArray(name).also { it.push(values.toList()) }
         }
 
-        fun from(delta: List<YArrayDeltaOp>, doc: YDoc, name: String = ""): YArray {
+        public fun from(delta: List<YArrayDeltaOp>, doc: YDoc, name: String = ""): YArray {
             return doc.getArray(name).also { it.applyDelta(delta) }
         }
 
-        fun from(delta: YArrayDeepDelta, doc: YDoc = YDoc(), name: String = ""): YArray {
+        public fun from(delta: YArrayDeepDelta, doc: YDoc = YDoc(), name: String = ""): YArray {
             return doc.getArray(name).also { it.applyDeltaDeep(delta) }
         }
     }
@@ -1110,16 +1110,16 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
     }
 }
 
-open class YText internal constructor(
+public open class YText internal constructor(
     doc: YDoc,
     name: String,
     kind: RootKind = RootKind.Text,
 ) : AbstractYType(doc, name, kind), Iterable<Any?> {
-    constructor() : this(YDoc(), "") {
+    public constructor() : this(YDoc(), "") {
         markDetached()
     }
 
-    constructor(text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) : this() {
+    public constructor(text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) : this() {
         insert(0, text, attributes)
     }
 
@@ -1133,7 +1133,7 @@ open class YText internal constructor(
     private var cachedStringVersion: Long = Long.MIN_VALUE
     private var cachedString: String = ""
 
-    val length: Int
+    public val length: Int
         get() {
             if (cachedLengthInitialized && cachedLengthUnchecked) return cachedLength
             if (warnIfPreliminary()) return 0
@@ -1156,9 +1156,9 @@ open class YText internal constructor(
         }.toNonNegativeInt("maintained text length")
     }
 
-    val attrSize: Int get() = getAttrs().size
+    public val attrSize: Int get() = getAttrs().size
 
-    fun insert(index: Int, text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
+    public fun insert(index: Int, text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
         if (text.isEmpty()) return
         if (isPreliminary) {
             queuePreliminaryOperation(attributes) { insert(index, text, attributes) }
@@ -1177,7 +1177,7 @@ open class YText internal constructor(
         }
     }
 
-    fun insertText(
+    public fun insertText(
         index: Int,
         text: String,
         attributes: Map<String, Any?> = UnspecifiedTextAttributes,
@@ -1201,7 +1201,7 @@ open class YText internal constructor(
         }
     }
 
-    fun insert(
+    public fun insert(
         index: Int,
         values: List<Any?>,
         attributes: Map<String, Any?> = UnspecifiedTextAttributes,
@@ -1243,7 +1243,7 @@ open class YText internal constructor(
         }
     }
 
-    fun insertEmbed(
+    public fun insertEmbed(
         index: Int,
         embed: Any?,
         attributes: Map<String, Any?> = emptyMap(),
@@ -1277,7 +1277,7 @@ open class YText internal constructor(
         }
     }
 
-    fun insertEmbed(index: Int, embed: Any?, attributes: Map<String, Any?> = emptyMap(), origin: Any?) {
+    public fun insertEmbed(index: Int, embed: Any?, attributes: Map<String, Any?> = emptyMap(), origin: Any?) {
         require(embed != null) { "embed must not be null" }
         if (isPreliminary) {
             require(embed !== this) { "shared type cannot contain itself" }
@@ -1307,31 +1307,31 @@ open class YText internal constructor(
         }
     }
 
-    fun push(text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
+    public fun push(text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
         insert(length, text, attributes)
     }
 
-    fun push(values: List<Any?>, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
+    public fun push(values: List<Any?>, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
         insert(length, values, attributes)
     }
 
-    fun push(vararg values: Any?) {
+    public fun push(vararg values: Any?) {
         push(values.toList())
     }
 
-    fun unshift(text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
+    public fun unshift(text: String, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
         insert(0, text, attributes)
     }
 
-    fun unshift(values: List<Any?>, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
+    public fun unshift(values: List<Any?>, attributes: Map<String, Any?> = UnspecifiedTextAttributes) {
         insert(0, values, attributes)
     }
 
-    fun unshift(vararg values: Any?) {
+    public fun unshift(vararg values: Any?) {
         unshift(values.toList())
     }
 
-    fun delete(index: Int, length: Int = 1) {
+    public fun delete(index: Int, length: Int = 1) {
         if (length == 0) return
         if (isPreliminary) {
             queuePreliminaryOperation { delete(index, length) }
@@ -1340,7 +1340,7 @@ open class YText internal constructor(
         doc.deleteVisible(name, index, length, strictLength = false)
     }
 
-    fun deleteText(index: Int, length: Int = 1, origin: Any? = null) {
+    public fun deleteText(index: Int, length: Int = 1, origin: Any? = null) {
         if (length == 0) return
         if (isPreliminary) {
             queuePreliminaryOperation { deleteText(index, length, origin) }
@@ -1349,11 +1349,11 @@ open class YText internal constructor(
         doc.deleteVisible(name, index, length, origin = origin, strictLength = false)
     }
 
-    fun clear() {
+    public fun clear() {
         delete(0, length)
     }
 
-    fun setAttr(key: String, value: Any?): Any? {
+    public fun setAttr(key: String, value: Any?): Any? {
         if (isPreliminary) {
             queuePreliminaryOperation(value) { setAttr(key, value) }
             return value
@@ -1361,9 +1361,9 @@ open class YText internal constructor(
         return doc.setTypeAttribute(name, key, value)
     }
 
-    fun setAttribute(key: String, value: Any?): Any? = setAttr(key, value)
+    public fun setAttribute(key: String, value: Any?): Any? = setAttr(key, value)
 
-    fun setAttrs(values: Map<String, Any?>): YText {
+    public fun setAttrs(values: Map<String, Any?>): YText {
         if (!isPreliminary) doc.preflightNestedValue(values.values.toList())
         doc.transact {
             values.toSortedMap().forEach { (key, value) -> setAttr(key, value) }
@@ -1371,63 +1371,63 @@ open class YText internal constructor(
         return this
     }
 
-    fun getAttr(key: String): Any? {
+    public fun getAttr(key: String): Any? {
         if (warnIfPreliminary()) return null
         return doc.typeAttribute(name, key)
     }
 
-    fun getAttr(key: String, snapshot: Snapshot): Any? =
+    public fun getAttr(key: String, snapshot: Snapshot): Any? =
         doc.mapValueAtSnapshot(this, key, snapshot)?.let(doc::valueToAny)
 
-    fun getAttribute(key: String): Any? = getAttr(key)
+    public fun getAttribute(key: String): Any? = getAttr(key)
 
-    fun getAttribute(key: String, snapshot: Snapshot): Any? = getAttr(key, snapshot)
+    public fun getAttribute(key: String, snapshot: Snapshot): Any? = getAttr(key, snapshot)
 
-    fun getAttrs(): Map<String, Any?> {
+    public fun getAttrs(): Map<String, Any?> {
         if (warnIfPreliminary()) return emptyMap()
         return doc.typeAttributes(name)
     }
 
-    fun getAttributes(): Map<String, Any?> = getAttrs()
+    public fun getAttributes(): Map<String, Any?> = getAttrs()
 
-    fun getAttrs(snapshot: Snapshot): Map<String, Any?> =
+    public fun getAttrs(snapshot: Snapshot): Map<String, Any?> =
         doc.mapAtSnapshot(this, snapshot).mapValues { (_, value) -> doc.valueToAny(value) }
 
-    fun attrKeys(): Set<String> = getAttrs().keys
+    public fun attrKeys(): Set<String> = getAttrs().keys
 
-    fun attrValues(): Collection<Any?> = getAttrs().values
+    public fun attrValues(): Collection<Any?> = getAttrs().values
 
-    fun attrEntries(): Set<Map.Entry<String, Any?>> = getAttrs().entries
+    public fun attrEntries(): Set<Map.Entry<String, Any?>> = getAttrs().entries
 
-    fun <T> mapAttrs(transform: (value: Any?, key: String) -> T): List<T> {
+    public fun <T> mapAttrs(transform: (value: Any?, key: String) -> T): List<T> {
         return getAttrs().map { (key, value) -> transform(value, key) }
     }
 
-    fun <T> mapAttrs(transform: (value: Any?, key: String, type: YText) -> T): List<T> {
+    public fun <T> mapAttrs(transform: (value: Any?, key: String, type: YText) -> T): List<T> {
         return getAttrs().map { (key, value) -> transform(value, key, this) }
     }
 
-    fun forEachAttr(action: (value: Any?, key: String) -> Unit) {
+    public fun forEachAttr(action: (value: Any?, key: String) -> Unit) {
         getAttrs().forEach { (key, value) -> action(value, key) }
     }
 
-    fun forEachAttr(action: (value: Any?, key: String, type: YText) -> Unit) {
+    public fun forEachAttr(action: (value: Any?, key: String, type: YText) -> Unit) {
         getAttrs().forEach { (key, value) -> action(value, key, this) }
     }
 
-    fun hasAttr(key: String): Boolean {
+    public fun hasAttr(key: String): Boolean {
         if (warnIfPreliminary()) return false
         return doc.hasTypeAttribute(name, key)
     }
 
-    fun hasAttr(key: String, snapshot: Snapshot): Boolean =
+    public fun hasAttr(key: String, snapshot: Snapshot): Boolean =
         doc.mapValueAtSnapshot(this, key, snapshot) != null
 
-    fun hasAttribute(key: String): Boolean = hasAttr(key)
+    public fun hasAttribute(key: String): Boolean = hasAttr(key)
 
-    fun hasAttribute(key: String, snapshot: Snapshot): Boolean = hasAttr(key, snapshot)
+    public fun hasAttribute(key: String, snapshot: Snapshot): Boolean = hasAttr(key, snapshot)
 
-    fun deleteAttr(key: String) {
+    public fun deleteAttr(key: String) {
         if (isPreliminary) {
             queuePreliminaryOperation { deleteAttr(key) }
             return
@@ -1435,25 +1435,25 @@ open class YText internal constructor(
         doc.deleteTypeAttribute(name, key)
     }
 
-    fun deleteAttribute(key: String) {
+    public fun deleteAttribute(key: String) {
         deleteAttr(key)
     }
 
-    fun removeAttribute(key: String) {
+    public fun removeAttribute(key: String) {
         deleteAttr(key)
     }
 
-    fun clearAttrs() {
+    public fun clearAttrs() {
         doc.transact {
             getAttrs().keys.forEach(::deleteAttr)
         }
     }
 
-    fun format(index: Int, length: Int, attributes: Map<String, Any?>) {
+    public fun format(index: Int, length: Int, attributes: Map<String, Any?>) {
         formatRange(index, length, attributes, origin = null)
     }
 
-    fun formatText(index: Int, length: Int, attributes: Map<String, Any?>, origin: Any? = null) {
+    public fun formatText(index: Int, length: Int, attributes: Map<String, Any?>, origin: Any? = null) {
         formatRange(index, length, attributes, origin)
     }
 
@@ -1484,7 +1484,7 @@ open class YText internal constructor(
         }
     }
 
-    fun applyDelta(
+    public fun applyDelta(
         delta: YTextDelta,
         origin: Any? = null,
         renderer: AbstractRenderer = activeRenderer,
@@ -1555,11 +1555,11 @@ open class YText internal constructor(
         }, origin = origin)
     }
 
-    fun applyDelta(delta: YTextDelta, sanitize: Boolean) {
+    public fun applyDelta(delta: YTextDelta, sanitize: Boolean) {
         applyDelta(delta, origin = null, renderer = activeRenderer, sanitize = sanitize)
     }
 
-    fun applyDeltaDeep(delta: YTextDeepDelta, origin: Any? = null) {
+    public fun applyDeltaDeep(delta: YTextDeepDelta, origin: Any? = null) {
         if (isPreliminary) {
             queuePreliminaryOperation(
                 listOf(delta.attrs) + delta.delta.ops.flatMap { op -> listOf(op.insert, op.attributes) },
@@ -1574,7 +1574,7 @@ open class YText internal constructor(
         }
     }
 
-    fun toDelta(): YTextDelta {
+    public fun toDelta(): YTextDelta {
         if (warnIfPreliminary()) return YTextDelta()
         val delta = YTextDelta()
         var pendingText = StringBuilder()
@@ -1642,7 +1642,7 @@ open class YText internal constructor(
         return delta
     }
 
-    fun toDelta(
+    public fun toDelta(
         snapshot: Snapshot?,
         prevSnapshot: Snapshot? = null,
         computeYChange: ((change: String, id: Id) -> Any?)? = null,
@@ -1781,10 +1781,10 @@ open class YText internal constructor(
         return delta
     }
 
-    fun toDeltaDeep(renderer: AbstractRenderer = activeRenderer): YTextDeepDelta =
+    public fun toDeltaDeep(renderer: AbstractRenderer = activeRenderer): YTextDeepDelta =
         renderTextDeepDelta(this, DeepDeltaRenderOptions(renderer = renderer))
 
-    fun toList(): List<Any?> {
+    public fun toList(): List<Any?> {
         if (warnIfPreliminary()) return emptyList()
         return buildList(length) {
             doc.sequence(name).forEach { item ->
@@ -1799,9 +1799,9 @@ open class YText internal constructor(
         }
     }
 
-    fun toArray(): List<Any?> = toList()
+    public fun toArray(): List<Any?> = toList()
 
-    fun slice(start: Int = 0, end: Int = length): List<Any?> {
+    public fun slice(start: Int = 0, end: Int = length): List<Any?> {
         val values = toList()
         val normalizedStart = normalizeTextSliceIndex(start, values.size)
         val normalizedEnd = normalizeTextSliceIndex(end, values.size)
@@ -1809,7 +1809,7 @@ open class YText internal constructor(
         return values.subList(normalizedStart, normalizedEnd)
     }
 
-    fun get(index: Int): Any? {
+    public fun get(index: Int): Any? {
         if (index < 0) return null
         val (item, offset) = doc.visibleSequencePositionAt(name, kind, index) ?: return null
         return when (val content = item.content) {
@@ -1820,27 +1820,27 @@ open class YText internal constructor(
         }
     }
 
-    fun <T> map(transform: (Any?) -> T): List<T> = toList().map(transform)
+    public fun <T> map(transform: (Any?) -> T): List<T> = toList().map(transform)
 
-    fun <T> map(transform: (value: Any?, index: Int) -> T): List<T> =
+    public fun <T> map(transform: (value: Any?, index: Int) -> T): List<T> =
         toList().mapIndexed { index, value -> transform(value, index) }
 
-    fun <T> map(transform: (value: Any?, index: Int, type: YText) -> T): List<T> =
+    public fun <T> map(transform: (value: Any?, index: Int, type: YText) -> T): List<T> =
         toList().mapIndexed { index, value -> transform(value, index, this) }
 
-    fun forEach(action: (Any?) -> Unit) {
+    public fun forEach(action: (Any?) -> Unit) {
         toList().forEach(action)
     }
 
-    fun forEach(action: (value: Any?, index: Int) -> Unit) {
+    public fun forEach(action: (value: Any?, index: Int) -> Unit) {
         toList().forEachIndexed { index, value -> action(value, index) }
     }
 
-    fun forEach(action: (value: Any?, index: Int, type: YText) -> Unit) {
+    public fun forEach(action: (value: Any?, index: Int, type: YText) -> Unit) {
         toList().forEachIndexed { index, value -> action(value, index, this) }
     }
 
-    fun forEachIndexed(action: (Int, Any?) -> Unit) {
+    public fun forEachIndexed(action: (Int, Any?) -> Unit) {
         toList().forEachIndexed(action)
     }
 
@@ -1859,26 +1859,26 @@ open class YText internal constructor(
 
     override fun toJson(): String = toString()
 
-    open fun clone(): YText {
+    public open fun clone(): YText {
         return YText().also { cloned ->
             cloned.applyDelta(toDelta().cloneDetached())
             cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueDetached() })
         }
     }
 
-    open fun clone(targetDoc: YDoc): YText {
+    public open fun clone(targetDoc: YDoc): YText {
         return targetDoc.createText().also { cloned ->
             cloned.applyDelta(toDelta().cloneInto(targetDoc))
             cloned.setAttrs(getAttrs().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
         }
     }
 
-    companion object {
-        fun from(delta: YTextDelta, doc: YDoc = YDoc(), name: String = ""): YText {
+    public companion object {
+        public fun from(delta: YTextDelta, doc: YDoc = YDoc(), name: String = ""): YText {
             return doc.getText(name).also { it.applyDelta(delta) }
         }
 
-        fun from(delta: YTextDeepDelta, doc: YDoc = YDoc(), name: String = ""): YText {
+        public fun from(delta: YTextDeepDelta, doc: YDoc = YDoc(), name: String = ""): YText {
             return doc.getText(name).also { it.applyDeltaDeep(delta) }
         }
     }
@@ -2235,22 +2235,22 @@ internal fun YTextDelta.cloneDetached(): YTextDelta {
     return cloned
 }
 
-open class YMap internal constructor(
+public open class YMap internal constructor(
     doc: YDoc,
     name: String,
     kind: RootKind = RootKind.Map,
 ) :
     AbstractYType(doc, name, kind),
     Iterable<Map.Entry<String, Any?>> {
-    constructor() : this(YDoc(), "") {
+    public constructor() : this(YDoc(), "") {
         markDetached()
     }
 
-    constructor(values: Map<String, Any?>) : this() {
+    public constructor(values: Map<String, Any?>) : this() {
         setAttrs(values)
     }
 
-    constructor(entries: Iterable<Pair<String, Any?>>) : this() {
+    public constructor(entries: Iterable<Pair<String, Any?>>) : this() {
         setAttrs(entries.toMap())
     }
 
@@ -2260,15 +2260,15 @@ open class YMap internal constructor(
         }
     }
 
-    val size: Int
+    public val size: Int
         get() {
             if (warnIfPreliminary()) return 0
             return doc.visibleMap(name).size
         }
 
-    val attrSize: Int get() = size
+    public val attrSize: Int get() = size
 
-    fun set(key: String, value: Any?): Any? {
+    public fun set(key: String, value: Any?): Any? {
         if (isPreliminary) {
             require(value !== this) { "shared type cannot contain itself" }
             preliminaryMap[key] = value
@@ -2294,11 +2294,11 @@ open class YMap internal constructor(
         return get(key)
     }
 
-    fun setAttr(key: String, value: Any?): Any? = set(key, value)
+    public fun setAttr(key: String, value: Any?): Any? = set(key, value)
 
-    fun setAttribute(key: String, value: Any?): Any? = setAttr(key, value)
+    public fun setAttribute(key: String, value: Any?): Any? = setAttr(key, value)
 
-    fun setAttrs(values: Map<String, Any?>): YMap {
+    public fun setAttrs(values: Map<String, Any?>): YMap {
         if (isPreliminary) {
             values.forEach { (key, value) -> preliminaryMap[key] = value }
             return this
@@ -2310,38 +2310,38 @@ open class YMap internal constructor(
         return this
     }
 
-    fun get(key: String): Any? {
+    public fun get(key: String): Any? {
         if (warnIfPreliminary()) return null
         return doc.visibleMapValue(name, key)?.let { doc.valueToAny(it) }
     }
 
-    fun get(key: String, snapshot: Snapshot): Any? =
+    public fun get(key: String, snapshot: Snapshot): Any? =
         doc.mapValueAtSnapshot(this, key, snapshot)?.let(doc::valueToAny)
 
-    fun getAttr(key: String): Any? = get(key)
+    public fun getAttr(key: String): Any? = get(key)
 
-    fun getAttr(key: String, snapshot: Snapshot): Any? = get(key, snapshot)
+    public fun getAttr(key: String, snapshot: Snapshot): Any? = get(key, snapshot)
 
-    fun getAttribute(key: String): Any? = getAttr(key)
+    public fun getAttribute(key: String): Any? = getAttr(key)
 
-    fun getAttribute(key: String, snapshot: Snapshot): Any? = getAttr(key, snapshot)
+    public fun getAttribute(key: String, snapshot: Snapshot): Any? = getAttr(key, snapshot)
 
-    fun has(key: String): Boolean {
+    public fun has(key: String): Boolean {
         if (warnIfPreliminary()) return false
         return doc.visibleMapValue(name, key) != null
     }
 
-    fun has(key: String, snapshot: Snapshot): Boolean = doc.mapValueAtSnapshot(this, key, snapshot) != null
+    public fun has(key: String, snapshot: Snapshot): Boolean = doc.mapValueAtSnapshot(this, key, snapshot) != null
 
-    fun hasAttr(key: String): Boolean = has(key)
+    public fun hasAttr(key: String): Boolean = has(key)
 
-    fun hasAttr(key: String, snapshot: Snapshot): Boolean = has(key, snapshot)
+    public fun hasAttr(key: String, snapshot: Snapshot): Boolean = has(key, snapshot)
 
-    fun hasAttribute(key: String): Boolean = hasAttr(key)
+    public fun hasAttribute(key: String): Boolean = hasAttr(key)
 
-    fun hasAttribute(key: String, snapshot: Snapshot): Boolean = hasAttr(key, snapshot)
+    public fun hasAttribute(key: String, snapshot: Snapshot): Boolean = hasAttr(key, snapshot)
 
-    fun delete(key: String) {
+    public fun delete(key: String) {
         if (isPreliminary) {
             preliminaryMap.remove(key)
             return
@@ -2349,19 +2349,19 @@ open class YMap internal constructor(
         doc.deleteMapKey(name, key)
     }
 
-    fun deleteAttr(key: String) {
+    public fun deleteAttr(key: String) {
         delete(key)
     }
 
-    fun deleteAttribute(key: String) {
+    public fun deleteAttribute(key: String) {
         deleteAttr(key)
     }
 
-    fun removeAttribute(key: String) {
+    public fun removeAttribute(key: String) {
         deleteAttr(key)
     }
 
-    fun clear() {
+    public fun clear() {
         if (isPreliminary) {
             preliminaryMap.clear()
             return
@@ -2371,11 +2371,11 @@ open class YMap internal constructor(
         }
     }
 
-    fun clearAttrs() {
+    public fun clearAttrs() {
         clear()
     }
 
-    fun applyDelta(delta: YMapDelta, origin: Any? = null) {
+    public fun applyDelta(delta: YMapDelta, origin: Any? = null) {
         if (!isPreliminary) {
             doc.preflightNestedValue(
                 delta.ops.values.filter { op -> op.action == YMapDeltaAction.Set }.map { op -> op.value },
@@ -2391,71 +2391,71 @@ open class YMap internal constructor(
         }
     }
 
-    fun applyDeltaDeep(delta: YMapDeepDelta, origin: Any? = null) {
+    public fun applyDeltaDeep(delta: YMapDeepDelta, origin: Any? = null) {
         doc.transact(origin = origin) {
             clear()
             setAttrs(delta.attrs.fromDeepDeltaValues(doc))
         }
     }
 
-    fun toDelta(): YMapDelta {
+    public fun toDelta(): YMapDelta {
         val delta = YMapDelta()
         toMap().forEach { (key, value) -> delta.setAttr(key, value) }
         return delta
     }
 
-    fun toDeltaDeep(renderer: AbstractRenderer = activeRenderer): YMapDeepDelta =
+    public fun toDeltaDeep(renderer: AbstractRenderer = activeRenderer): YMapDeepDelta =
         renderMapDeepDelta(this, DeepDeltaRenderOptions(renderer = renderer))
 
-    fun keys(): Set<String> = toMap().keys
+    public fun keys(): Set<String> = toMap().keys
 
-    fun attrKeys(): Set<String> = keys()
+    public fun attrKeys(): Set<String> = keys()
 
-    fun values(): Collection<Any?> = toMap().values
+    public fun values(): Collection<Any?> = toMap().values
 
-    fun attrValues(): Collection<Any?> = values()
+    public fun attrValues(): Collection<Any?> = values()
 
-    fun entries(): Set<Map.Entry<String, Any?>> = toMap().entries
+    public fun entries(): Set<Map.Entry<String, Any?>> = toMap().entries
 
-    fun attrEntries(): Set<Map.Entry<String, Any?>> = entries()
+    public fun attrEntries(): Set<Map.Entry<String, Any?>> = entries()
 
-    fun forEach(action: (value: Any?, key: String) -> Unit) {
+    public fun forEach(action: (value: Any?, key: String) -> Unit) {
         toMap().forEach { (key, value) -> action(value, key) }
     }
 
-    fun forEach(action: (value: Any?, key: String, type: YMap) -> Unit) {
+    public fun forEach(action: (value: Any?, key: String, type: YMap) -> Unit) {
         toMap().forEach { (key, value) -> action(value, key, this) }
     }
 
-    fun <T> mapAttrs(transform: (value: Any?, key: String) -> T): List<T> {
+    public fun <T> mapAttrs(transform: (value: Any?, key: String) -> T): List<T> {
         return toMap().map { (key, value) -> transform(value, key) }
     }
 
-    fun <T> mapAttrs(transform: (value: Any?, key: String, type: YMap) -> T): List<T> {
+    public fun <T> mapAttrs(transform: (value: Any?, key: String, type: YMap) -> T): List<T> {
         return toMap().map { (key, value) -> transform(value, key, this) }
     }
 
-    fun forEachAttr(action: (value: Any?, key: String) -> Unit) {
+    public fun forEachAttr(action: (value: Any?, key: String) -> Unit) {
         toMap().forEach { (key, value) -> action(value, key) }
     }
 
-    fun forEachAttr(action: (value: Any?, key: String, type: YMap) -> Unit) {
+    public fun forEachAttr(action: (value: Any?, key: String, type: YMap) -> Unit) {
         toMap().forEach { (key, value) -> action(value, key, this) }
     }
 
     override fun iterator(): Iterator<Map.Entry<String, Any?>> = entries().iterator()
 
-    fun toMap(): Map<String, Any?> {
+    public fun toMap(): Map<String, Any?> {
         if (warnIfPreliminary()) return emptyMap()
         return doc.visibleMap(name).mapValues { (_, value) -> doc.valueToAny(value) }
     }
 
-    fun toMap(snapshot: Snapshot): Map<String, Any?> =
+    public fun toMap(snapshot: Snapshot): Map<String, Any?> =
         doc.mapAtSnapshot(this, snapshot).mapValues { (_, value) -> doc.valueToAny(value) }
 
-    fun getAttrs(): Map<String, Any?> = toMap()
+    public fun getAttrs(): Map<String, Any?> = toMap()
 
-    fun getAttrs(snapshot: Snapshot): Map<String, Any?> = toMap(snapshot)
+    public fun getAttrs(snapshot: Snapshot): Map<String, Any?> = toMap(snapshot)
 
     override fun toJson(): Map<String, Any?> {
         if (warnIfPreliminary()) return emptyMap()
@@ -2468,24 +2468,24 @@ open class YMap internal constructor(
         .mapValues { (_, value) -> toYTypeJsonValue(value) }
         .inJavaScriptObjectKeyOrder()
 
-    open fun clone(): YMap {
+    public open fun clone(): YMap {
         return YMap().also { cloned ->
             cloned.setAttrs(toMap().mapValues { (_, value) -> value.cloneValueDetached() })
         }
     }
 
-    open fun clone(targetDoc: YDoc): YMap {
+    public open fun clone(targetDoc: YDoc): YMap {
         return targetDoc.createMap().also { cloned ->
             cloned.setAttrs(toMap().mapValues { (_, value) -> value.cloneValueInto(targetDoc) })
         }
     }
 
-    companion object {
-        fun from(delta: YMapDelta, doc: YDoc = YDoc(), name: String = ""): YMap {
+    public companion object {
+        public fun from(delta: YMapDelta, doc: YDoc = YDoc(), name: String = ""): YMap {
             return doc.getMap(name).also { it.applyDelta(delta) }
         }
 
-        fun from(delta: YMapDeepDelta, doc: YDoc = YDoc(), name: String = ""): YMap {
+        public fun from(delta: YMapDeepDelta, doc: YDoc = YDoc(), name: String = ""): YMap {
             return doc.getMap(name).also { it.applyDeltaDeep(delta) }
         }
     }

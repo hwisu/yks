@@ -26,20 +26,20 @@ private val docOnlyEventNames = setOf(
  * The default runtime policy binds on first CRDT access and rejects every other thread. Encoded
  * updates, state vectors, and copied value snapshots are safe hand-off boundaries.
  */
-class YDoc(
+public class YDoc(
     clientId: Long = randomClientId(),
-    var guid: String = randomGuid(),
-    var collectionId: String? = null,
-    var gc: Boolean = true,
-    var gcFilter: (AbstractStruct) -> Boolean = { true },
-    var meta: Any? = null,
+    public var guid: String = randomGuid(),
+    public var collectionId: String? = null,
+    public var gc: Boolean = true,
+    public var gcFilter: (AbstractStruct) -> Boolean = { true },
+    public var meta: Any? = null,
     shouldLoad: Boolean = true,
-    var autoLoad: Boolean = false,
-    var isSuggestionDoc: Boolean = false,
+    public var autoLoad: Boolean = false,
+    public var isSuggestionDoc: Boolean = false,
 ) {
-    constructor(options: YDocOptions) : this(options, YDocRuntimeOptions.DEFAULT)
+    public constructor(options: YDocOptions) : this(options, YDocRuntimeOptions.DEFAULT)
 
-    constructor(options: YDocOptions, runtimeOptions: YDocRuntimeOptions) : this(
+    public constructor(options: YDocOptions, runtimeOptions: YDocRuntimeOptions) : this(
         clientId = options.clientId,
         guid = options.guid,
         collectionId = options.collectionId,
@@ -67,9 +67,9 @@ class YDoc(
     private var configuredStandardUpdatePolicy: YStandardUpdatePolicy =
         YStandardUpdatePolicy.ALLOW_LOSSLESS_EXTENSIONS
 
-    val updateLimits: YUpdateLimits get() = configuredUpdateLimits
-    val threadAccessPolicy: YThreadAccessPolicy get() = configuredThreadAccessPolicy
-    val standardUpdatePolicy: YStandardUpdatePolicy get() = configuredStandardUpdatePolicy
+    public val updateLimits: YUpdateLimits get() = configuredUpdateLimits
+    public val threadAccessPolicy: YThreadAccessPolicy get() = configuredThreadAccessPolicy
+    public val standardUpdatePolicy: YStandardUpdatePolicy get() = configuredStandardUpdatePolicy
 
     internal fun ensureThreadAccess() {
         val current = Thread.currentThread()
@@ -131,42 +131,42 @@ class YDoc(
         }
     }
 
-    var clientId: Long = clientId.also { require(it >= 0) { "clientId must be non-negative" } }
+    public var clientId: Long = clientId.also { require(it >= 0) { "clientId must be non-negative" } }
         set(value) {
             ensureThreadAccess()
             require(value >= 0) { "clientId must be non-negative" }
             field = value
         }
-    var clientID: Long
+    public var clientID: Long
         get() = clientId
         set(value) {
             clientId = value
         }
-    var collectionid: String?
+    public var collectionid: String?
         get() = collectionId
         set(value) {
             collectionId = value
         }
-    var shouldLoad: Boolean = shouldLoad
+    public var shouldLoad: Boolean = shouldLoad
         private set
-    var isLoaded: Boolean = false
+    public var isLoaded: Boolean = false
         private set
-    var isSynced: Boolean = false
+    public var isSynced: Boolean = false
         private set
-    var isDestroyed: Boolean = false
+    public var isDestroyed: Boolean = false
         private set
-    val whenLoaded: CompletableFuture<YDoc> = CompletableFuture()
-    var whenSynced: CompletableFuture<YDoc> = CompletableFuture()
+    public val whenLoaded: CompletableFuture<YDoc> = CompletableFuture()
+    public var whenSynced: CompletableFuture<YDoc> = CompletableFuture()
         private set
-    var cleanupFormatting: Boolean = !isSuggestionDoc
+    public var cleanupFormatting: Boolean = !isSuggestionDoc
         set(value) {
             ensureThreadAccess()
             field = value
         }
 
-    val `$type`: (Any?) -> Boolean get() = `$ydoc`
+    public val `$type`: (Any?) -> Boolean get() = `$ydoc`
 
-    val store: StructStore = StructStore(this)
+    public val store: StructStore = StructStore(this)
     private data class CachedFullUpdate(
         val storeVersion: Long,
         val parentKinds: Map<String, RootKind>,
@@ -229,6 +229,8 @@ class YDoc(
     private val pendingDeletes = DeleteSet.empty()
     private val redoneByOriginal = linkedMapOf<Id, Id>()
     private val redoneRangeEndByOriginal = linkedMapOf<Id, Id>()
+    private val redoneStartsByClient = mutableMapOf<Long, java.util.TreeMap<Long, Id>>()
+    private val redoneRangeEndsByClient = mutableMapOf<Long, java.util.TreeMap<Long, Id>>()
     private val keptItems = linkedSetOf<Id>()
     /**
      * Mirrors AbstractType._map's insertion-ordered JavaScript Map in upstream Yjs.
@@ -260,22 +262,22 @@ class YDoc(
     private var nestedTypeCounter = 0L
     internal val subdocInstanceId: String = randomGuid()
 
-    val share: Map<String, AbstractYType>
+    public val share: Map<String, AbstractYType>
         get() {
             ensureThreadAccess()
             return shareView
         }
 
     @get:JvmName("getSubdocsProperty")
-    val subdocs: Set<YDoc>
+    public val subdocs: Set<YDoc>
         get() = getSubdocs()
 
-    operator fun get(name: String): AbstractYType {
+    public operator fun get(name: String): AbstractYType {
         ensureThreadAccess()
         return rootType(name) ?: unopenedRoot(name) ?: createUnopenedRoot(name)
     }
 
-    fun get(name: String, kind: RootKind): AbstractYType = when (kind) {
+    public fun get(name: String, kind: RootKind): AbstractYType = when (kind) {
         RootKind.Array -> getArray(name)
         RootKind.Map -> getMap(name)
         RootKind.Text -> getText(name)
@@ -285,43 +287,43 @@ class YDoc(
         RootKind.XmlText -> error("XML node type refs cannot be document roots")
     }
 
-    fun get(name: String, typeRef: Int): AbstractYType = get(name, rootKindFromTypeRefId(typeRef))
+    public fun get(name: String, typeRef: Int): AbstractYType = get(name, rootKindFromTypeRefId(typeRef))
 
-    fun getOrNull(name: String): AbstractYType? {
+    public fun getOrNull(name: String): AbstractYType? {
         ensureThreadAccess()
         return rootType(name) ?: unopenedRoot(name)
     }
 
-    fun get(): YArray = getArray("")
+    public fun get(): YArray = getArray("")
 
-    fun getArray(name: String = ""): YArray = getOrCreate(name, RootKind.Array) { YArray(this, name) }
+    public fun getArray(name: String = ""): YArray = getOrCreate(name, RootKind.Array) { YArray(this, name) }
 
-    fun getMap(name: String = ""): YMap = getOrCreate(name, RootKind.Map) { YMap(this, name) }
+    public fun getMap(name: String = ""): YMap = getOrCreate(name, RootKind.Map) { YMap(this, name) }
 
-    fun getText(name: String = ""): YText = getOrCreate(name, RootKind.Text) { YText(this, name) }
+    public fun getText(name: String = ""): YText = getOrCreate(name, RootKind.Text) { YText(this, name) }
 
-    fun getXmlFragment(name: String = ""): YXmlFragment =
+    public fun getXmlFragment(name: String = ""): YXmlFragment =
         getOrCreate(name, RootKind.XmlFragment) { YXmlFragment(this, name) }
 
-    fun getXmlElement(name: String = "", nodeName: String = "UNDEFINED"): YXmlElementType =
+    public fun getXmlElement(name: String = "", nodeName: String = "UNDEFINED"): YXmlElementType =
         getOrCreate(name, RootKind.XmlElement) { YXmlElementType(this, name, nodeName) }
 
-    fun createArray(): YArray = createNestedType(RootKind.Array) { nestedName -> YArray(this, nestedName) }
+    public fun createArray(): YArray = createNestedType(RootKind.Array) { nestedName -> YArray(this, nestedName) }
 
-    fun createMap(): YMap = createNestedType(RootKind.Map) { nestedName -> YMap(this, nestedName) }
+    public fun createMap(): YMap = createNestedType(RootKind.Map) { nestedName -> YMap(this, nestedName) }
 
-    fun createText(): YText = createNestedType(RootKind.Text) { nestedName -> YText(this, nestedName) }
+    public fun createText(): YText = createNestedType(RootKind.Text) { nestedName -> YText(this, nestedName) }
 
-    fun createXmlFragment(): YXmlFragment =
+    public fun createXmlFragment(): YXmlFragment =
         createNestedType(RootKind.XmlFragment) { nestedName -> YXmlFragment(this, nestedName) }
 
-    fun createXmlElement(nodeName: String): YXmlElementType =
+    public fun createXmlElement(nodeName: String): YXmlElementType =
         createXmlElementType(nodeName, RootKind.XmlElement)
 
-    fun createXmlHook(hookName: String): YXmlHook =
+    public fun createXmlHook(hookName: String): YXmlHook =
         createNestedType(RootKind.XmlHook) { nestedName -> YXmlHook(this, nestedName, hookName) }
 
-    fun createXmlText(): YXmlTextType =
+    public fun createXmlText(): YXmlTextType =
         createXmlTextType()
 
     internal fun createXmlElementType(nodeName: String, kind: RootKind): YXmlElementType =
@@ -330,21 +332,21 @@ class YDoc(
     internal fun createXmlTextType(): YXmlTextType =
         createNestedType(RootKind.XmlText) { nestedName -> YXmlTextType(this, nestedName) }
 
-    fun toJson(): Map<String, Any?> {
+    public fun toJson(): Map<String, Any?> {
         ensureThreadAccess()
         return rootTypes
             .mapValues { (_, type) -> type.toJson() }
             .inJavaScriptObjectKeyOrder()
     }
 
-    fun toJSON(): Map<String, Any?> {
+    public fun toJSON(): Map<String, Any?> {
         ensureThreadAccess()
         return rootTypes
             .mapValues { (_, type) -> type.toJSON() }
             .inJavaScriptObjectKeyOrder()
     }
 
-    fun load() {
+    public fun load() {
         ensureThreadAccess()
         if (!shouldLoad) {
             shouldLoad = true
@@ -357,12 +359,12 @@ class YDoc(
         }
     }
 
-    fun sync(synced: Boolean = true) {
+    public fun sync(synced: Boolean = true) {
         ensureThreadAccess()
         emit("sync", YDocEvent(name = "sync", synced = synced))
     }
 
-    fun destroy() {
+    public fun destroy() {
         withDocumentAccess(::destroyWithinAccess)
     }
 
@@ -405,26 +407,26 @@ class YDoc(
         transactionListeners.clear()
     }
 
-    fun observeSubdocs(listener: (YSubdocEvent) -> Unit): Subscription {
+    public fun observeSubdocs(listener: (YSubdocEvent) -> Unit): Subscription {
         ensureThreadAccess()
         subdocObservers.add(listener)
         return confinedSubscription { subdocObservers.remove(listener) }
     }
 
-    fun onSubdocs(listener: (YSubdocEvent, YDoc, YTransactionEvent?) -> Unit): Subscription {
+    public fun onSubdocs(listener: (YSubdocEvent, YDoc, YTransactionEvent?) -> Unit): Subscription {
         ensureThreadAccess()
         subdocEventListeners.add(listener)
         return confinedSubscription { subdocEventListeners.remove(listener) }
     }
 
-    fun on(eventName: String, listener: (YDocEvent) -> Unit): Subscription {
+    public fun on(eventName: String, listener: (YDocEvent) -> Unit): Subscription {
         ensureThreadAccess()
         val listeners = eventListeners.getOrPut(eventName) { mutableListOf() }
         listeners.add(listener)
         return confinedSubscription { off(eventName, listener) }
     }
 
-    fun onDoc(eventName: String, listener: (YDoc) -> Unit): Subscription {
+    public fun onDoc(eventName: String, listener: (YDoc) -> Unit): Subscription {
         ensureThreadAccess()
         require(eventName in docOnlyEventNames) { "event '$eventName' does not provide document callback arguments" }
         val listeners = docOnlyEventListeners.getOrPut(eventName) { mutableListOf() }
@@ -432,7 +434,7 @@ class YDoc(
         return confinedSubscription { offDoc(eventName, listener) }
     }
 
-    fun on(eventName: String, listener: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit): Subscription =
+    public fun on(eventName: String, listener: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit): Subscription =
         when (eventName) {
             "update" -> onUpdate(listener)
             "updateV2" -> onUpdateV2(listener)
@@ -441,13 +443,13 @@ class YDoc(
             else -> error("event '$eventName' does not provide update callback arguments")
         }
 
-    fun onSync(listener: (Boolean, YDoc) -> Unit): Subscription {
+    public fun onSync(listener: (Boolean, YDoc) -> Unit): Subscription {
         ensureThreadAccess()
         syncEventListeners.add(listener)
         return confinedSubscription { offSync(listener) }
     }
 
-    fun on(eventName: String, listener: (YTransactionEvent, YDoc) -> Unit): Subscription {
+    public fun on(eventName: String, listener: (YTransactionEvent, YDoc) -> Unit): Subscription {
         ensureThreadAccess()
         require(eventName in transactionEventNames) {
             "event '$eventName' does not provide transaction callback arguments"
@@ -457,18 +459,18 @@ class YDoc(
         return confinedSubscription { off(eventName, listener) }
     }
 
-    fun onAfterAllTransactions(listener: (YDoc, List<YTransactionEvent>) -> Unit): Subscription {
+    public fun onAfterAllTransactions(listener: (YDoc, List<YTransactionEvent>) -> Unit): Subscription {
         ensureThreadAccess()
         afterAllTransactionsEventListeners.add(listener)
         return confinedSubscription { offAfterAllTransactions(listener) }
     }
 
-    fun on(eventName: String, listener: (YSubdocEvent, YDoc, YTransactionEvent?) -> Unit): Subscription {
+    public fun on(eventName: String, listener: (YSubdocEvent, YDoc, YTransactionEvent?) -> Unit): Subscription {
         require(eventName == "subdocs") { "event '$eventName' does not provide subdoc callback arguments" }
         return onSubdocs(listener)
     }
 
-    fun once(eventName: String, listener: (YDocEvent) -> Unit): Subscription {
+    public fun once(eventName: String, listener: (YDocEvent) -> Unit): Subscription {
         lateinit var subscription: Subscription
         val onceListener: (YDocEvent) -> Unit = { event ->
             subscription.close()
@@ -478,7 +480,7 @@ class YDoc(
         return subscription
     }
 
-    fun onceDoc(eventName: String, listener: (YDoc) -> Unit): Subscription {
+    public fun onceDoc(eventName: String, listener: (YDoc) -> Unit): Subscription {
         lateinit var subscription: Subscription
         val onceListener: (YDoc) -> Unit = { doc ->
             subscription.close()
@@ -488,7 +490,7 @@ class YDoc(
         return subscription
     }
 
-    fun once(eventName: String, listener: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit): Subscription {
+    public fun once(eventName: String, listener: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit): Subscription {
         lateinit var subscription: Subscription
         val onceListener: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit = { update, origin, doc, transaction ->
             subscription.close()
@@ -498,7 +500,7 @@ class YDoc(
         return subscription
     }
 
-    fun onceSync(listener: (Boolean, YDoc) -> Unit): Subscription {
+    public fun onceSync(listener: (Boolean, YDoc) -> Unit): Subscription {
         lateinit var subscription: Subscription
         val onceListener: (Boolean, YDoc) -> Unit = { synced, doc ->
             subscription.close()
@@ -508,7 +510,7 @@ class YDoc(
         return subscription
     }
 
-    fun once(eventName: String, listener: (YTransactionEvent, YDoc) -> Unit): Subscription {
+    public fun once(eventName: String, listener: (YTransactionEvent, YDoc) -> Unit): Subscription {
         lateinit var subscription: Subscription
         val onceListener: (YTransactionEvent, YDoc) -> Unit = { transaction, doc ->
             subscription.close()
@@ -518,7 +520,7 @@ class YDoc(
         return subscription
     }
 
-    fun onceAfterAllTransactions(listener: (YDoc, List<YTransactionEvent>) -> Unit): Subscription {
+    public fun onceAfterAllTransactions(listener: (YDoc, List<YTransactionEvent>) -> Unit): Subscription {
         lateinit var subscription: Subscription
         val onceListener: (YDoc, List<YTransactionEvent>) -> Unit = { doc, transactions ->
             subscription.close()
@@ -528,7 +530,7 @@ class YDoc(
         return subscription
     }
 
-    fun once(eventName: String, listener: (YSubdocEvent, YDoc, YTransactionEvent?) -> Unit): Subscription {
+    public fun once(eventName: String, listener: (YSubdocEvent, YDoc, YTransactionEvent?) -> Unit): Subscription {
         lateinit var subscription: Subscription
         val onceListener: (YSubdocEvent, YDoc, YTransactionEvent?) -> Unit = { event, doc, transaction ->
             subscription.close()
@@ -538,7 +540,7 @@ class YDoc(
         return subscription
     }
 
-    fun off(eventName: String, listener: (YDocEvent) -> Unit) {
+    public fun off(eventName: String, listener: (YDocEvent) -> Unit) {
         ensureThreadAccess()
         val listeners = eventListeners[eventName] ?: return
         listeners.remove(listener)
@@ -547,7 +549,7 @@ class YDoc(
         }
     }
 
-    fun offDoc(eventName: String, listener: (YDoc) -> Unit) {
+    public fun offDoc(eventName: String, listener: (YDoc) -> Unit) {
         ensureThreadAccess()
         val listeners = docOnlyEventListeners[eventName] ?: return
         listeners.remove(listener)
@@ -556,7 +558,7 @@ class YDoc(
         }
     }
 
-    fun off(eventName: String, listener: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit) {
+    public fun off(eventName: String, listener: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit) {
         ensureThreadAccess()
         when (eventName) {
             "update" -> updateEventListeners.remove(listener)
@@ -566,12 +568,12 @@ class YDoc(
         }
     }
 
-    fun offSync(listener: (Boolean, YDoc) -> Unit) {
+    public fun offSync(listener: (Boolean, YDoc) -> Unit) {
         ensureThreadAccess()
         syncEventListeners.remove(listener)
     }
 
-    fun off(eventName: String, listener: (YTransactionEvent, YDoc) -> Unit) {
+    public fun off(eventName: String, listener: (YTransactionEvent, YDoc) -> Unit) {
         ensureThreadAccess()
         val listeners = transactionEventListeners[eventName] ?: return
         listeners.remove(listener)
@@ -580,23 +582,23 @@ class YDoc(
         }
     }
 
-    fun offAfterAllTransactions(listener: (YDoc, List<YTransactionEvent>) -> Unit) {
+    public fun offAfterAllTransactions(listener: (YDoc, List<YTransactionEvent>) -> Unit) {
         ensureThreadAccess()
         afterAllTransactionsEventListeners.remove(listener)
     }
 
-    fun off(eventName: String, listener: (YSubdocEvent, YDoc, YTransactionEvent?) -> Unit) {
+    public fun off(eventName: String, listener: (YSubdocEvent, YDoc, YTransactionEvent?) -> Unit) {
         ensureThreadAccess()
         if (eventName == "subdocs") {
             subdocEventListeners.remove(listener)
         }
     }
 
-    fun emit(eventName: String, event: YDocEvent = YDocEvent(name = eventName)) {
+    public fun emit(eventName: String, event: YDocEvent = YDocEvent(name = eventName)) {
         emit(if (event.name == eventName) event else event.copy(name = eventName))
     }
 
-    fun emit(event: YDocEvent) {
+    public fun emit(event: YDocEvent) {
         ensureThreadAccess()
         when (event.name) {
             "load" -> {
@@ -624,7 +626,7 @@ class YDoc(
         }
     }
 
-    fun getSubdocs(): Set<YDoc> {
+    public fun getSubdocs(): Set<YDoc> {
         ensureThreadAccess()
         return visibleSubdocRefs()
             .map(::subdocFromRef)
@@ -632,9 +634,9 @@ class YDoc(
             .toCollection(linkedSetOf())
     }
 
-    fun getSubdocGuids(): Set<String> = getSubdocs().map { it.guid }.toSortedSet()
+    public fun getSubdocGuids(): Set<String> = getSubdocs().map { it.guid }.toSortedSet()
 
-    fun <T> transact(origin: Any? = null, local: Boolean = true, block: () -> T): T {
+    public fun <T> transact(origin: Any? = null, local: Boolean = true, block: () -> T): T {
         return withDocumentAccess {
             transactWithinAccess(origin, local, block)
         }
@@ -719,7 +721,7 @@ class YDoc(
         return result as T
     }
 
-    fun <T> transact(block: (YTransaction) -> T, origin: Any? = null, local: Boolean = true): T {
+    public fun <T> transact(block: (YTransaction) -> T, origin: Any? = null, local: Boolean = true): T {
         return withDocumentAccess {
             val existing = currentTransaction
             if (existing != null) {
@@ -818,6 +820,7 @@ class YDoc(
         redoneByOriginal.putAll(snapshot.redoneByOriginal)
         redoneRangeEndByOriginal.clear()
         redoneRangeEndByOriginal.putAll(snapshot.redoneRangeEndByOriginal)
+        rebuildRedoneIndexes()
         keptItems.clear()
         keptItems.addAll(snapshot.keptItems)
         addedMapKeys.forEach { (parent, keys) ->
@@ -833,13 +836,13 @@ class YDoc(
         store.restoreSnapshot(snapshot.store)
     }
 
-    fun observeUpdates(listener: (update: ByteArray, origin: Any?) -> Unit): Subscription {
+    public fun observeUpdates(listener: (update: ByteArray, origin: Any?) -> Unit): Subscription {
         ensureThreadAccess()
         updateListeners.add(listener)
         return confinedSubscription { updateListeners.remove(listener) }
     }
 
-    fun observeUpdatesLossless(listener: (update: ByteArray, origin: Any?) -> Unit): Subscription {
+    public fun observeUpdatesLossless(listener: (update: ByteArray, origin: Any?) -> Unit): Subscription {
         ensureThreadAccess()
         val wrapper: (ByteArray, Any?, YDoc, YTransactionEvent?) -> Unit = { update, origin, _, _ ->
             listener(update, origin)
@@ -848,19 +851,19 @@ class YDoc(
         return confinedSubscription { updateLosslessEventListeners.remove(wrapper) }
     }
 
-    fun onUpdate(listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit): Subscription {
+    public fun onUpdate(listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit): Subscription {
         ensureThreadAccess()
         updateEventListeners.add(listener)
         return confinedSubscription { updateEventListeners.remove(listener) }
     }
 
-    fun onUpdateV2(listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit): Subscription {
+    public fun onUpdateV2(listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit): Subscription {
         ensureThreadAccess()
         updateV2EventListeners.add(listener)
         return confinedSubscription { updateV2EventListeners.remove(listener) }
     }
 
-    fun onUpdateLossless(
+    public fun onUpdateLossless(
         listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit,
     ): Subscription {
         ensureThreadAccess()
@@ -868,7 +871,7 @@ class YDoc(
         return confinedSubscription { updateLosslessEventListeners.remove(listener) }
     }
 
-    fun onUpdateV2Lossless(
+    public fun onUpdateV2Lossless(
         listener: (update: ByteArray, origin: Any?, doc: YDoc, transaction: YTransactionEvent?) -> Unit,
     ): Subscription {
         ensureThreadAccess()
@@ -876,37 +879,37 @@ class YDoc(
         return confinedSubscription { updateV2LosslessEventListeners.remove(listener) }
     }
 
-    fun observeBeforeAllTransactions(listener: () -> Unit): Subscription {
+    public fun observeBeforeAllTransactions(listener: () -> Unit): Subscription {
         ensureThreadAccess()
         beforeAllTransactionListeners.add(listener)
         return confinedSubscription { beforeAllTransactionListeners.remove(listener) }
     }
 
-    fun observeBeforeTransactions(listener: (YTransactionEvent) -> Unit): Subscription {
+    public fun observeBeforeTransactions(listener: (YTransactionEvent) -> Unit): Subscription {
         ensureThreadAccess()
         beforeTransactionListeners.add(listener)
         return confinedSubscription { beforeTransactionListeners.remove(listener) }
     }
 
-    fun observeBeforeObserverCalls(listener: (YTransactionEvent) -> Unit): Subscription {
+    public fun observeBeforeObserverCalls(listener: (YTransactionEvent) -> Unit): Subscription {
         ensureThreadAccess()
         beforeObserverCallsListeners.add(listener)
         return confinedSubscription { beforeObserverCallsListeners.remove(listener) }
     }
 
-    fun observeAfterTransactions(listener: (YTransactionEvent) -> Unit): Subscription {
+    public fun observeAfterTransactions(listener: (YTransactionEvent) -> Unit): Subscription {
         ensureThreadAccess()
         afterTransactionListeners.add(listener)
         return confinedSubscription { afterTransactionListeners.remove(listener) }
     }
 
-    fun observeAfterTransactionCleanup(listener: (YTransactionEvent) -> Unit): Subscription {
+    public fun observeAfterTransactionCleanup(listener: (YTransactionEvent) -> Unit): Subscription {
         ensureThreadAccess()
         afterTransactionCleanupListeners.add(listener)
         return confinedSubscription { afterTransactionCleanupListeners.remove(listener) }
     }
 
-    fun observeAfterAllTransactions(listener: (List<YTransactionEvent>) -> Unit): Subscription {
+    public fun observeAfterAllTransactions(listener: (List<YTransactionEvent>) -> Unit): Subscription {
         ensureThreadAccess()
         afterAllTransactionsListeners.add(listener)
         return confinedSubscription { afterAllTransactionsListeners.remove(listener) }
@@ -923,7 +926,7 @@ class YDoc(
         unsubscribe()
     }
 
-    fun encodeStateVector(): ByteArray = withDocumentAccess {
+    public fun encodeStateVector(): ByteArray = withDocumentAccess {
         dev.yks.encodeStateVector(store.stateVector())
     }
 
@@ -972,7 +975,7 @@ class YDoc(
         )
     }
 
-    fun encodeStateAsUpdate(encodedStateVector: ByteArray = ByteArray(0)): ByteArray = withDocumentAccess {
+    public fun encodeStateAsUpdate(encodedStateVector: ByteArray = ByteArray(0)): ByteArray = withDocumentAccess {
         val cacheEligible = encodedStateVector.isEmpty() && pendingItems.isEmpty() && pendingDeletes.isEmpty
         val parentKinds = if (cacheEligible) store.parentKinds() else emptyMap()
         if (cacheEligible) {
@@ -1002,7 +1005,7 @@ class YDoc(
         encoded
     }
 
-    fun encodeStateAsUpdateLossless(encodedStateVector: ByteArray = ByteArray(0)): ByteArray = withDocumentAccess {
+    public fun encodeStateAsUpdateLossless(encodedStateVector: ByteArray = ByteArray(0)): ByteArray = withDocumentAccess {
         val stateVector = decodeStateVector(encodedStateVector)
         val items = losslessItems(store.itemsSince(stateVector))
         val update = DocumentUpdate(
@@ -1099,7 +1102,7 @@ class YDoc(
     private fun ByteArray.hasPrivateEnvelope(): Boolean =
         size >= 3 && this[0] == 'Y'.code.toByte() && this[1] == 'K'.code.toByte() && this[2] == 'S'.code.toByte()
 
-    fun applyUpdate(update: ByteArray, origin: Any? = null) {
+    public fun applyUpdate(update: ByteArray, origin: Any? = null) {
         withDocumentAccess {
             updateLimits.requireEncodedSize(update.size)
             val decoded = UpdateCodec.decode(
@@ -1111,7 +1114,7 @@ class YDoc(
         }
     }
 
-    fun applyUpdateV2(update: ByteArray, origin: Any? = null) {
+    public fun applyUpdateV2(update: ByteArray, origin: Any? = null) {
         withDocumentAccess {
             updateLimits.requireEncodedSize(update.size)
             applyUpdate(
@@ -1324,13 +1327,15 @@ class YDoc(
         while (seen.add(current)) {
             val direct = redoneByOriginal[current]
             val ranged = if (direct == null) {
-                redoneByOriginal.entries.firstNotNullOfOrNull { (originalStart, restoredStart) ->
-                    if (originalStart.client != current.client || current.clock < originalStart.clock) return@firstNotNullOfOrNull null
-                    val original = store.getStoreItem(originalStart) ?: return@firstNotNullOfOrNull null
-                    val offset = current.clock - originalStart.clock
-                    if (offset >= original.length) return@firstNotNullOfOrNull null
-                    Id(restoredStart.client, checkedClockAdd(restoredStart.clock, offset, "follow redone clock"))
-                }
+                redoneStartsByClient[current.client]
+                    ?.floorEntry(current.clock)
+                    ?.let { (clock, restoredStart) ->
+                        val originalStart = Id(current.client, clock)
+                        val original = store.getStoreItem(originalStart) ?: return@let null
+                        val offset = current.clock - clock
+                        if (offset >= original.length) return@let null
+                        Id(restoredStart.client, checkedClockAdd(restoredStart.clock, offset, "follow redone clock"))
+                    }
             } else {
                 null
             }
@@ -1341,14 +1346,38 @@ class YDoc(
 
     internal fun redoneRangeEnd(id: Id): Id? {
         val end = redoneRangeEndByOriginal[id]
-            ?: redoneRangeEndByOriginal.entries.firstNotNullOfOrNull { (originalStart, restoredEnd) ->
-                if (originalStart.client != id.client || id.clock < originalStart.clock) {
-                    return@firstNotNullOfOrNull null
+            ?: redoneRangeEndsByClient[id.client]
+                ?.floorEntry(id.clock)
+                ?.let { (clock, restoredEnd) ->
+                    val original = store.getStoreItem(Id(id.client, clock)) ?: return@let null
+                    restoredEnd.takeIf { id.clock - clock < original.length }
                 }
-                val original = store.getStoreItem(originalStart) ?: return@firstNotNullOfOrNull null
-                restoredEnd.takeIf { id.clock - originalStart.clock < original.length }
-            }
         return end?.let(::followRedone)
+    }
+
+    private fun rememberRedone(original: Id, restored: Id) {
+        redoneByOriginal[original] = restored
+        redoneStartsByClient.getOrPut(original.client) { java.util.TreeMap() }[original.clock] = restored
+    }
+
+    private fun rememberRedoneRangeEnd(original: Id, restoredEnd: Id) {
+        redoneRangeEndByOriginal[original] = restoredEnd
+        redoneRangeEndsByClient.getOrPut(original.client) { java.util.TreeMap() }[original.clock] = restoredEnd
+    }
+
+    private fun rebuildRedoneIndexes() {
+        redoneStartsByClient.clear()
+        redoneByOriginal.forEach(::rememberRedoneIndex)
+        redoneRangeEndsByClient.clear()
+        redoneRangeEndByOriginal.forEach(::rememberRedoneRangeEndIndex)
+    }
+
+    private fun rememberRedoneIndex(original: Id, restored: Id) {
+        redoneStartsByClient.getOrPut(original.client) { java.util.TreeMap() }[original.clock] = restored
+    }
+
+    private fun rememberRedoneRangeEndIndex(original: Id, restoredEnd: Id) {
+        redoneRangeEndsByClient.getOrPut(original.client) { java.util.TreeMap() }[original.clock] = restoredEnd
     }
 
     internal fun setItemKeep(id: Id, keep: Boolean) {
@@ -1376,7 +1405,7 @@ class YDoc(
 
     internal fun rootType(name: String): AbstractYType? = rootTypes[name]
 
-    fun rootNames(): Set<String> {
+    public fun rootNames(): Set<String> {
         ensureThreadAccess()
         return (rootTypes.keys + unopenedRootEntries.keys + store.parentNames())
             .filterNot(::isNestedName)
@@ -1391,7 +1420,7 @@ class YDoc(
      * contract. Deleted list content and deleted map keys still make the root
      * non-empty because their structs remain attached to the shared type.
      */
-    fun isRootEmpty(name: String): Boolean {
+    public fun isRootEmpty(name: String): Boolean {
         ensureThreadAccess()
         return store.firstItemForParent(name, sequenceOnly = true) == null &&
             store.mapKeysForParent(name).isEmpty()
@@ -2188,8 +2217,8 @@ class YDoc(
 
     internal fun restoreItems(items: List<RestoreItem>): List<StoreItem> {
         if (items.isEmpty()) return emptyList()
-        val originalPositions = restorePositions(items)
-        val sortedItems = items.sortedForRestore(originalPositions)
+        val originalPositions = if (items.size == 1) emptyMap() else restorePositions(items)
+        val sortedItems = if (items.size == 1) items else items.sortedForRestore(originalPositions)
         val restored = mutableListOf<StoreItem>()
         transact {
             val restoredByOriginal = mutableMapOf<Id, Id>()
@@ -2218,7 +2247,7 @@ class YDoc(
                     } else if (original.anchorAfterOriginal) {
                         source.origin?.let { restoredByOriginal[it] } ?: source.id
                     } else {
-                        source.origin?.let { restoredByOriginal[it] } ?: source.origin
+                        source.origin?.let { restoredByOriginal[it] } ?: source.origin?.let(::followRedone)
                     },
                     rightOrigin = if (source.parentSub != null) {
                         null
@@ -2229,21 +2258,27 @@ class YDoc(
                     } else if (original.anchorAfterOriginal) {
                         inferRightOrigin(source)
                     } else {
-                        source.rightOrigin
+                        source.rightOrigin?.let { restoredByOriginal[it] } ?: source.rightOrigin?.let(::followRedone)
                     },
                     parent = source.parent,
                     parentSub = source.parentSub,
                     content = source.content.retargetTextFormat(restoredByOriginal),
                     deleted = false,
                 )
+                if (!original.anchorAfterOriginal) {
+                    // Redo may anchor inside a packed text/array item. Remote integration
+                    // already normalizes those boundaries; local restoration must do the
+                    // same before rebuilding the sequence index.
+                    cleanRemoteOrigins(item)
+                }
                 check(store.add(item)) { "duplicate restored item id: ${item.id}" }
                 rememberMapKey(item)
                 restoredByOriginal[source.id] = item.id
-                redoneByOriginal[source.id] = item.id
+                rememberRedone(source.id, item.id)
                 restoredPairs.add(source to item)
                 restored.add(item)
                 if (sourcePosition != null) {
-                    previousRestoredByParent[parentKey] = sourcePosition to item.id
+                    previousRestoredByParent[parentKey] = sourcePosition to item.lastId
                 }
                 recordAddedItem(item)
                 currentTransaction?.markChanged(item.parent, item.parentSub)
@@ -2274,12 +2309,20 @@ class YDoc(
     }
 
     internal fun restoreItemAtCurrentPosition(item: StoreItem): RestoreItem {
-        val anchored = if (item.parentSub == null && item.rightOrigin == null) {
-            item.copy(rightOrigin = inferRightOrigin(item))
+        val needsCurrentSequenceAnchors = item.parentSub == null && !isNestedName(item.parent)
+        val anchored = if (needsCurrentSequenceAnchors) {
+            val (left, right) = store.visibleSequenceNeighbors(item)
+            item.copy(
+                origin = left?.lastId,
+                rightOrigin = right?.id,
+            )
         } else {
             item
         }
-        return RestoreItem(anchored.copy(deleted = false), anchorAfterOriginal = true)
+        return RestoreItem(
+            anchored.copy(deleted = false),
+            anchorAfterOriginal = !needsCurrentSequenceAnchors,
+        )
     }
 
     private fun applyDeleteSet(
@@ -4600,7 +4643,7 @@ class YDoc(
         pairs.groupBy { (source, _) -> source.parent to source.parentSub }.values.forEach { group ->
             val parentSub = group.first().first.parentSub
             if (parentSub != null) {
-                group.forEach { (source, restored) -> redoneRangeEndByOriginal[source.id] = restored.id }
+                group.forEach { (source, restored) -> rememberRedoneRangeEnd(source.id, restored.id) }
                 return@forEach
             }
 
@@ -4615,7 +4658,7 @@ class YDoc(
             fun flushBlock() {
                 if (block.isEmpty()) return
                 val end = block.last().second.lastId
-                block.forEach { (source, _) -> redoneRangeEndByOriginal[source.id] = end }
+                block.forEach { (source, _) -> rememberRedoneRangeEnd(source.id, end) }
                 block.clear()
             }
 
@@ -4717,10 +4760,10 @@ class YDoc(
         }
     }
 
-    companion object {
+    public companion object {
         private val random = SecureRandom()
 
-        fun generateNewClientId(): Long = randomClientId()
+        public fun generateNewClientId(): Long = randomClientId()
 
         private fun randomClientId(excluding: Set<Long> = emptySet()): Long {
             var value: Long
@@ -4736,37 +4779,37 @@ class YDoc(
     }
 }
 
-class Subscription internal constructor(private val unsubscribeAction: () -> Unit) : AutoCloseable {
+public class Subscription internal constructor(private val unsubscribeAction: () -> Unit) : AutoCloseable {
     override fun close() {
         unsubscribeAction()
     }
 }
 
-class YTransaction internal constructor(
-    val doc: YDoc,
+public class YTransaction internal constructor(
+    public val doc: YDoc,
     private val transaction: YDoc.Transaction,
 ) {
-    val origin: Any? get() = transaction.origin
-    val local: Boolean get() = transaction.local
-    val beforeState: StateVector get() = transaction.beforeState
-    val afterState: StateVector get() = transaction.afterState
-    val insertSet: IdSet get() = transaction.addedItems.toIdSet()
-    val deleteSet: DeleteSet get() = transaction.deleteSet
-    val cleanUps: IdSet get() = transaction.cleanUps
-    val meta: MutableMap<Any?, Any?> get() = transaction.meta
-    val changedParents: Set<String> get() = doc.changedParentsFor(transaction)
-    val changedTypes: Set<AbstractYType> get() = changedParents.mapNotNull { doc.typeForParent(it) }.toSet()
-    val addedItemCount: Int get() = transaction.addedItems.logicalEventItemCount()
-    val deletedItemCount: Int get() = transaction.deletedItems.logicalEventItemCount()
-    val update: ByteArray get() = transaction.update
+    public val origin: Any? get() = transaction.origin
+    public val local: Boolean get() = transaction.local
+    public val beforeState: StateVector get() = transaction.beforeState
+    public val afterState: StateVector get() = transaction.afterState
+    public val insertSet: IdSet get() = transaction.addedItems.toIdSet()
+    public val deleteSet: DeleteSet get() = transaction.deleteSet
+    public val cleanUps: IdSet get() = transaction.cleanUps
+    public val meta: MutableMap<Any?, Any?> get() = transaction.meta
+    public val changedParents: Set<String> get() = doc.changedParentsFor(transaction)
+    public val changedTypes: Set<AbstractYType> get() = changedParents.mapNotNull { doc.typeForParent(it) }.toSet()
+    public val addedItemCount: Int get() = transaction.addedItems.logicalEventItemCount()
+    public val deletedItemCount: Int get() = transaction.deletedItems.logicalEventItemCount()
+    public val update: ByteArray get() = transaction.update
 
-    fun adds(id: Id): Boolean = id.clock >= (beforeState[id.client] ?: 0)
+    public fun adds(id: Id): Boolean = id.clock >= (beforeState[id.client] ?: 0)
 
-    fun adds(client: Long, clock: Long): Boolean = adds(Id(client, clock))
+    public fun adds(client: Long, clock: Long): Boolean = adds(Id(client, clock))
 
-    fun deletes(id: Id): Boolean = deleteSet.contains(id)
+    public fun deletes(id: Id): Boolean = deleteSet.contains(id)
 
-    fun deletes(client: Long, clock: Long): Boolean = deletes(Id(client, clock))
+    public fun deletes(client: Long, clock: Long): Boolean = deletes(Id(client, clock))
 
     internal fun registerSplitMergeCandidate(item: StoreItem) {
         transaction.mergeStructs.add(item.id)
@@ -4792,25 +4835,25 @@ internal data class YEventSets(
     val deleteSet: DeleteSet,
 )
 
-class YEvent(
-    val target: AbstractYType,
-    val origin: Any?,
+public class YEvent(
+    public val target: AbstractYType,
+    public val origin: Any?,
     update: ByteArray,
     insertSet: IdSet = createIdSet(),
     deleteSet: DeleteSet = DeleteSet.empty(),
-    val transaction: YTransactionEvent? = null,
-    val currentTarget: AbstractYType = target,
-    val childListChanged: Boolean = false,
-    val keysChanged: Set<String> = emptySet(),
+    public val transaction: YTransactionEvent? = null,
+    public val currentTarget: AbstractYType = target,
+    public val childListChanged: Boolean = false,
+    public val keysChanged: Set<String> = emptySet(),
     mapChanges: Map<String, YMapChange> = emptyMap(),
     mapDelta: YMapDelta = YMapDelta(),
-    val name: String? = null,
+    public val name: String? = null,
     value: Any? = null,
-    val arrayDelta: List<YArrayDeltaOp> = emptyList(),
-    val textDelta: YTextDelta = YTextDelta(),
-    val path: List<Any> = emptyList(),
-    val changedTarget: AbstractYType = target,
-    val deepEvents: List<YEvent> = emptyList(),
+    public val arrayDelta: List<YArrayDeltaOp> = emptyList(),
+    public val textDelta: YTextDelta = YTextDelta(),
+    public val path: List<Any> = emptyList(),
+    public val changedTarget: AbstractYType = target,
+    public val deepEvents: List<YEvent> = emptyList(),
 ) {
     private var updateValue: ByteArray? = update
     private var updateProvider: (() -> ByteArray)? = null
@@ -4819,7 +4862,7 @@ class YEvent(
     private var setsValue = YEventSets(insertSet, deleteSet)
     private var setsProvider: (() -> YEventSets)? = null
 
-    val update: ByteArray
+    public val update: ByteArray
         get() {
             updateValue?.let { return it }
             val resolved = checkNotNull(mapNotNullUpdateProvider())()
@@ -4828,19 +4871,19 @@ class YEvent(
             return resolved
         }
 
-    val mapChanges: Map<String, YMapChange>
+    public val mapChanges: Map<String, YMapChange>
         get() = mapDetails().changes
 
-    val mapDelta: YMapDelta
+    public val mapDelta: YMapDelta
         get() = mapDetails().delta
 
-    val value: Any?
+    public val value: Any?
         get() = mapDetails().value
 
-    val insertSet: IdSet
+    public val insertSet: IdSet
         get() = sets().insertSet
 
-    val deleteSet: DeleteSet
+    public val deleteSet: DeleteSet
         get() = sets().deleteSet
 
     private fun mapNotNullUpdateProvider(): (() -> ByteArray)? = updateProvider
@@ -4910,7 +4953,7 @@ class YEvent(
     }
 
     @get:kotlin.jvm.JvmName("getDeltaValue")
-    val delta: Any
+    public val delta: Any
         get() = when (target.kind) {
             RootKind.Array,
             RootKind.XmlFragment,
@@ -4921,10 +4964,10 @@ class YEvent(
             RootKind.XmlText -> textDelta
         }
 
-    val deltaDeep: Any
+    public val deltaDeep: Any
         get() = getDelta(deep = true)
 
-    fun getDelta(deep: Boolean = false, renderer: AbstractRenderer = target.activeRenderer): Any {
+    public fun getDelta(deep: Boolean = false, renderer: AbstractRenderer = target.activeRenderer): Any {
         if (!deep) return delta
         val itemsToRender = eventItemsToRender(renderer)
         if (!itemsToRender.isEmpty()) {
@@ -4971,30 +5014,30 @@ class YEvent(
         return mergeIdSets(sets)
     }
 
-    fun adds(id: Id): Boolean = insertSet.hasId(id)
+    public fun adds(id: Id): Boolean = insertSet.hasId(id)
 
-    fun adds(client: Long, clock: Long): Boolean = insertSet.has(client, clock)
+    public fun adds(client: Long, clock: Long): Boolean = insertSet.has(client, clock)
 
-    fun adds(struct: AbstractStruct): Boolean = adds(struct.id)
+    public fun adds(struct: AbstractStruct): Boolean = adds(struct.id)
 
-    fun adds(struct: DecodedUpdateStruct): Boolean = adds(struct.id)
+    public fun adds(struct: DecodedUpdateStruct): Boolean = adds(struct.id)
 
-    fun deletes(id: Id): Boolean = deleteSet.contains(id)
+    public fun deletes(id: Id): Boolean = deleteSet.contains(id)
 
-    fun deletes(client: Long, clock: Long): Boolean = deletes(Id(client, clock))
+    public fun deletes(client: Long, clock: Long): Boolean = deletes(Id(client, clock))
 
-    fun deletes(struct: AbstractStruct): Boolean = deletes(struct.id)
+    public fun deletes(struct: AbstractStruct): Boolean = deletes(struct.id)
 
-    fun deletes(struct: DecodedUpdateStruct): Boolean = deletes(struct.id)
+    public fun deletes(struct: DecodedUpdateStruct): Boolean = deletes(struct.id)
 }
 
-enum class YMapChangeAction {
+public enum class YMapChangeAction {
     Add,
     Update,
     Delete,
 }
 
-data class YMapChange(
+public data class YMapChange(
     val action: YMapChangeAction,
     val oldValue: Any?,
     val newValue: Any?,
@@ -5178,7 +5221,7 @@ internal fun <T> callAllYksCallbacks(values: Iterable<T>, callback: (T) -> Unit)
     firstError?.let { throw it }
 }
 
-data class YArrayDeltaOp(
+public data class YArrayDeltaOp(
     val retain: Int? = null,
     val insert: List<Any?>? = null,
     val delete: Int? = null,
@@ -5198,29 +5241,29 @@ internal class YTransactionEventItems(
     val deleted: List<StoreItem>,
 )
 
-class YTransactionEvent internal constructor(
-    val doc: YDoc,
-    val origin: Any?,
-    val local: Boolean,
+public class YTransactionEvent internal constructor(
+    public val doc: YDoc,
+    public val origin: Any?,
+    public val local: Boolean,
     update: ByteArray?,
     private val updateProvider: (() -> ByteArray)? = null,
-    val beforeState: StateVector,
-    val afterState: StateVector,
+    public val beforeState: StateVector,
+    public val afterState: StateVector,
     insertSet: IdSet?,
-    val deleteSet: DeleteSet,
+    public val deleteSet: DeleteSet,
     deleteIdSet: IdSet? = null,
-    val cleanUps: IdSet = createIdSet(),
-    val meta: MutableMap<Any?, Any?> = linkedMapOf(),
+    public val cleanUps: IdSet = createIdSet(),
+    public val meta: MutableMap<Any?, Any?> = linkedMapOf(),
     addedStructs: List<ItemStruct>? = emptyList(),
     deletedStructs: List<ItemStruct>? = emptyList(),
     addedItems: List<StoreItem>?,
     deletedItems: List<StoreItem>?,
     internal val eventItems: YTransactionEventItems? = null,
-    val changedParents: Set<String>,
-    val changedTypes: Set<AbstractYType> = emptySet(),
-    val subdocsAdded: Set<YDoc> = emptySet(),
-    val subdocsRemoved: Set<YDoc> = emptySet(),
-    val subdocsLoaded: Set<YDoc> = emptySet(),
+    public val changedParents: Set<String>,
+    public val changedTypes: Set<AbstractYType> = emptySet(),
+    public val subdocsAdded: Set<YDoc> = emptySet(),
+    public val subdocsRemoved: Set<YDoc> = emptySet(),
+    public val subdocsLoaded: Set<YDoc> = emptySet(),
 ) {
     private val eagerUpdate = update
     private val eagerInsertSet = insertSet
@@ -5230,19 +5273,19 @@ class YTransactionEvent internal constructor(
     private val eagerAddedItems = addedItems
     private val eagerDeletedItems = deletedItems
 
-    val update: ByteArray by lazy(LazyThreadSafetyMode.NONE) {
+    public val update: ByteArray by lazy(LazyThreadSafetyMode.NONE) {
         eagerUpdate ?: updateProvider?.invoke() ?: ByteArray(0)
     }
-    val insertSet: IdSet by lazy(LazyThreadSafetyMode.NONE) {
+    public val insertSet: IdSet by lazy(LazyThreadSafetyMode.NONE) {
         eagerInsertSet ?: eventItems?.added?.toIdSet() ?: createIdSet()
     }
-    val deleteIdSet: IdSet by lazy(LazyThreadSafetyMode.NONE) {
+    public val deleteIdSet: IdSet by lazy(LazyThreadSafetyMode.NONE) {
         eagerDeleteIdSet ?: deleteSet.toIdSet()
     }
-    val addedStructs: List<ItemStruct> by lazy(LazyThreadSafetyMode.NONE) {
+    public val addedStructs: List<ItemStruct> by lazy(LazyThreadSafetyMode.NONE) {
         eagerAddedStructs ?: eventItems?.added.orEmpty().map { item -> item.toItemStruct(doc) }
     }
-    val deletedStructs: List<ItemStruct> by lazy(LazyThreadSafetyMode.NONE) {
+    public val deletedStructs: List<ItemStruct> by lazy(LazyThreadSafetyMode.NONE) {
         eagerDeletedStructs
             ?: eventItems?.deleted.orEmpty().map { item -> item.copy(deleted = true).toItemStruct(doc) }
     }
@@ -5253,24 +5296,24 @@ class YTransactionEvent internal constructor(
         eagerDeletedItems ?: eventItems?.deleted.orEmpty()
     }
 
-    val changedParentTypes: Set<AbstractYType> get() = changedTypes
+    public val changedParentTypes: Set<AbstractYType> get() = changedTypes
 
-    val addedItemCount: Int
+    public val addedItemCount: Int
         get() = (eagerAddedItems ?: eventItems?.added).orEmpty().logicalEventItemCount()
-    val deletedItemCount: Int
+    public val deletedItemCount: Int
         get() = (eagerDeletedItems ?: eventItems?.deleted).orEmpty().logicalEventItemCount()
 
-    fun adds(id: Id): Boolean = id.clock >= (beforeState[id.client] ?: 0)
+    public fun adds(id: Id): Boolean = id.clock >= (beforeState[id.client] ?: 0)
 
-    fun adds(client: Long, clock: Long): Boolean = adds(Id(client, clock))
+    public fun adds(client: Long, clock: Long): Boolean = adds(Id(client, clock))
 
-    fun adds(struct: AbstractStruct): Boolean = adds(struct.id)
+    public fun adds(struct: AbstractStruct): Boolean = adds(struct.id)
 
-    fun deletes(id: Id): Boolean = deleteSet.contains(id)
+    public fun deletes(id: Id): Boolean = deleteSet.contains(id)
 
-    fun deletes(client: Long, clock: Long): Boolean = deletes(Id(client, clock))
+    public fun deletes(client: Long, clock: Long): Boolean = deletes(Id(client, clock))
 
-    fun deletes(struct: AbstractStruct): Boolean = deletes(struct.id)
+    public fun deletes(struct: AbstractStruct): Boolean = deletes(struct.id)
 
     internal fun subdocEvent(): YSubdocEvent? {
         if (subdocsAdded.isEmpty() && subdocsRemoved.isEmpty() && subdocsLoaded.isEmpty()) return null
@@ -5282,8 +5325,8 @@ class YTransactionEvent internal constructor(
     }
 }
 
-typealias Transaction = YTransaction
-typealias TransactionEvent = YTransactionEvent
+public typealias Transaction = YTransaction
+public typealias TransactionEvent = YTransactionEvent
 
 private fun List<StoreItem>.toIdSet(): IdSet {
     val idSet = createIdSet()
@@ -5300,13 +5343,13 @@ private fun List<StoreItem>.logicalEventItemCount(): Int = fold(0L) { count, ite
     checkedClockAdd(count, increment, "transaction item count")
 }.toNonNegativeInt("transaction item count")
 
-data class YSubdocEvent(
+public data class YSubdocEvent(
     val added: List<YDoc> = emptyList(),
     val removed: List<YDoc> = emptyList(),
     val loaded: List<YDoc> = emptyList(),
 )
 
-data class YDocEvent(
+public data class YDocEvent(
     val name: String,
     val update: ByteArray = ByteArray(0),
     val origin: Any? = null,

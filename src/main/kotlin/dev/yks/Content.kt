@@ -1,39 +1,39 @@
 package dev.yks
 
-const val contentDeletedRefNumber: Int = 1
-const val contentJSONRefNumber: Int = 2
-const val contentBinaryRefNumber: Int = 3
-const val contentStringRefNumber: Int = 4
-const val contentEmbedRefNumber: Int = 5
-const val contentFormatRefNumber: Int = 6
-const val contentTypeRefNumber: Int = 7
-const val contentAnyRefNumber: Int = 8
-const val contentDocRefNumber: Int = 9
+public const val contentDeletedRefNumber: Int = 1
+public const val contentJSONRefNumber: Int = 2
+public const val contentBinaryRefNumber: Int = 3
+public const val contentStringRefNumber: Int = 4
+public const val contentEmbedRefNumber: Int = 5
+public const val contentFormatRefNumber: Int = 6
+public const val contentTypeRefNumber: Int = 7
+public const val contentAnyRefNumber: Int = 8
+public const val contentDocRefNumber: Int = 9
 
-abstract class AbstractContent {
-    abstract fun getLength(): Long
+public abstract class AbstractContent {
+    public abstract fun getLength(): Long
 
-    abstract fun getContent(): List<Any?>
+    public abstract fun getContent(): List<Any?>
 
-    abstract fun isCountable(): Boolean
+    public abstract fun isCountable(): Boolean
 
-    abstract fun copy(): AbstractContent
+    public abstract fun copy(): AbstractContent
 
-    open fun splice(offset: Long): AbstractContent {
+    public open fun splice(offset: Long): AbstractContent {
         error("content cannot be spliced")
     }
 
-    open fun mergeWith(right: AbstractContent): Boolean = false
+    public open fun mergeWith(right: AbstractContent): Boolean = false
 
-    abstract fun write(encoder: UpdateContentEncoder, offset: Long = 0, offsetEnd: Long = 0): UpdateContentEncoder
+    public abstract fun write(encoder: UpdateContentEncoder, offset: Long = 0, offsetEnd: Long = 0): UpdateContentEncoder
 
-    abstract fun getRef(): Int
+    public abstract fun getRef(): Int
 }
 
-class ContentAny(
+public class ContentAny(
     arr: List<Any?>,
 ) : AbstractContent() {
-    var arr: List<Any?> = arr.map(::copyContentValue)
+    public var arr: List<Any?> = arr.map(::copyContentValue)
         private set
 
     override fun getLength(): Long = arr.size.toLong()
@@ -73,12 +73,12 @@ class ContentAny(
     override fun toString(): String = "ContentAny(arr=$arr)"
 }
 
-class ContentBinary(
+public class ContentBinary(
     content: ByteArray,
 ) : AbstractContent() {
     private var bytes: ByteArray = content.copyOf()
 
-    val content: ByteArray get() = bytes.copyOf()
+    public val content: ByteArray get() = bytes.copyOf()
 
     override fun getLength(): Long = 1
 
@@ -105,8 +105,8 @@ class ContentBinary(
     override fun toString(): String = "ContentBinary(${bytes.size} bytes)"
 }
 
-class ContentDeleted(
-    var len: Long,
+public class ContentDeleted(
+    public var len: Long,
 ) : AbstractContent() {
     init {
         require(len >= 0) { "len must be non-negative" }
@@ -148,12 +148,12 @@ class ContentDeleted(
     override fun toString(): String = "ContentDeleted(len=$len)"
 }
 
-class ContentDoc(
-    val guid: String,
+public class ContentDoc(
+    public val guid: String,
     opts: Map<String, Any?> = emptyMap(),
 ) : AbstractContent() {
-    val opts: Map<String, Any?> = opts.mapValues { (_, value) -> copyContentValue(value) }
-    var doc: YDoc? = null
+    public val opts: Map<String, Any?> = opts.mapValues { (_, value) -> copyContentValue(value) }
+    public var doc: YDoc? = null
 
     override fun getLength(): Long = 1
 
@@ -182,7 +182,7 @@ class ContentDoc(
     override fun toString(): String = "ContentDoc(guid=$guid, opts=$opts)"
 }
 
-fun createContentDocFromDoc(doc: YDoc): ContentDoc {
+public fun createContentDocFromDoc(doc: YDoc): ContentDoc {
     val opts = linkedMapOf<String, Any?>()
     if (!doc.gc) opts["gc"] = false
     if (doc.autoLoad) opts["autoLoad"] = true
@@ -221,8 +221,8 @@ private fun Map<String, Any?>.booleanOption(key: String, default: Boolean = fals
 private fun Map<String, Any?>.stringOption(key: String): String? =
     this[key] as? String
 
-class ContentEmbed(
-    val embed: Any?,
+public class ContentEmbed(
+    public val embed: Any?,
 ) : AbstractContent() {
     override fun getLength(): Long = 1
 
@@ -249,9 +249,9 @@ class ContentEmbed(
     override fun toString(): String = "ContentEmbed(embed=$embed)"
 }
 
-class ContentFormat(
-    val key: String,
-    val value: Any?,
+public class ContentFormat(
+    public val key: String,
+    public val value: Any?,
 ) : AbstractContent() {
     override fun getLength(): Long = 1
 
@@ -280,7 +280,7 @@ class ContentFormat(
     override fun toString(): String = "ContentFormat(key=$key, value=$value)"
 }
 
-data class ContentTextFormatRange(
+public data class ContentTextFormatRange(
     val target: Id,
     val len: Long,
     val attributes: Map<String, YValue>,
@@ -325,10 +325,10 @@ data class ContentTextFormatRange(
     override fun getRef(): Int = contentFormatRefNumber
 }
 
-class ContentJSON(
+public class ContentJSON(
     arr: List<Any?>,
 ) : AbstractContent() {
-    var arr: List<Any?> = arr.map(::copyContentValue)
+    public var arr: List<Any?> = arr.map(::copyContentValue)
         private set
 
     override fun getLength(): Long = arr.size.toLong()
@@ -370,8 +370,8 @@ class ContentJSON(
     override fun toString(): String = "ContentJSON(arr=$arr)"
 }
 
-class ContentString(
-    var str: String,
+public class ContentString(
+    public var str: String,
 ) : AbstractContent() {
     override fun getLength(): Long = str.length.toLong()
 
@@ -413,8 +413,8 @@ class ContentString(
     override fun toString(): String = "ContentString(str=$str)"
 }
 
-class ContentType(
-    val type: AbstractYType,
+public class ContentType(
+    public val type: AbstractYType,
 ) : AbstractContent() {
     override fun getLength(): Long = 1
 
@@ -441,11 +441,11 @@ class ContentType(
     override fun toString(): String = "ContentType(type=${type.name})"
 }
 
-fun readContentType(decoder: UpdateContentDecoder): ContentType = ContentType(readYType(decoder))
+public fun readContentType(decoder: UpdateContentDecoder): ContentType = ContentType(readYType(decoder))
 
-fun readContentString(decoder: UpdateContentDecoder): ContentString = ContentString(decoder.readString())
+public fun readContentString(decoder: UpdateContentDecoder): ContentString = ContentString(decoder.readString())
 
-fun readContentJSON(decoder: UpdateContentDecoder): ContentJSON {
+public fun readContentJSON(decoder: UpdateContentDecoder): ContentJSON {
     val len = decoder.readLen().toDecodedCount()
     require(len >= 0) { "content JSON length must be non-negative" }
     return ContentJSON(List(len) {
@@ -456,26 +456,26 @@ fun readContentJSON(decoder: UpdateContentDecoder): ContentJSON {
     })
 }
 
-fun readContentFormat(decoder: UpdateContentDecoder): ContentFormat =
+public fun readContentFormat(decoder: UpdateContentDecoder): ContentFormat =
     ContentFormat(decoder.readKey(), decoder.readJSON())
 
-fun readContentEmbed(decoder: UpdateContentDecoder): ContentEmbed =
+public fun readContentEmbed(decoder: UpdateContentDecoder): ContentEmbed =
     ContentEmbed(decoder.readJSON())
 
-fun readContentDoc(decoder: UpdateContentDecoder): ContentDoc =
+public fun readContentDoc(decoder: UpdateContentDecoder): ContentDoc =
     ContentDoc(decoder.readString(), decoder.readAny().asContentDocOpts())
 
-fun readContentAny(decoder: UpdateContentDecoder): ContentAny {
+public fun readContentAny(decoder: UpdateContentDecoder): ContentAny {
     val len = decoder.readLen().toDecodedCount()
     require(len >= 0) { "content any length must be non-negative" }
     return ContentAny(List(len) { decoder.readAny() })
 }
 
-fun readContentBinary(decoder: UpdateContentDecoder): ContentBinary = ContentBinary(decoder.readBuf())
+public fun readContentBinary(decoder: UpdateContentDecoder): ContentBinary = ContentBinary(decoder.readBuf())
 
-fun readContentDeleted(decoder: UpdateContentDecoder): ContentDeleted = ContentDeleted(decoder.readLen())
+public fun readContentDeleted(decoder: UpdateContentDecoder): ContentDeleted = ContentDeleted(decoder.readLen())
 
-val contentRefs: List<(UpdateContentDecoder) -> AbstractContent> = listOf(
+public val contentRefs: List<(UpdateContentDecoder) -> AbstractContent> = listOf(
     { error("GC is not item content") },
     ::readContentDeleted,
     ::readContentJSON,
@@ -489,13 +489,13 @@ val contentRefs: List<(UpdateContentDecoder) -> AbstractContent> = listOf(
     { error("Skip is not item content") },
 )
 
-fun readItemContent(decoder: UpdateContentDecoder, info: Int): AbstractContent {
+public fun readItemContent(decoder: UpdateContentDecoder, info: Int): AbstractContent {
     val ref = info and 0x1f
     val reader = contentRefs.getOrNull(ref) ?: error("unknown item content ref: $ref")
     return reader(decoder)
 }
 
-fun readYType(decoder: UpdateContentDecoder, doc: YDoc = YDoc()): AbstractYType {
+public fun readYType(decoder: UpdateContentDecoder, doc: YDoc = YDoc()): AbstractYType {
     return when (val typeRef = decoder.readTypeRef()) {
         YArrayRefID -> doc.createArray()
         YMapRefID -> doc.createMap()
@@ -514,7 +514,7 @@ fun readYType(decoder: UpdateContentDecoder, doc: YDoc = YDoc()): AbstractYType 
     }
 }
 
-fun writeYType(encoder: UpdateContentEncoder, type: AbstractYType): UpdateContentEncoder {
+public fun writeYType(encoder: UpdateContentEncoder, type: AbstractYType): UpdateContentEncoder {
     encoder.writeTypeRef(type.typeRef)
     when (type) {
         is YXmlElementType -> encoder.writeKey(type.nodeName)
@@ -524,7 +524,7 @@ fun writeYType(encoder: UpdateContentEncoder, type: AbstractYType): UpdateConten
     return encoder
 }
 
-fun writeItemContent(
+public fun writeItemContent(
     encoder: UpdateContentEncoder,
     content: AbstractContent,
     offset: Long = 0,

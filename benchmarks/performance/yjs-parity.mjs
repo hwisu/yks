@@ -17,6 +17,7 @@ const arrayFixturePath = path.join(outputDirectory, 'array-5000-v1.bin')
 const fragmentedFixturePath = path.join(outputDirectory, 'fragmented-text-5000-v1.bin')
 const concurrentFixturePath = path.join(outputDirectory, 'concurrent-text-1000-v1.bin')
 const incrementalFixturePath = path.join(outputDirectory, 'incremental-text-1000-v1.txt')
+const incrementalV2FixturePath = path.join(outputDirectory, 'incremental-text-1000-v2.txt')
 // The JVM tiered compiler needs more whole-workload invocations than V8 for the fragmented-edit
 // path. Fifty keeps the process-to-process parity gate stable; JMH remains the authoritative
 // steady-state CPU/allocation measurement.
@@ -112,15 +113,22 @@ const incrementalFixtureDoc = new Y.Doc({ gc: false })
 incrementalFixtureDoc.clientID = 8
 const incrementalFixtureText = incrementalFixtureDoc.getText('body')
 const incrementalUpdates = []
+const incrementalV2Updates = []
 incrementalFixtureDoc.on('update', update => {
   incrementalUpdates.push(Buffer.from(update).toString('base64'))
+})
+incrementalFixtureDoc.on('updateV2', update => {
+  incrementalV2Updates.push(Buffer.from(update).toString('base64'))
 })
 for (let index = 0; index < 1_000; index += 1) {
   incrementalFixtureText.insert(incrementalFixtureText.length, 'x')
 }
 assert.equal(incrementalUpdates.length, 1_000)
+assert.equal(incrementalV2Updates.length, 1_000)
 fs.writeFileSync(incrementalFixturePath, `${incrementalUpdates.join('\n')}\n`)
+fs.writeFileSync(incrementalV2FixturePath, `${incrementalV2Updates.join('\n')}\n`)
 const decodedIncrementalUpdates = incrementalUpdates.map(update => Buffer.from(update, 'base64'))
+const decodedIncrementalV2Updates = incrementalV2Updates.map(update => Buffer.from(update, 'base64'))
 
 let sink = 0
 function benchmark(scenario, repeatCount) {
@@ -247,6 +255,21 @@ const observedMap = observedMapDoc.getMap('map')
 let observedMapEvents = 0
 observedMap.observe(() => { observedMapEvents += 1 })
 let observedMapIndex = 0
+
+const relativePositionDoc = new Y.Doc({ gc: false })
+const relativePositionText = relativePositionDoc.getText('body')
+relativePositionText.insert(0, 'x'.repeat(5_000))
+const relativePositions = Array.from({ length: 1_000 }, (_, index) =>
+  Y.createRelativePositionFromTypeIndex(relativePositionText, index * 5, index % 2 === 0 ? -1 : 0))
+
+let undoRedoState
+function prepareUndoRedo() {
+  const doc = new Y.Doc({ gc: false })
+  const text = doc.getText('body')
+  const manager = new Y.UndoManager(text, { captureTimeout: 0 })
+  for (let index = 0; index < 1_000; index += 1) text.insert(text.length, 'x')
+  undoRedoState = { text, manager }
+}
 
 const yjsScenarios = {
   apply_5000_structs: () => {
@@ -459,6 +482,47 @@ const yjsScenarios = {
     }
     return wideDeepEvents + wideDeepValue
   },
+  xml_build_render_500: () => {
+    const doc = new Y.Doc({ gc: false })
+    const fragment = doc.getXmlFragment('xml')
+    doc.transact(() => {
+      for (let index = 0; index < 500; index += 1) {
+        const element = new Y.XmlElement('p')
+        fragment.push([element])
+        element.setAttribute('data-index', String(index))
+        const text = new Y.XmlText()
+        element.push([text])
+        text.insert(0, `content-${index}`)
+      }
+    })
+    return fragment.toString().length
+  },
+  relative_position_resolve_10000: () => {
+    let sum = 0
+    for (let index = 0; index < 10_000; index += 1) {
+      const absolute = Y.createAbsolutePositionFromRelativePosition(
+        relativePositions[index % relativePositions.length],
+        relativePositionDoc,
+      )
+      assert.ok(absolute)
+      sum += absolute.index
+    }
+    return sum
+  },
+  v2_merge_diff_1000: () => {
+    const merged = Y.mergeUpdatesV2(decodedIncrementalV2Updates)
+    const stateVector = Y.encodeStateVectorFromUpdateV2(merged)
+    const diff = Y.diffUpdateV2(merged, stateVector)
+    return merged.length + stateVector.length + diff.length
+  },
+  undo_redo_1000: {
+    prepare: prepareUndoRedo,
+    operation: () => {
+      for (let index = 0; index < 1_000; index += 1) assert.ok(undoRedoState.manager.undo())
+      for (let index = 0; index < 1_000; index += 1) assert.ok(undoRedoState.manager.redo())
+      return undoRedoState.text.length
+    },
+  },
 }
 
 // Each measured sample should be long enough that process/runtime timer noise cannot hide a large
@@ -499,18 +563,34 @@ const repeatCounts = {
   local_format_first_char_on_50000: 512,
   unrelated_observer_edit_on_50000: 2_048,
   deep_first_child_edit_10_on_10000: 128,
+  xml_build_render_500: 4,
+  relative_position_resolve_10000: 16,
+  v2_merge_diff_1000: 1,
+  undo_redo_1000: 2,
 }
 assert.deepEqual(
   Object.keys(repeatCounts).sort(),
   Object.keys(yjsScenarios).sort(),
   'every performance scenario must have an explicit noise-amplifying repeat count',
 )
-const selectedYjsScenarios = selectedScenarioNames.includes('all')
-  ? yjsScenarios
-  : Object.fromEntries(selectedScenarioNames.map(name => {
+const knownEngineGapScenarios = new Set(['xml_build_render_500', 'undo_redo_1000'])
+const advancedScenarioNames = new Set([
+  'xml_build_render_500',
+  'relative_position_resolve_10000',
+  'v2_merge_diff_1000',
+  'undo_redo_1000',
+])
+const resolvedScenarioNames = selectedScenarioNames.includes('advanced')
+  ? [...advancedScenarioNames]
+  : selectedScenarioNames.includes('all')
+    ? Object.keys(yjsScenarios).filter(name => !knownEngineGapScenarios.has(name))
+    : selectedScenarioNames
+const selectedYjsScenarios = Object.fromEntries(
+  resolvedScenarioNames.map(name => {
       assert.ok(yjsScenarios[name], `unknown performance scenario: ${name}`)
       return [name, yjsScenarios[name]]
-    }))
+    }),
+)
 
 const yjsResults = Object.fromEntries(
   Object.entries(selectedYjsScenarios).map(([name, operation]) => [
@@ -531,7 +611,7 @@ const gradle = spawnSync(
     `-PperformanceFixture=${fixturePath}`,
     `-PperformanceWarmup=${warmupIterations}`,
     `-PperformanceSamples=${sampleIterations}`,
-    `-PperformanceScenarios=${selectedScenarioNames.join(',')}`,
+    `-PperformanceScenarios=${resolvedScenarioNames.join(',')}`,
     `-PperformanceRepeatCounts=${encodedRepeatCounts}`,
   ],
   { cwd: projectDirectory, encoding: 'utf8', env: process.env },

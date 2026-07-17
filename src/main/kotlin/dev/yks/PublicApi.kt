@@ -1,38 +1,38 @@
 package dev.yks
 
-typealias Doc = YDoc
-typealias AbstractType = AbstractYType
-typealias Type = AbstractYType
-typealias YType = AbstractYType
-typealias Text = YText
-typealias XmlElement = YXmlElementType
-typealias XmlText = YXmlTextType
-typealias XmlFragment = YXmlFragment
-typealias XmlHook = YXmlHook
+public typealias Doc = YDoc
+public typealias AbstractType = AbstractYType
+public typealias Type = AbstractYType
+public typealias YType = AbstractYType
+public typealias Text = YText
+public typealias XmlElement = YXmlElementType
+public typealias XmlText = YXmlTextType
+public typealias XmlFragment = YXmlFragment
+public typealias XmlHook = YXmlHook
 
-fun generateNewClientId(): Long = YDoc.generateNewClientId()
+public fun generateNewClientId(): Long = YDoc.generateNewClientId()
 
-fun <T> transact(doc: YDoc, origin: Any? = null, local: Boolean = true, block: () -> T): T =
+public fun <T> transact(doc: YDoc, origin: Any? = null, local: Boolean = true, block: () -> T): T =
     doc.transact(origin = origin, local = local, block = block)
 
-fun <T> transact(doc: YDoc, block: (YTransaction) -> T, origin: Any? = null, local: Boolean = true): T =
+public fun <T> transact(doc: YDoc, block: (YTransaction) -> T, origin: Any? = null, local: Boolean = true): T =
     doc.transact(block = block, origin = origin, local = local)
 
-fun addChangedTypeToTransaction(transaction: YTransaction, type: AbstractYType, parentSub: String? = null) {
+public fun addChangedTypeToTransaction(transaction: YTransaction, type: AbstractYType, parentSub: String? = null) {
     transaction.addChangedType(type, parentSub)
 }
 
-fun deleteText(type: YText, index: Int, length: Int = 1, origin: Any? = null) {
+public fun deleteText(type: YText, index: Int, length: Int = 1, origin: Any? = null) {
     type.deleteText(index, length, origin)
 }
 
-fun getPathTo(
+public fun getPathTo(
     parent: AbstractYType,
     child: AbstractYType,
     renderer: AbstractRenderer = baseRenderer,
 ): List<Any> = parent.getPathTo(child, renderer)
 
-data class YTypeChild(
+public data class YTypeChild(
     val id: Id,
     val origin: Id?,
     val rightOrigin: Id?,
@@ -43,10 +43,10 @@ data class YTypeChild(
     val length: Long,
 )
 
-fun getTypeChildren(type: AbstractYType): List<ItemStruct> =
+public fun getTypeChildren(type: AbstractYType): List<ItemStruct> =
     type.doc.typeChildren(type).map { item -> item.toItemStruct(type.doc) }
 
-fun getTypeChildSummaries(type: AbstractYType): List<YTypeChild> =
+public fun getTypeChildSummaries(type: AbstractYType): List<YTypeChild> =
     type.doc.typeChildren(type).map { item ->
         YTypeChild(
             id = item.id,
@@ -60,9 +60,9 @@ fun getTypeChildSummaries(type: AbstractYType): List<YTypeChild> =
         )
     }
 
-fun getTypeChildTypes(type: AbstractYType): List<AbstractYType> = type.doc.directNestedChildTypes(type)
+public fun getTypeChildTypes(type: AbstractYType): List<AbstractYType> = type.doc.directNestedChildTypes(type)
 
-fun logType(type: AbstractYType): String {
+public fun logType(type: AbstractYType): String {
     val children = type.doc.typeChildren(type)
     val childSummary = children.joinToString(
         prefix = "Children[",
@@ -80,12 +80,12 @@ fun logType(type: AbstractYType): String {
     return "$childSummary\n$contentSummary"
 }
 
-fun isParentOf(parent: AbstractYType, child: AbstractYType): Boolean {
+public fun isParentOf(parent: AbstractYType, child: AbstractYType): Boolean {
     require(parent.doc === child.doc) { "types must belong to the same document" }
     return parent.doc.pathBetween(parent.name, child.name) != null
 }
 
-fun isParentOf(parent: AbstractYType, child: Item?): Boolean {
+public fun isParentOf(parent: AbstractYType, child: Item?): Boolean {
     var current = child
     while (current != null) {
         if (current.parent == parent.name) return true
@@ -96,7 +96,7 @@ fun isParentOf(parent: AbstractYType, child: Item?): Boolean {
     return false
 }
 
-fun computeModifiedFromItems(doc: YDoc, items: IdSet): Map<AbstractYType, Set<String?>> {
+public fun computeModifiedFromItems(doc: YDoc, items: IdSet): Map<AbstractYType, Set<String?>> {
     val modified = linkedMapOf<AbstractYType, MutableSet<String?>>()
     iterateStructsByIdSetWithoutSplits(doc.store, items) { struct, _, _ ->
         var item: ItemStruct? = struct
@@ -112,13 +112,13 @@ fun computeModifiedFromItems(doc: YDoc, items: IdSet): Map<AbstractYType, Set<St
     return modified.mapValues { (_, changes) -> changes.toSet() }
 }
 
-fun typeMapGetSnapshot(parent: YMap, key: String, snapshot: Snapshot): Any? =
+public fun typeMapGetSnapshot(parent: YMap, key: String, snapshot: Snapshot): Any? =
     parent.doc.mapValueAtSnapshot(parent, key, snapshot)?.let(parent.doc::valueToAny)
 
-fun typeMapGetAllSnapshot(parent: YMap, snapshot: Snapshot): Map<String, Any?> =
+public fun typeMapGetAllSnapshot(parent: YMap, snapshot: Snapshot): Map<String, Any?> =
     parent.doc.mapAtSnapshot(parent, snapshot).mapValues { (_, value) -> parent.doc.valueToAny(value) }
 
-fun typeListToArraySnapshot(parent: AbstractYType, snapshot: Snapshot): List<Any?> = when (parent) {
+public fun typeListToArraySnapshot(parent: AbstractYType, snapshot: Snapshot): List<Any?> = when (parent) {
     is YUnopenedRoot -> error("an unopened root has no concrete list type")
     is YArray -> parent.doc.arrayAtSnapshot(parent, snapshot)
     is YXmlTextType -> parent.doc.textArrayAtSnapshot(parent, snapshot)
@@ -131,34 +131,34 @@ fun typeListToArraySnapshot(parent: AbstractYType, snapshot: Snapshot): List<Any
     is YMap -> error("map-backed shared types do not have list content")
 }
 
-fun typeArrayToArraySnapshot(parent: YArray, snapshot: Snapshot): List<Any?> =
+public fun typeArrayToArraySnapshot(parent: YArray, snapshot: Snapshot): List<Any?> =
     typeListToArraySnapshot(parent, snapshot)
 
-fun typeTextToDeltaSnapshot(parent: YText, snapshot: Snapshot): YTextDelta =
+public fun typeTextToDeltaSnapshot(parent: YText, snapshot: Snapshot): YTextDelta =
     parent.doc.textDeltaAtSnapshot(parent, snapshot)
 
-fun typeTextToStringSnapshot(parent: YText, snapshot: Snapshot): String =
+public fun typeTextToStringSnapshot(parent: YText, snapshot: Snapshot): String =
     parent.doc.textStringAtSnapshot(parent, snapshot)
 
-fun typeTextToArraySnapshot(parent: YText, snapshot: Snapshot): List<Any?> =
+public fun typeTextToArraySnapshot(parent: YText, snapshot: Snapshot): List<Any?> =
     parent.doc.textArrayAtSnapshot(parent, snapshot)
 
-fun typeXmlFragmentToJsonSnapshot(parent: YXmlFragment, snapshot: Snapshot): List<Any?> =
+public fun typeXmlFragmentToJsonSnapshot(parent: YXmlFragment, snapshot: Snapshot): List<Any?> =
     parent.doc.xmlFragmentAtSnapshot(parent, snapshot)
 
-fun typeXmlFragmentToArraySnapshot(parent: YXmlFragment, snapshot: Snapshot): List<Any?> =
+public fun typeXmlFragmentToArraySnapshot(parent: YXmlFragment, snapshot: Snapshot): List<Any?> =
     parent.doc.xmlFragmentArrayAtSnapshot(parent, snapshot)
 
-fun typeXmlFragmentToStringSnapshot(
+public fun typeXmlFragmentToStringSnapshot(
     parent: YXmlFragment,
     snapshot: Snapshot,
     forceTag: Boolean = false,
 ): String = parent.doc.xmlFragmentStringAtSnapshot(parent, snapshot, forceTag = forceTag)
 
-fun typeXmlFragmentToDeltaSnapshot(parent: YXmlFragment, snapshot: Snapshot): List<YArrayDeltaOp> =
+public fun typeXmlFragmentToDeltaSnapshot(parent: YXmlFragment, snapshot: Snapshot): List<YArrayDeltaOp> =
     parent.doc.xmlFragmentDeltaAtSnapshot(parent, snapshot)
 
-fun cleanupYTextFormatting(type: YText): Int {
+public fun cleanupYTextFormatting(type: YText): Int {
     if (!type.doc.cleanupFormatting) return 0
     var cleaned = 0
     type.doc.transact {
@@ -243,26 +243,26 @@ private fun MutableMap<String, YValue>.applyNativeTextFormat(marker: ItemContent
     if (marker.value == YValue.Null) remove(marker.key) else this[marker.key] = marker.value
 }
 
-fun cleanupYTextAfterTransaction(transaction: YTransaction): Int =
+public fun cleanupYTextAfterTransaction(transaction: YTransaction): Int =
     transaction.changedTypes.filterIsInstance<YText>().sumOf(::cleanupYTextFormatting)
 
-fun cleanupYTextAfterTransaction(transaction: YTransactionEvent): Int =
+public fun cleanupYTextAfterTransaction(transaction: YTransactionEvent): Int =
     transaction.changedTypes.filterIsInstance<YText>().sumOf(::cleanupYTextFormatting)
 
-fun cleanupContextlessFormattingGap(transaction: YTransaction, item: Item?): Int =
+public fun cleanupContextlessFormattingGap(transaction: YTransaction, item: Item?): Int =
     cleanupContextlessFormattingGap(transaction.doc, item)
 
-fun cleanupContextlessFormattingGap(transaction: YTransactionEvent, item: Item?): Int =
+public fun cleanupContextlessFormattingGap(transaction: YTransactionEvent, item: Item?): Int =
     cleanupContextlessFormattingGap(transaction.doc, item)
 
 @Suppress("UNUSED_PARAMETER")
-fun cleanupContextlessFormattingGap(doc: YDoc, item: Item?): Int {
+public fun cleanupContextlessFormattingGap(doc: YDoc, item: Item?): Int {
     if (!doc.cleanupFormatting) return 0
     val type = item?.parent?.let(doc::typeForParent) as? YText ?: return 0
     return cleanupYTextFormatting(type)
 }
 
-fun cleanupFormattingGap(
+public fun cleanupFormattingGap(
     transaction: YTransaction,
     start: Item?,
     curr: Item?,
@@ -270,7 +270,7 @@ fun cleanupFormattingGap(
     currFormats: MutableMap<String, Any?>,
 ): Int = cleanupFormattingGap(transaction.doc, start, curr, startFormats, currFormats)
 
-fun cleanupFormattingGap(
+public fun cleanupFormattingGap(
     transaction: YTransactionEvent,
     start: Item?,
     curr: Item?,
@@ -279,7 +279,7 @@ fun cleanupFormattingGap(
 ): Int = cleanupFormattingGap(transaction.doc, start, curr, startFormats, currFormats)
 
 @Suppress("UNUSED_PARAMETER")
-fun cleanupFormattingGap(
+public fun cleanupFormattingGap(
     doc: YDoc,
     start: Item?,
     curr: Item?,
@@ -293,12 +293,12 @@ fun cleanupFormattingGap(
     return cleanupYTextFormatting(type)
 }
 
-fun findRootTypeKey(type: AbstractYType): String {
+public fun findRootTypeKey(type: AbstractYType): String {
     check(type.name in type.doc.rootNames()) { "type is not a root type" }
     return type.name
 }
 
-fun findTypeInOtherDoc(type: AbstractYType, otherDoc: YDoc): AbstractYType {
+public fun findTypeInOtherDoc(type: AbstractYType, otherDoc: YDoc): AbstractYType {
     if (type.name in type.doc.rootNames()) {
         val rootKey = findRootTypeKey(type)
         otherDoc.rootType(rootKey)?.let { return it }

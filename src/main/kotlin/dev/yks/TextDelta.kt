@@ -1,6 +1,6 @@
 package dev.yks
 
-data class YTextDeltaOp(
+public data class YTextDeltaOp(
     val insert: Any? = null,
     val retain: Int? = null,
     val delete: Int? = null,
@@ -15,12 +15,12 @@ data class YTextDeltaOp(
     }
 }
 
-class YTextDelta(ops: List<YTextDeltaOp> = emptyList()) {
+public class YTextDelta(ops: List<YTextDeltaOp> = emptyList()) {
     private val mutableOps = ops.toMutableList()
 
-    val ops: List<YTextDeltaOp> get() = mutableOps.toList()
+    public val ops: List<YTextDeltaOp> get() = mutableOps.toList()
 
-    fun insert(text: String, attributes: Map<String, Any?> = emptyMap()): YTextDelta {
+    public fun insert(text: String, attributes: Map<String, Any?> = emptyMap()): YTextDelta {
         if (text.isNotEmpty()) {
             append(YTextDeltaOp(insert = text, attributes = normalizePublicAttributes(attributes)))
         }
@@ -35,7 +35,7 @@ class YTextDelta(ops: List<YTextDeltaOp> = emptyList()) {
         return this
     }
 
-    fun insert(values: List<Any?>, attributes: Map<String, Any?> = emptyMap()): YTextDelta {
+    public fun insert(values: List<Any?>, attributes: Map<String, Any?> = emptyMap()): YTextDelta {
         if (values.isEmpty()) return this
         val normalized = normalizePublicAttributes(attributes)
         values.forEach { value ->
@@ -49,20 +49,20 @@ class YTextDelta(ops: List<YTextDeltaOp> = emptyList()) {
         return this
     }
 
-    fun insertEmbed(embed: Any?, attributes: Map<String, Any?> = emptyMap()): YTextDelta {
+    public fun insertEmbed(embed: Any?, attributes: Map<String, Any?> = emptyMap()): YTextDelta {
         require(embed != null) { "embed must not be null" }
         append(YTextDeltaOp(insert = embed, attributes = normalizePublicAttributes(attributes)))
         return this
     }
 
-    fun retain(length: Int, attributes: Map<String, Any?> = emptyMap()): YTextDelta {
+    public fun retain(length: Int, attributes: Map<String, Any?> = emptyMap()): YTextDelta {
         if (length > 0) {
             append(YTextDeltaOp(retain = length, attributes = normalizeRetainAttributes(attributes)))
         }
         return this
     }
 
-    fun delete(length: Int): YTextDelta {
+    public fun delete(length: Int): YTextDelta {
         if (length > 0) {
             append(YTextDeltaOp(delete = length))
         }
@@ -97,7 +97,7 @@ class YTextDelta(ops: List<YTextDeltaOp> = emptyList()) {
     override fun toString(): String = "YTextDelta($ops)"
 }
 
-fun yTextDelta(): YTextDelta = YTextDelta()
+public fun yTextDelta(): YTextDelta = YTextDelta()
 
 internal fun normalizeTextAttributes(attributes: Map<String, Any?>): Map<String, YValue> =
     attributes

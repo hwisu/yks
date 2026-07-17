@@ -1,42 +1,42 @@
 package dev.yks
 
-interface UpdateContentEncoder {
-    fun writeString(value: String)
+public interface UpdateContentEncoder {
+    public fun writeString(value: String)
 
-    fun writeTypeRef(info: Int)
+    public fun writeTypeRef(info: Int)
 
-    fun writeLen(len: Long)
+    public fun writeLen(len: Long)
 
-    fun writeAny(value: Any?)
+    public fun writeAny(value: Any?)
 
-    fun writeBuf(value: ByteArray)
+    public fun writeBuf(value: ByteArray)
 
-    fun writeJSON(value: Any?)
+    public fun writeJSON(value: Any?)
 
-    fun writeKey(key: String)
+    public fun writeKey(key: String)
 }
 
-open class IdSetEncoderV1(
-    val restEncoder: BinaryEncoder = BinaryEncoder(),
+public open class IdSetEncoderV1(
+    public val restEncoder: BinaryEncoder = BinaryEncoder(),
 ) {
-    open fun toByteArray(): ByteArray = restEncoder.toByteArray()
+    public open fun toByteArray(): ByteArray = restEncoder.toByteArray()
 
-    open fun toUint8Array(): ByteArray = toByteArray()
+    public open fun toUint8Array(): ByteArray = toByteArray()
 
-    open fun resetIdSetCurVal() {
+    public open fun resetIdSetCurVal() {
         // V1 stores absolute clocks.
     }
 
-    open fun writeIdSetClock(clock: Long) {
+    public open fun writeIdSetClock(clock: Long) {
         restEncoder.writeVarUInt(clock)
     }
 
-    open fun writeIdSetLen(len: Long) {
+    public open fun writeIdSetLen(len: Long) {
         restEncoder.writeVarUInt(len)
     }
 }
 
-open class IdSetEncoderV2(
+public open class IdSetEncoderV2(
     restEncoder: BinaryEncoder = BinaryEncoder(),
 ) : IdSetEncoderV1(restEncoder) {
     private var dsCurrVal: Long = 0
@@ -58,22 +58,22 @@ open class IdSetEncoderV2(
     }
 }
 
-open class UpdateEncoderV1(
+public open class UpdateEncoderV1(
     restEncoder: BinaryEncoder = BinaryEncoder(),
 ) : IdSetEncoderV1(restEncoder), UpdateContentEncoder {
-    fun writeLeftID(id: Id) {
+    public fun writeLeftID(id: Id) {
         writeId(id)
     }
 
-    fun writeRightID(id: Id) {
+    public fun writeRightID(id: Id) {
         writeId(id)
     }
 
-    fun writeClient(client: Long) {
+    public fun writeClient(client: Long) {
         restEncoder.writeVarUInt(client)
     }
 
-    fun writeInfo(info: Int) {
+    public fun writeInfo(info: Int) {
         require(info in 0..255) { "info must be an unsigned byte" }
         restEncoder.writeByte(info)
     }
@@ -82,7 +82,7 @@ open class UpdateEncoderV1(
         restEncoder.writeString(value)
     }
 
-    fun writeParentInfo(isYKey: Boolean) {
+    public fun writeParentInfo(isYKey: Boolean) {
         restEncoder.writeVarUInt(if (isYKey) 1 else 0)
     }
 
@@ -117,7 +117,7 @@ open class UpdateEncoderV1(
     }
 }
 
-open class UpdateEncoderV2(
+public open class UpdateEncoderV2(
     restEncoder: BinaryEncoder = BinaryEncoder(),
 ) : IdSetEncoderV2(restEncoder), UpdateContentEncoder {
     private val keyClocks = Lib0IntDiffOptRleEncoder()
@@ -161,24 +161,24 @@ open class UpdateEncoderV2(
 
     override fun toUint8Array(): ByteArray = toByteArray()
 
-    fun writeLeftID(id: Id) {
+    public fun writeLeftID(id: Id) {
         hasOptimizedContent = true
         clients.write(id.client)
         leftClocks.write(id.clock)
     }
 
-    fun writeRightID(id: Id) {
+    public fun writeRightID(id: Id) {
         hasOptimizedContent = true
         clients.write(id.client)
         rightClocks.write(id.clock)
     }
 
-    fun writeClient(client: Long) {
+    public fun writeClient(client: Long) {
         hasOptimizedContent = true
         clients.write(client)
     }
 
-    fun writeInfo(info: Int) {
+    public fun writeInfo(info: Int) {
         require(info in 0..255) { "info must be an unsigned byte" }
         hasOptimizedContent = true
         infos.write(info)
@@ -189,7 +189,7 @@ open class UpdateEncoderV2(
         strings.write(value)
     }
 
-    fun writeParentInfo(isYKey: Boolean) {
+    public fun writeParentInfo(isYKey: Boolean) {
         hasOptimizedContent = true
         parentInfos.write(if (isYKey) 1 else 0)
     }

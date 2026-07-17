@@ -11,8 +11,8 @@ internal const val YJS_MAX_SAFE_INTEGER: Long = 9_007_199_254_740_991L
  * genuine Yjs update. Call the corresponding `*Lossless` API when the private YKS envelope is
  * an acceptable transport.
  */
-class UnsupportedYjsStandardUpdateException internal constructor(
-    val format: String,
+public class UnsupportedYjsStandardUpdateException internal constructor(
+    public val format: String,
     detail: String = "update cannot be represented as a genuine Yjs $format update",
 ) : IllegalArgumentException(
     "$detail; use the corresponding *Lossless API",

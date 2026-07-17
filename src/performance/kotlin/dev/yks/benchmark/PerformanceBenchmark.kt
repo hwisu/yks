@@ -4,6 +4,13 @@ import dev.yks.YDoc
 import dev.yks.YDocOptions
 import dev.yks.YDocRuntimeOptions
 import dev.yks.YThreadAccessPolicy
+import dev.yks.UndoManager
+import dev.yks.UndoManagerOptions
+import dev.yks.createAbsolutePositionFromRelativePosition
+import dev.yks.createRelativePositionFromTypeIndex
+import dev.yks.diffUpdateV2
+import dev.yks.encodeStateVectorFromUpdateV2
+import dev.yks.mergeUpdatesV2
 import dev.yks.snapshot
 import java.nio.file.Files
 import java.nio.file.Path
@@ -86,6 +93,9 @@ fun main(args: Array<String>) {
     val fragmentedFixture = fixture("fragmented-text-5000-v1.bin")
     val concurrentFixture = fixture("concurrent-text-1000-v1.bin")
     val incrementalFixtures = Files.readAllLines(fixtureDirectory.resolve("incremental-text-1000-v1.txt"))
+        .filter(String::isNotBlank)
+        .map(Base64.getDecoder()::decode)
+    val incrementalV2Fixtures = Files.readAllLines(fixtureDirectory.resolve("incremental-text-1000-v2.txt"))
         .filter(String::isNotBlank)
         .map(Base64.getDecoder()::decode)
     val warmupIterations = args[1].toInt()
@@ -174,6 +184,8 @@ fun main(args: Array<String>) {
     var nestedDeleteDoc: YDoc? = null
     data class ObservedFragmentedState(val text: dev.yks.YText, val observed: () -> Long)
     var observedFragmentedState: ObservedFragmentedState? = null
+    data class UndoRedoState(val text: dev.yks.YText, val manager: UndoManager)
+    var undoRedoState: UndoRedoState? = null
     val scenarioPreparations = mapOf<String, () -> Unit>(
         "nested_delete_3000" to {
             nestedDeleteDoc = YDoc(clientId = 31, gc = false).also { doc -> doc.applyUpdate(nestedFixture) }
@@ -185,6 +197,13 @@ fun main(args: Array<String>) {
             doc.observeAfterTransactions { observed++ }
             observedFragmentedState = ObservedFragmentedState(doc.getText("body")) { observed }
         },
+        "undo_redo_1000" to {
+            val doc = YDoc(clientId = 49, gc = false)
+            val text = doc.getText("body")
+            val manager = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+            repeat(1_000) { text.insert(text.length, "x") }
+            undoRedoState = UndoRedoState(text, manager)
+        },
     )
     val observedMapDoc = YDoc(clientId = 42, gc = false)
     observedMapDoc.applyUpdate(mapFixture)
@@ -192,6 +211,13 @@ fun main(args: Array<String>) {
     val observedMap = observedMapDoc.getMap("map")
     observedMap.observe { observedMapEvents++ }
     var observedMapIndex = 0
+
+    val relativePositionDoc = YDoc(clientId = 48, gc = false)
+    val relativePositionText = relativePositionDoc.getText("body")
+    relativePositionText.insert(0, "x".repeat(5_000))
+    val relativePositions = List(1_000) { index ->
+        createRelativePositionFromTypeIndex(relativePositionText, index * 5, if (index % 2 == 0) -1 else 0)
+    }
 
     val scenarios = linkedMapOf<String, () -> Long>(
         "apply_5000_structs" to {
@@ -402,6 +428,46 @@ fun main(args: Array<String>) {
                 wideDeepChildren[0].set("value", wideDeepValue)
             }
             wideDeepEvents + wideDeepValue
+        },
+        "xml_build_render_500" to {
+            val doc = YDoc(clientId = 50, gc = false)
+            val fragment = doc.getXmlFragment("xml")
+            doc.transact {
+                repeat(500) { index ->
+                    val element = doc.createXmlElement("p")
+                    fragment.push(element)
+                    element.setAttr("data-index", index.toString())
+                    val text = doc.createXmlText()
+                    element.push(text)
+                    text.insert(0, "content-$index")
+                }
+            }
+            fragment.toString().length.toLong()
+        },
+        "relative_position_resolve_10000" to {
+            var sum = 0L
+            repeat(10_000) { index ->
+                val absolute = checkNotNull(
+                    createAbsolutePositionFromRelativePosition(
+                        relativePositions[index % relativePositions.size],
+                        relativePositionDoc,
+                    ),
+                )
+                sum += absolute.index
+            }
+            sum
+        },
+        "v2_merge_diff_1000" to {
+            val merged = mergeUpdatesV2(incrementalV2Fixtures)
+            val stateVector = encodeStateVectorFromUpdateV2(merged)
+            val diff = diffUpdateV2(merged, stateVector)
+            (merged.size + stateVector.size + diff.size).toLong()
+        },
+        "undo_redo_1000" to {
+            val state = checkNotNull(undoRedoState)
+            repeat(1_000) { checkNotNull(state.manager.undo()) }
+            repeat(1_000) { checkNotNull(state.manager.redo()) }
+            state.text.length.toLong()
         },
     )
 

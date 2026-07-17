@@ -1,38 +1,38 @@
 package dev.yks
 
-sealed interface YDeepDelta {
-    val attrs: Map<String, Any?>
+public sealed interface YDeepDelta {
+    public val attrs: Map<String, Any?>
 }
 
-data class YAttributeDelta(
+public data class YAttributeDelta(
     val value: Any?,
     val attributes: Map<String, Any?> = emptyMap(),
 )
 
-data class YDocDeepDelta(
+public data class YDocDeepDelta(
     val roots: Map<String, YDeepDelta> = emptyMap(),
 )
 
-data class YArrayDeepDelta(
+public data class YArrayDeepDelta(
     override val attrs: Map<String, Any?> = emptyMap(),
     val delta: List<YArrayDeltaOp> = emptyList(),
 ) : YDeepDelta
 
-data class YTextDeepDelta(
+public data class YTextDeepDelta(
     override val attrs: Map<String, Any?> = emptyMap(),
     val delta: YTextDelta = YTextDelta(),
 ) : YDeepDelta
 
-data class YMapDeepDelta(
+public data class YMapDeepDelta(
     override val attrs: Map<String, Any?> = emptyMap(),
 ) : YDeepDelta
 
-data class YXmlFragmentDeepDelta(
+public data class YXmlFragmentDeepDelta(
     override val attrs: Map<String, Any?> = emptyMap(),
     val delta: List<YArrayDeltaOp> = emptyList(),
 ) : YDeepDelta
 
-data class YXmlElementDeepDelta(
+public data class YXmlElementDeepDelta(
     val nodeName: String,
     override val attrs: Map<String, Any?> = emptyMap(),
     val children: List<Any?> = emptyList(),
@@ -55,7 +55,7 @@ internal data class DeepDeltaRenderOptions(
     val modified: Map<AbstractYType, Set<String?>>? = null,
 )
 
-fun YDoc.toDeltaDeep(renderer: AbstractRenderer = baseRenderer): YDocDeepDelta =
+public fun YDoc.toDeltaDeep(renderer: AbstractRenderer = baseRenderer): YDocDeepDelta =
     YDocDeepDelta(
         roots = rootNames().mapNotNull { name ->
             val type = rootType(name) ?: return@mapNotNull null
@@ -63,7 +63,7 @@ fun YDoc.toDeltaDeep(renderer: AbstractRenderer = baseRenderer): YDocDeepDelta =
         }.toMap().toSortedMap(),
     )
 
-fun YDoc.applyDeltaDeep(delta: YDocDeepDelta, origin: Any? = null) {
+public fun YDoc.applyDeltaDeep(delta: YDocDeepDelta, origin: Any? = null) {
     transact(origin = origin) {
         delta.roots.toSortedMap().forEach { (name, rootDelta) ->
             when (rootDelta) {
@@ -77,7 +77,7 @@ fun YDoc.applyDeltaDeep(delta: YDocDeepDelta, origin: Any? = null) {
     }
 }
 
-fun diffDocsToDelta(
+public fun diffDocsToDelta(
     previous: YDoc,
     next: YDoc,
     renderer: AbstractRenderer = createDiffRenderer(previous, next),

@@ -1,41 +1,41 @@
 package dev.yks
 
-interface UpdateContentDecoder {
-    fun readString(): String
+public interface UpdateContentDecoder {
+    public fun readString(): String
 
-    fun readTypeRef(): Int
+    public fun readTypeRef(): Int
 
-    fun readLen(): Long
+    public fun readLen(): Long
 
-    fun readAny(): Any?
+    public fun readAny(): Any?
 
-    fun readBuf(): ByteArray
+    public fun readBuf(): ByteArray
 
-    fun readJSON(): Any?
+    public fun readJSON(): Any?
 
-    fun readKey(): String
+    public fun readKey(): String
 }
 
-open class IdSetDecoderV1(
-    val restDecoder: BinaryDecoder,
+public open class IdSetDecoderV1(
+    public val restDecoder: BinaryDecoder,
 ) {
-    constructor(bytes: ByteArray) : this(BinaryDecoder(bytes))
+    public constructor(bytes: ByteArray) : this(BinaryDecoder(bytes))
 
-    fun hasRemaining(): Boolean = restDecoder.hasRemaining()
+    public fun hasRemaining(): Boolean = restDecoder.hasRemaining()
 
-    open fun resetDsCurVal() {
+    public open fun resetDsCurVal() {
         // V1 reads absolute clocks.
     }
 
-    open fun readDsClock(): Long = restDecoder.readVarUInt()
+    public open fun readDsClock(): Long = restDecoder.readVarUInt()
 
-    open fun readDsLen(): Long = restDecoder.readVarUInt()
+    public open fun readDsLen(): Long = restDecoder.readVarUInt()
 }
 
-open class IdSetDecoderV2(
+public open class IdSetDecoderV2(
     restDecoder: BinaryDecoder,
 ) : IdSetDecoderV1(restDecoder) {
-    constructor(bytes: ByteArray) : this(BinaryDecoder(bytes))
+    public constructor(bytes: ByteArray) : this(BinaryDecoder(bytes))
 
     private var dsCurrVal: Long = 0
 
@@ -55,22 +55,22 @@ open class IdSetDecoderV2(
     }
 }
 
-open class UpdateDecoderV1(
+public open class UpdateDecoderV1(
     restDecoder: BinaryDecoder,
 ) : IdSetDecoderV1(restDecoder), UpdateContentDecoder {
-    constructor(bytes: ByteArray) : this(BinaryDecoder(bytes))
+    public constructor(bytes: ByteArray) : this(BinaryDecoder(bytes))
 
-    fun readLeftID(): Id = readId()
+    public fun readLeftID(): Id = readId()
 
-    fun readRightID(): Id = readId()
+    public fun readRightID(): Id = readId()
 
-    fun readClient(): Long = restDecoder.readVarUInt()
+    public fun readClient(): Long = restDecoder.readVarUInt()
 
-    fun readInfo(): Int = restDecoder.readByte()
+    public fun readInfo(): Int = restDecoder.readByte()
 
     override fun readString(): String = restDecoder.readString()
 
-    fun readParentInfo(): Boolean = restDecoder.readVarUInt() == 1L
+    public fun readParentInfo(): Boolean = restDecoder.readVarUInt() == 1L
 
     override fun readTypeRef(): Int = restDecoder.readVarUInt().toDecodedCount("type ref")
 
@@ -136,26 +136,26 @@ private fun readV2DecoderStreams(bytes: ByteArray): V2DecoderStreams {
     )
 }
 
-open class UpdateDecoderV2 private constructor(
+public open class UpdateDecoderV2 private constructor(
     private val streams: V2DecoderStreams,
 ) : IdSetDecoderV2(streams.rest), UpdateContentDecoder {
     internal val usesLegacyRest: Boolean get() = streams.legacy
     private val keys = mutableListOf<String>()
-    constructor(bytes: ByteArray) : this(readV2DecoderStreams(bytes))
+    public constructor(bytes: ByteArray) : this(readV2DecoderStreams(bytes))
 
-    constructor(decoder: BinaryDecoder) : this(decoder.readRemainingBytes())
+    public constructor(decoder: BinaryDecoder) : this(decoder.readRemainingBytes())
 
-    fun readLeftID(): Id = Id(streams.clients.read(), streams.leftClocks.read())
+    public fun readLeftID(): Id = Id(streams.clients.read(), streams.leftClocks.read())
 
-    fun readRightID(): Id = Id(streams.clients.read(), streams.rightClocks.read())
+    public fun readRightID(): Id = Id(streams.clients.read(), streams.rightClocks.read())
 
-    fun readClient(): Long = streams.clients.read()
+    public fun readClient(): Long = streams.clients.read()
 
-    fun readInfo(): Int = streams.infos.read()
+    public fun readInfo(): Int = streams.infos.read()
 
     override fun readString(): String = streams.strings.read()
 
-    fun readParentInfo(): Boolean = streams.parentInfos.read() == 1
+    public fun readParentInfo(): Boolean = streams.parentInfos.read() == 1
 
     override fun readTypeRef(): Int = streams.typeRefs.read().toDecodedCount("type ref")
 

@@ -1,14 +1,14 @@
 package dev.yks
 
 /** Base type for failures reported by the YKS public boundary. */
-open class YksException(
+public open class YksException(
     message: String,
     cause: Throwable? = null,
 ) : IllegalStateException(message, cause)
 
 /** Malformed or unsupported bytes were rejected while decoding an external payload. */
-class YksDecodingException(
-    val format: String,
+public class YksDecodingException(
+    public val format: String,
     cause: Throwable,
 ) : YksException(
     message = "failed to decode $format: ${cause.message ?: cause::class.simpleName}",
@@ -16,30 +16,30 @@ class YksDecodingException(
 )
 
 /** A configured update resource limit was exceeded before document mutation began. */
-class YksUpdateLimitException(
-    val limit: String,
-    val maximum: Long,
-    val actual: Long,
+public class YksUpdateLimitException(
+    public val limit: String,
+    public val maximum: Long,
+    public val actual: Long,
 ) : YksException("update $limit exceeds limit $maximum: $actual")
 
 /** A mutable document was accessed from a thread other than its owning thread. */
-class YksThreadConfinementException(
-    val ownerThreadName: String,
-    val currentThreadName: String,
+public class YksThreadConfinementException(
+    public val ownerThreadName: String,
+    public val currentThreadName: String,
 ) : YksException(
     "YDoc is confined to thread '$ownerThreadName' and cannot be accessed from '$currentThreadName'",
 )
 
 /** Concurrent access was rejected for a document whose caller promised external serialization. */
-class YksConcurrentAccessException(
-    val activeThreadName: String,
-    val currentThreadName: String,
+public class YksConcurrentAccessException(
+    public val activeThreadName: String,
+    public val currentThreadName: String,
 ) : YksException(
     "YDoc is already in use by '$activeThreadName' and cannot be accessed concurrently from '$currentThreadName'",
 )
 
 /** Immutable, per-document limits applied before integrating an update. */
-data class YUpdateLimits(
+public data class YUpdateLimits(
     val maxEncodedBytes: Int = 16 * 1024 * 1024,
     val maxStructs: Int = 50_000,
     val maxDeleteRanges: Int = 50_000,
@@ -74,26 +74,26 @@ data class YUpdateLimits(
         }
     }
 
-    companion object {
+    public companion object {
         @JvmField
-        val DEFAULT: YUpdateLimits = YUpdateLimits()
+        public val DEFAULT: YUpdateLimits = YUpdateLimits()
     }
 }
 
 /** Immutable JVM runtime policies kept separate from Yjs-compatible document options. */
-data class YDocRuntimeOptions(
+public data class YDocRuntimeOptions(
     val updateLimits: YUpdateLimits = YUpdateLimits.DEFAULT,
     val threadAccessPolicy: YThreadAccessPolicy = YThreadAccessPolicy.ENFORCED,
     val standardUpdatePolicy: YStandardUpdatePolicy = YStandardUpdatePolicy.ALLOW_LOSSLESS_EXTENSIONS,
 ) {
-    companion object {
+    public companion object {
         @JvmField
-        val DEFAULT: YDocRuntimeOptions = YDocRuntimeOptions()
+        public val DEFAULT: YDocRuntimeOptions = YDocRuntimeOptions()
     }
 }
 
 /** Controls whether CRDT operations enforce YDoc's single-thread ownership at runtime. */
-enum class YThreadAccessPolicy {
+public enum class YThreadAccessPolicy {
     /** Bind lazily on first CRDT access and reject access from every other thread. */
     ENFORCED,
 
@@ -110,7 +110,7 @@ enum class YThreadAccessPolicy {
 }
 
 /** Controls whether local transactions may contain Kotlin-only lossless extensions. */
-enum class YStandardUpdatePolicy {
+public enum class YStandardUpdatePolicy {
     /** Allow extensions unless a standard update listener makes a standard wire update mandatory. */
     ALLOW_LOSSLESS_EXTENSIONS,
 
