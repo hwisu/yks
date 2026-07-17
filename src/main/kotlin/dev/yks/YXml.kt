@@ -87,7 +87,7 @@ class YXmlElementType internal constructor(
     val length: Int
         get() {
             if (warnIfPreliminary()) return preliminaryList.size
-            return xmlItems().size
+            return doc.visibleLength(name, kind).toNonNegativeInt("XML element length")
         }
 
     val attrSize: Int get() = getAttrs().size
@@ -342,7 +342,7 @@ class YXmlElementType internal constructor(
 
     fun get(index: Int): Any? {
         if (index < 0) return null
-        return toArray().getOrNull(index)
+        return doc.visibleSequenceItemAt(name, kind, index)?.content?.toXmlChild(doc)
     }
 
     fun getType(index: Int): AbstractYType? {
@@ -831,7 +831,7 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
     val length: Int
         get() {
             if (warnIfPreliminary()) return preliminaryList.size
-            return xmlItems().size
+            return doc.visibleLength(name, RootKind.XmlFragment).toNonNegativeInt("XML fragment length")
         }
 
     val attrSize: Int get() = getAttrs().size
@@ -1076,7 +1076,7 @@ class YXmlFragment internal constructor(doc: YDoc, name: String) :
 
     fun get(index: Int): Any? {
         if (index < 0) return null
-        return toArray().getOrNull(index)
+        return doc.visibleSequenceItemAt(name, RootKind.XmlFragment, index)?.content?.toXmlChild(doc)
     }
 
     fun getType(index: Int): AbstractYType? {
@@ -1406,14 +1406,22 @@ private fun YXmlNode.toRichSnapshotInsertionValue(): Any = when (this) {
 
 private fun xmlSibling(type: AbstractYType, offset: Int): Any? {
     val parent = type.parent ?: return null
-    val children = when (parent) {
-        is YXmlElementType -> parent.toArray()
-        is YXmlFragment -> parent.toArray()
-        else -> return null
+    if (parent !is YXmlElementType && parent !is YXmlFragment) return null
+    val ownerId = type.doc.typeRefItemId(type) ?: return null
+    var current = type.doc.getItem(ownerId) ?: return null
+    while (true) {
+        val neighbors = type.doc.store.sequenceNeighbors(current)
+        current = if (offset < 0) neighbors.first ?: return null else neighbors.second ?: return null
+        if (
+            !current.deleted &&
+            current.countable &&
+            current.parent == parent.name &&
+            current.content.kind == parent.kind &&
+            current.content.isXmlSequenceChild()
+        ) {
+            return current.content.toXmlChild(type.doc)
+        }
     }
-    val index = children.indexOfFirst { child -> child === type }
-    if (index < 0) return null
-    return children.getOrNull(index + offset)
 }
 
 private fun xmlTreeWalker(nodes: Iterable<Any?>, filter: (Any?) -> Boolean): Sequence<Any?> = sequence {
@@ -1492,10 +1500,9 @@ private fun xmlInsertAfter(parent: YXmlSharedType, ref: Any?, content: List<Any?
 }
 
 private fun YXmlSharedType.visibleXmlInsertionIndexAfter(id: Id): Int {
-    val items = doc.sequence(name).filter { item -> item.content.isXmlSequenceChild() && item.content.kind == kind }
-    val referenceIndex = items.indexOfFirst { item -> item.id == id }
-    require(referenceIndex >= 0) { "reference item not found" }
-    return items.take(referenceIndex + 1).count { item -> !item.deleted && item.countable }
+    return requireNotNull(doc.visibleSequenceIndexAfter(name, kind, id)) {
+        "reference item not found"
+    }
 }
 
 private fun normalizeXmlSliceIndex(index: Int, size: Int): Int {

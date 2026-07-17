@@ -333,7 +333,7 @@ fun encodeStructsFromIdSet(doc: YDoc, idSet: IdSet): ByteArray =
 fun encodeStructsFromIdSetLossless(doc: YDoc, idSet: IdSet): ByteArray =
     UpdateCodec.encodeLossless(
         DocumentUpdate(
-            doc.itemsForIdSet(idSet),
+            doc.itemsForIdSet(idSet, materializeTextAttributes = true),
             DeleteSet.empty(),
             doc.store.parentItemIds(),
             doc.store.parentKinds(),
@@ -353,7 +353,7 @@ fun encodeStructsFromIdSetV2(doc: YDoc, idSet: IdSet): ByteArray =
 fun encodeStructsFromIdSetV2Lossless(doc: YDoc, idSet: IdSet): ByteArray =
     UpdateCodec.encodeV2Lossless(
         DocumentUpdate(
-            doc.itemsForIdSet(idSet),
+            doc.itemsForIdSet(idSet, materializeTextAttributes = true),
             DeleteSet.empty(),
             doc.store.parentItemIds(),
             doc.store.parentKinds(),
@@ -1265,41 +1265,78 @@ private fun List<StoreItem>.resolveSyntheticParentsFromUnion(): List<StoreItem> 
         return candidate?.takeIf { item -> id.clock < checkedClockAdd(item.id.clock, item.length) }
     }
 
-    fun resolve(item: StoreItem, seen: Set<Id> = emptySet()): StoreItem {
+    fun resolve(item: StoreItem): StoreItem {
         resolved[item.id]?.let { return it }
-        val unresolved = item.unresolvedParent ?: return item
-        if (item.id in seen) return item
+        if (item.unresolvedParent == null) return item
 
-        val next = when (unresolved) {
-            is UnresolvedYjsParent.Nested -> {
-                val owner = containing(unresolved.id) ?: return item
-                val ownerRef = owner.content.directTypeRef() ?: return item
-                item.copy(
-                    parent = ownerRef.name,
-                    content = item.content.withResolvedParentKind(ownerRef.kind),
-                    unresolvedParent = null,
-                )
+        val path = mutableListOf<StoreItem>()
+        val visiting = hashSetOf<Id>()
+        var current = item
+        var base: StoreItem? = null
+
+        while (true) {
+            resolved[current.id]?.let { cached ->
+                base = cached
+                break
             }
-            is UnresolvedYjsParent.Inherit -> {
-                val anchor = containing(unresolved.id) ?: return item
-                val resolvedAnchor = resolve(anchor, seen + item.id)
-                if (resolvedAnchor.unresolvedParent != null) return item
-                val parentSub = resolvedAnchor.parentSub
-                val kind = when {
-                    parentSub != null -> RootKind.Map
-                    resolvedAnchor.content is ItemContent.Deleted -> item.content.kind
-                    else -> resolvedAnchor.content.kind
+            val unresolved = current.unresolvedParent
+            if (unresolved == null) {
+                base = current
+                break
+            }
+            if (!visiting.add(current.id)) {
+                // Preserve the unresolved aliases exactly on malformed cyclic input.
+                base = null
+                break
+            }
+            when (unresolved) {
+                is UnresolvedYjsParent.Nested -> {
+                    val owner = containing(unresolved.id)
+                    val ownerRef = owner?.content?.directTypeRef()
+                    base = if (ownerRef == null) {
+                        null
+                    } else {
+                        current.copy(
+                            parent = ownerRef.name,
+                            content = current.content.withResolvedParentKind(ownerRef.kind),
+                            unresolvedParent = null,
+                        ).also { next -> resolved[current.id] = next }
+                    }
+                    break
                 }
-                item.copy(
-                    parent = resolvedAnchor.parent,
-                    parentSub = parentSub,
-                    content = item.content.withResolvedParentKind(kind),
-                    unresolvedParent = null,
-                )
+                is UnresolvedYjsParent.Inherit -> {
+                    path.add(current)
+                    val anchor = containing(unresolved.id)
+                    if (anchor == null) {
+                        base = null
+                        break
+                    }
+                    current = anchor
+                }
             }
         }
-        resolved[item.id] = next
-        return next
+
+        for (index in path.indices.reversed()) {
+            val pending = path[index]
+            val resolvedAnchor = base
+            if (resolvedAnchor == null || resolvedAnchor.unresolvedParent != null) {
+                base = null
+                continue
+            }
+            val parentSub = resolvedAnchor.parentSub
+            val kind = when {
+                parentSub != null -> RootKind.Map
+                resolvedAnchor.content is ItemContent.Deleted -> pending.content.kind
+                else -> resolvedAnchor.content.kind
+            }
+            base = pending.copy(
+                parent = resolvedAnchor.parent,
+                parentSub = parentSub,
+                content = pending.content.withResolvedParentKind(kind),
+                unresolvedParent = null,
+            ).also { next -> resolved[pending.id] = next }
+        }
+        return resolved[item.id] ?: item
     }
 
     return map { item -> resolve(item) }
@@ -1314,7 +1351,19 @@ private fun ItemContent.withResolvedParentKind(kind: RootKind): ItemContent = wh
         RootKind.XmlText -> ItemContent.TextEmbed(value, kind = kind)
         else -> this
     }
+    is ItemContent.ArrayValues -> {
+        require(kind == RootKind.Array) {
+            "packed array values cannot be resolved as $kind"
+        }
+        this
+    }
     is ItemContent.MapEntry -> if (kind == RootKind.Map || kind == RootKind.XmlHook) this else ItemContent.Value(value)
+    is ItemContent.MapEntries -> {
+        require(kind == RootKind.Map || kind == RootKind.XmlHook) {
+            "packed map history cannot be resolved as $kind"
+        }
+        this
+    }
     is ItemContent.Text -> copy(kind = kind)
     is ItemContent.TextEmbed -> copy(kind = kind)
     is ItemContent.TextFormat -> copy(kind = kind)
@@ -1550,6 +1599,7 @@ private class UpdateObfuscator(
                 content.baseAttributes
             },
         )
+        is ItemContent.ArrayValues -> ItemContent.ArrayValues(content.values.map(::obfuscate))
         is ItemContent.TextEmbed -> ItemContent.TextEmbed(
             obfuscate(content.value),
             if (options.formatting) obfuscateFormatting(content.attributes) else content.attributes,
@@ -1557,6 +1607,7 @@ private class UpdateObfuscator(
             content.kind,
         )
         is ItemContent.MapEntry -> ItemContent.MapEntry(obfuscate(content.value))
+        is ItemContent.MapEntries -> ItemContent.MapEntries(content.values.map(::obfuscate))
         is ItemContent.XmlNode -> content.copy(value = obfuscate(content.value))
         is ItemContent.XmlType -> content.copy(
             nodeName = if (options.yxml) obfuscateNodeName(content.nodeName) else content.nodeName,

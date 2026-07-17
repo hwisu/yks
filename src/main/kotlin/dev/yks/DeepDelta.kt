@@ -124,10 +124,11 @@ internal fun renderArrayDeepDelta(type: YArray, options: DeepDeltaRenderOptions)
     YArrayDeepDelta(
         attrs = renderTypeAttrs(type, options),
         delta = renderSequenceDelta(type, RootKind.Array, options) { rendered ->
-            DeepDeltaInsertValue(
-                type.doc.arrayItemValue(rendered.item)
-                    .toDeepDeltaValue(options.nestedValueOptions(rendered.action)),
-            )
+            type.doc.arrayItemValues(rendered.item).map { value ->
+                DeepDeltaInsertValue(
+                    value.toDeepDeltaValue(options.nestedValueOptions(rendered.action)),
+                )
+            }
         },
     )
 
@@ -141,7 +142,7 @@ internal fun renderTextDeepDelta(type: YText, options: DeepDeltaRenderOptions): 
             .mergeTextAttribution(formatAttributions[rendered.item.id].orEmpty())
         when (rendered.action) {
             RenderedDeltaAction.Insert -> {
-                val attributes = rendered.item.content.textAttributesForDeepDelta(type.doc, options) + attribution
+                val attributes = rendered.item.textAttributesForDeepDelta(type.doc, options) + attribution
                 when (val content = rendered.item.content) {
                     is ItemContent.Text -> delta.insert(content.value, attributes)
                     is ItemContent.TextEmbed -> {
@@ -164,7 +165,7 @@ internal fun renderTextDeepDelta(type: YText, options: DeepDeltaRenderOptions): 
                 }
             }
             RenderedDeltaAction.Retain -> {
-                val attributes = rendered.item.content.textRetainAttributesForDeepDelta(
+                val attributes = rendered.item.textRetainAttributesForDeepDelta(
                     doc = type.doc,
                     hasTextFormatChange = options.hasTextFormatChange(type),
                     options = options,
@@ -194,7 +195,6 @@ private fun textFormatAttributionsByTarget(
                     item.content is ItemContent.TextEmbed ||
                     item.content is ItemContent.XmlType)
         }
-        .flatMap(StoreItem::logicalUnits)
     if (textItems.isEmpty()) return emptyMap()
     val attributionsByTarget = linkedMapOf<Id, Map<String, Any?>>()
 
@@ -224,7 +224,6 @@ private fun textFormatAttributionsByTarget(
 
     val activeNativeAttributions = linkedMapOf<String, Map<String, Any?>>()
     type.doc.sequence(type.name)
-        .flatMap { item -> if (item.content is ItemContent.Text) item.logicalUnits() else listOf(item) }
         .forEach { item ->
         if (item.content.kind != type.kind) return@forEach
         when (val content = item.content) {
@@ -338,7 +337,12 @@ internal fun renderXmlFragmentDeepDelta(
     YXmlFragmentDeepDelta(
         attrs = renderTypeAttrs(type, options),
         delta = renderSequenceDelta(type, RootKind.XmlFragment, options) { rendered ->
-            rendered.item.content.toXmlDeepDeltaInsertValue(type.doc, options.nestedValueOptions(rendered.action))
+            listOf(
+                rendered.item.content.toXmlDeepDeltaInsertValue(
+                    type.doc,
+                    options.nestedValueOptions(rendered.action),
+                ),
+            )
         },
     )
 
@@ -474,6 +478,7 @@ private fun renderTypeAttr(
         .mapNotNull { item ->
             val value = when (val content = item.content) {
                 is ItemContent.MapEntry -> type.doc.valueToAny(content.value)
+                is ItemContent.MapEntries -> type.doc.valueToAny(content.values.last())
                 is ItemContent.XmlType -> type.doc.typeFromXmlType(content)
                 else -> return@mapNotNull null
             }
@@ -517,15 +522,16 @@ private fun renderSequenceDelta(
     type: AbstractYType,
     kind: RootKind,
     options: DeepDeltaRenderOptions,
-    value: (RenderedSequenceItem) -> DeepDeltaInsertValue,
+    value: (RenderedSequenceItem) -> List<DeepDeltaInsertValue>,
 ): List<YArrayDeltaOp> {
     val delta = mutableListOf<YArrayDeltaOp>()
     renderSequenceItems(type, kind, options).forEach { rendered ->
         val length = rendered.content.content.getLength().toNonNegativeInt("rendered sequence length")
         when (rendered.action) {
             RenderedDeltaAction.Insert -> {
-                val insert = value(rendered)
-                delta.appendInsert(insert.value, (insert.attributes + rendered.attribution()).toSortedMap())
+                value(rendered).forEach { insert ->
+                    delta.appendInsert(insert.value, (insert.attributes + rendered.attribution()).toSortedMap())
+                }
             }
             RenderedDeltaAction.Retain -> delta.appendRetain(length, rendered.attribution())
             RenderedDeltaAction.Delete -> delta.appendDelete(length, rendered.attribution())
@@ -539,15 +545,35 @@ private fun renderSequenceItems(
     type: AbstractYType,
     kind: RootKind,
     options: DeepDeltaRenderOptions,
-): List<RenderedSequenceItem> =
-    type.doc.sequence(type.name)
+): List<RenderedSequenceItem> {
+    val items = type.doc.sequence(type.name)
         .filter { item -> item.content.kind == kind && item.countable }
-        .flatMap(StoreItem::logicalUnits)
-        .flatMap { item ->
-            item.readRenderedContents(type.doc, options).map { content ->
-                RenderedSequenceItem(item, content, content.renderedAction(options))
+    val boundarySets = listOfNotNull(
+        options.renderer.attributed,
+        options.itemsToRender,
+        options.insertedItems,
+    )
+    return buildList {
+        ClockRangeCursor(items).forEachRange(
+            boundaries = { item ->
+                buildList {
+                    boundarySets.forEach { ids ->
+                        ids.ranges(item.id.client).forEach { range ->
+                            add(range.clock)
+                            add(range.end)
+                        }
+                    }
+                }
+            },
+        ) { source, startClock, endClock ->
+            val item = source.clockRangeView(startClock, endClock)
+            item.readRenderedContents(type.doc, options).forEach { content ->
+                add(RenderedSequenceItem(item, content, content.renderedAction(options)))
             }
+            true
         }
+    }
+}
 
 private fun StoreItem.readRenderedContents(
     doc: YDoc,
@@ -654,29 +680,27 @@ private fun DeepDeltaRenderOptions.nestedValueOptions(action: RenderedDeltaActio
         this
     }
 
-private fun ItemContent.textAttributesForDeepDelta(
+private fun StoreItem.textAttributesForDeepDelta(
     doc: YDoc,
     options: DeepDeltaRenderOptions,
-): Map<String, Any?> = when (this) {
-    is ItemContent.Text -> attributes
-    is ItemContent.TextEmbed -> attributes
-    is ItemContent.XmlType -> attributes
-    else -> emptyMap()
-}.mapValues { (_, value) -> doc.valueToAny(value).toDeepDeltaValue(options) }.toSortedMap()
+): Map<String, Any?> =
+    doc.renderedTextAttributes(this)
+        .mapValues { (_, value) -> doc.valueToAny(value).toDeepDeltaValue(options) }
+        .toSortedMap()
 
 private fun ItemContent.TextFormat.formatAttributesForDeepDelta(doc: YDoc): Map<String, Any?> =
     attributes.mapValues { (_, value) -> doc.valueToAny(value) }.toSortedMap()
 
-private fun ItemContent.textRetainAttributesForDeepDelta(
+private fun StoreItem.textRetainAttributesForDeepDelta(
     doc: YDoc,
     hasTextFormatChange: Boolean,
     options: DeepDeltaRenderOptions,
     attribution: Map<String, Any?>,
     renderHasAttribution: Boolean,
-): Map<String, Any?> = when (this) {
+): Map<String, Any?> = when (val value = content) {
     is ItemContent.Text -> {
         val formatAttributes = if (hasTextFormatChange) {
-            textAttributeDiffForDeepDelta(doc, baseAttributes, attributes, options)
+            textAttributeDiffForDeepDelta(doc, value.baseAttributes, doc.renderedTextAttributes(this), options)
         } else {
             emptyMap()
         }
@@ -684,7 +708,7 @@ private fun ItemContent.textRetainAttributesForDeepDelta(
     }
     is ItemContent.TextEmbed -> {
         val formatAttributes = if (hasTextFormatChange) {
-            textAttributeDiffForDeepDelta(doc, baseAttributes, attributes, options)
+            textAttributeDiffForDeepDelta(doc, value.baseAttributes, doc.renderedTextAttributes(this), options)
         } else {
             emptyMap()
         }
@@ -692,13 +716,13 @@ private fun ItemContent.textRetainAttributesForDeepDelta(
     }
     is ItemContent.XmlType -> {
         val formatAttributes = if (hasTextFormatChange) {
-            textAttributeDiffForDeepDelta(doc, baseAttributes, attributes, options)
+            textAttributeDiffForDeepDelta(doc, value.baseAttributes, doc.renderedTextAttributes(this), options)
         } else {
             emptyMap()
         }
         formatAttributes + attribution
     }
-    is ItemContent.TextFormat -> formatAttributesForDeepDelta(doc) + attribution
+    is ItemContent.TextFormat -> value.formatAttributesForDeepDelta(doc) + attribution
     else -> if (renderHasAttribution) attribution else emptyMap()
 }.toSortedMap()
 

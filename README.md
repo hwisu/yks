@@ -287,12 +287,20 @@ shared Yjs wire contract instead of Yrs-only defaults.
 
 `jmh` records forked latency plus the GC profiler's allocation metrics for
 insert, middle edit, standard update apply/encode, standard-listener
-transactions, and an adversarial pre-decode limit rejection. Results are
-written to `build/reports/jmh/results.json`. The cross-runtime performance gate
-batches sub-millisecond reads and empty transactions, then requires every
-measured YKS workload to remain within 1.5x of pinned Yjs 13.6.31. Release JARs disable file
-timestamps, use reproducible entry order, embed the exact `YKS-Revision`, and
-are built twice and byte-compared before publication.
+transactions, adversarial pre-decode rejection, formatted/nested/map updates,
+packed array updates/inserts, same-key map history, root and indexed-array
+access, already-open fragmented/concurrent roots, observed fragmented/map
+edits, packed undo, and snapshot clock ranges. Results are written to
+`build/reports/jmh/results.json`.
+
+The cross-runtime gate uses 50 warmups and 30 samples for 28 workloads. A YKS
+median must remain within 1.5x of pinned Yjs 13.6.31 when that threshold exceeds
+the explicit 6 ms process-level microbenchmark budget; shorter operations must
+remain within 6 ms. The JVM runner waits outside the measured interval after
+each warmup so queued tiered compilation from an earlier workload cannot
+contaminate the next one. Release JARs disable file timestamps, use
+reproducible entry order, embed the exact `YKS-Revision`, and are built twice
+and byte-compared before publication.
 
 Pushing a tag such as `v0.1.1` runs the same gates, publishes that immutable
 version to GitHub Packages, and verifies it again from a clean remote consumer.

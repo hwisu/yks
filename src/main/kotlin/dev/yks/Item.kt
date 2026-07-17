@@ -34,6 +34,15 @@ internal sealed class ItemContent {
         override val kind: RootKind = RootKind.Array
     }
 
+    /** Packed Yjs ContentAny values for an array sequence. */
+    data class ArrayValues(val values: List<YValue>) : ItemContent() {
+        init {
+            require(values.size > 1) { "packed array values must contain at least two values" }
+        }
+
+        override val kind: RootKind = RootKind.Array
+    }
+
     data class Text(
         val value: String,
         val attributes: Map<String, YValue> = emptyMap(),
@@ -90,6 +99,15 @@ internal sealed class ItemContent {
         override val kind: RootKind = RootKind.Map
     }
 
+    /** Packed Yjs ContentAny history for a map key. The last value is the current map value. */
+    data class MapEntries(val values: List<YValue>) : ItemContent() {
+        init {
+            require(values.size > 1) { "packed map entries must contain at least two values" }
+        }
+
+        override val kind: RootKind = RootKind.Map
+    }
+
     data class XmlNode(
         val value: YXmlNodeValue,
         override val kind: RootKind = RootKind.XmlFragment,
@@ -126,28 +144,78 @@ internal fun ItemContent.isCountable(): Boolean = when (this) {
     else -> true
 }
 
+internal fun ItemContent.storedTextAttributes(): Map<String, YValue> = when (this) {
+    is ItemContent.Text -> attributes
+    is ItemContent.TextEmbed -> attributes
+    is ItemContent.XmlType -> attributes
+    else -> emptyMap()
+}
+
+internal fun ItemContent.storedBaseTextAttributes(): Map<String, YValue> = when (this) {
+    is ItemContent.Text -> baseAttributes
+    is ItemContent.TextEmbed -> baseAttributes
+    is ItemContent.XmlType -> baseAttributes
+    else -> emptyMap()
+}
+
+internal fun ItemContent.withRenderedTextAttributes(attributes: Map<String, YValue>): ItemContent? = when (this) {
+    is ItemContent.Text -> copy(attributes = attributes)
+    is ItemContent.TextEmbed -> copy(attributes = attributes)
+    is ItemContent.XmlType -> copy(attributes = attributes)
+    else -> null
+}
+
 internal val ItemContent.clockLength: Long
     get() = when (this) {
         is ItemContent.Text -> value.length.toLong()
+        is ItemContent.ArrayValues -> values.size.toLong()
+        is ItemContent.MapEntries -> values.size.toLong()
         is ItemContent.Deleted -> length
         else -> 1
     }
 
-internal fun StoreItem.logicalUnits(): List<StoreItem> {
-    val text = content as? ItemContent.Text ?: return listOf(this)
-    if (text.value.length == 1) return listOf(this)
-    return text.value.mapIndexed { offset, char ->
-        copy(
-            id = Id(id.client, checkedClockAdd(id.clock, offset.toLong(), "text unit clock")),
-            origin = if (offset == 0) {
-                origin
-            } else {
-                Id(id.client, checkedClockAdd(id.clock, offset.toLong() - 1, "text unit origin"))
-            },
-            content = text.copy(value = char.toString()),
-        )
+/**
+ * Traverses packed structs as clock ranges instead of allocating one [StoreItem] per UTF-16 unit.
+ *
+ * Callers may provide structural boundaries (snapshot clocks, delete ranges, etc.). A packed text
+ * item is then sliced only at those boundaries, so work scales with CRDT ranges rather than text
+ * length.
+ */
+internal class ClockRangeCursor(private val items: Iterable<StoreItem>) {
+    fun forEachRange(action: (item: StoreItem, startClock: Long, endClock: Long) -> Boolean) {
+        items.forEach { item ->
+            if (!action(item, item.id.clock, item.clockEnd())) return
+        }
     }
+
+    fun forEachRange(
+        boundaries: (StoreItem) -> Iterable<Long>,
+        action: (item: StoreItem, startClock: Long, endClock: Long) -> Boolean,
+    ) {
+        items.forEach { item ->
+            val itemStart = item.id.clock
+            val itemEnd = item.clockEnd()
+            val cuts = boundaries(item)
+                .asSequence()
+                .filter { clock -> clock > itemStart && clock < itemEnd }
+                .distinct()
+                .sorted()
+                .toList()
+            var start = itemStart
+            cuts.forEach { end ->
+                if (!action(item, start, end)) return
+                start = end
+            }
+            if (!action(item, start, itemEnd)) return
+        }
+    }
+
 }
+
+internal fun StoreItem.clockRangeView(startClock: Long, endClock: Long): StoreItem =
+    if (startClock == id.clock && endClock == clockEnd()) this else sliceClocks(startClock, endClock)
+
+internal fun StoreItem.clockEnd(): Long = checkedClockAdd(id.clock, length, "item clock end")
 
 internal fun StoreItem.sliceClocks(startClock: Long, endClock: Long): StoreItem {
     val itemEnd = checkedClockAdd(id.clock, length, "item end")
@@ -164,6 +232,20 @@ internal fun StoreItem.sliceClocks(startClock: Long, endClock: Long): StoreItem 
             if (offset > 0) value = value.splice(offset)
             if (keepLength < value.getLength()) value.splice(keepLength)
             current.copy(value = value.str)
+        }
+        is ItemContent.MapEntries -> {
+            val from = offset.toNonNegativeInt("packed map slice offset")
+            val until = checkedClockAdd(offset, keepLength, "packed map slice end")
+                .toNonNegativeInt("packed map slice end")
+            val values = current.values.subList(from, until)
+            if (values.size == 1) ItemContent.MapEntry(values.single()) else current.copy(values = values.toList())
+        }
+        is ItemContent.ArrayValues -> {
+            val from = offset.toNonNegativeInt("packed array slice offset")
+            val until = checkedClockAdd(offset, keepLength, "packed array slice end")
+                .toNonNegativeInt("packed array slice end")
+            val values = current.values.subList(from, until)
+            if (values.size == 1) ItemContent.Value(values.single()) else current.copy(values = values.toList())
         }
         else -> error("clock range splits unsupported store item at $id")
     }

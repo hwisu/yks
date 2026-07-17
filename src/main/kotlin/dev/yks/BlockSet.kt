@@ -175,9 +175,11 @@ private fun mergeOverlappingBlockRefs(
     val result = mutableListOf<AbstractStruct>()
     var nextExpectedClock = allRefs.minOf { it.id.clock }
     val candidates = allRefs
+        .withIndex()
         .asSequence()
-        .filterNot { it is Skip }
-        .sortedWith(compareBy<AbstractStruct> { it.id.clock }.thenBy { allRefs.indexOf(it) })
+        .filterNot { indexed -> indexed.value is Skip }
+        .sortedWith(compareBy<IndexedValue<AbstractStruct>> { indexed -> indexed.value.id.clock }.thenBy { it.index })
+        .map { indexed -> indexed.value }
         .toList()
     candidates.forEach { block ->
         if (block.end <= nextExpectedClock) return@forEach

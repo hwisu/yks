@@ -1083,6 +1083,18 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun upstreamYjsAppliesPackedMapHistoryProducedByKotlin() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val map = doc.getMap("map")
+        doc.transact {
+            repeat(5_000) { index -> map.set("key", index) }
+        }
+
+        assertEquals(2, decodeUpdate(doc.encodeStateAsUpdate()).structs.size)
+        assertUpstreamApplies(doc, "map-history")
+    }
+
+    @Test
     fun upstreamYjsAppliesNestedMapUpdateProducedByKotlin() {
         val doc = YDoc(clientId = 1)
         val profile = doc.createMap()

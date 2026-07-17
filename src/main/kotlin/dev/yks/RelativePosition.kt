@@ -33,7 +33,7 @@ fun createRelativePositionFromTypeIndex(
     renderer: AbstractRenderer = baseRenderer,
 ): RelativePosition {
     require(index >= 0) { "index must be non-negative" }
-    val items = type.doc.relativePositionSequence(type)
+    val items = type.doc.relativePositionSequence(type, renderer)
 
     var remaining = index
     if (assoc < 0) {
@@ -88,7 +88,7 @@ fun createAbsolutePositionFromRelativePosition(
         }
         val item = doc.getItem(anchorId) ?: return null
         val type = doc.typeForParent(item.parent) ?: doc.getOrNull(item.parent) ?: return null
-        val ordered = doc.relativePositionSequence(type)
+        val ordered = doc.relativePositionSequence(type, renderer)
         val rawIndex = ordered.indexOfFirst { candidate ->
             anchorId.client == candidate.id.client &&
                 anchorId.clock >= candidate.id.clock &&
@@ -101,12 +101,27 @@ fun createAbsolutePositionFromRelativePosition(
             .fold(0L) { length, before ->
                 checkedClockAdd(length, rendererContentLength(renderer, before.toItemStruct(doc)), "relative position index")
             }
+        val prefixLength = if (anchorId.clock > anchorUnit.id.clock) {
+            val prefix = anchorUnit.clockRangeView(anchorUnit.id.clock, anchorId.clock)
+            rendererContentLength(renderer, prefix.toItemStruct(doc))
+        } else {
+            0L
+        }
         val includeAnchor = !anchorUnit.deleted && (
             relativePosition.assoc < 0 ||
                 (!followUndoneDeletions && originalItem.deleted && anchorId != itemId)
             )
-        val anchorLength = if (includeAnchor) rendererContentLength(renderer, anchorUnit.toItemStruct(doc)) else 0
-        val absoluteIndex = checkedClockAdd(visibleBefore, anchorLength, "relative position index")
+        val anchorLength = if (includeAnchor) {
+            val unitEnd = minOf(anchorUnit.clockEnd(), checkedClockAdd(anchorId.clock, 1, "relative position unit end"))
+            rendererContentLength(renderer, anchorUnit.clockRangeView(anchorId.clock, unitEnd).toItemStruct(doc))
+        } else {
+            0L
+        }
+        val absoluteIndex = checkedClockAdd(
+            checkedClockAdd(visibleBefore, prefixLength, "relative position prefix"),
+            anchorLength,
+            "relative position index",
+        )
             .toNonNegativeInt("relative position index")
         return AbsolutePosition(type, absoluteIndex, relativePosition.assoc)
     }
@@ -123,7 +138,7 @@ fun createAbsolutePositionFromRelativePosition(
     val index = if (relativePosition.assoc < 0) {
         0
     } else {
-        doc.relativePositionSequence(type)
+        doc.relativePositionSequence(type, renderer)
             .fold(0L) { length, item ->
                 checkedClockAdd(length, rendererContentLength(renderer, item.toItemStruct(doc)), "relative position index")
             }
@@ -132,12 +147,28 @@ fun createAbsolutePositionFromRelativePosition(
     return AbsolutePosition(type, index, relativePosition.assoc)
 }
 
-private fun YDoc.relativePositionSequence(type: AbstractYType): List<StoreItem> =
-    sequence(type.name)
-        .filter { item ->
-            item.countable && (type is YUnopenedRoot || item.content.kind == type.kind)
+private fun YDoc.relativePositionSequence(
+    type: AbstractYType,
+    renderer: AbstractRenderer,
+): List<StoreItem> {
+    val items = sequence(type.name)
+        .filter { item -> item.countable && (type is YUnopenedRoot || item.content.kind == type.kind) }
+    return buildList {
+        ClockRangeCursor(items).forEachRange(
+            boundaries = { item ->
+                buildList {
+                    renderer.attributed.ranges(item.id.client).forEach { range ->
+                        add(range.clock)
+                        add(range.end)
+                    }
+                }
+            },
+        ) { source, startClock, endClock ->
+            add(source.clockRangeView(startClock, endClock))
+            true
         }
-        .flatMap(StoreItem::logicalUnits)
+    }
+}
 
 fun encodeRelativePosition(relativePosition: RelativePosition): ByteArray {
     val encoder = BinaryEncoder()

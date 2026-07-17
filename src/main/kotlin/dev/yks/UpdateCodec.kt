@@ -20,7 +20,7 @@ internal object LegacyUpdateCodec {
     }
 
     fun write(encoder: BinaryEncoder, update: DocumentUpdate): BinaryEncoder {
-        val items = update.items.map { item ->
+        val items = update.items.flatMap { item -> item.expandPackedValues() }.map { item ->
             if (item.unresolvedParent != null) {
                 item
             } else {
@@ -108,6 +108,8 @@ internal object LegacyUpdateCodec {
                 encoder.writeByte(0)
                 writeYValue(encoder, content.value)
             }
+            is ItemContent.ArrayValues ->
+                error("packed array values must be expanded before private encoding")
             is ItemContent.Text -> {
                 if (version >= 5) {
                     encoder.writeByte(14)
@@ -127,6 +129,8 @@ internal object LegacyUpdateCodec {
                 encoder.writeByte(2)
                 writeYValue(encoder, content.value)
             }
+            is ItemContent.MapEntries ->
+                error("packed map history must be expanded before private encoding")
             is ItemContent.XmlNode -> {
                 if (content.kind == RootKind.XmlFragment) {
                     encoder.writeByte(3)
@@ -183,6 +187,22 @@ internal object LegacyUpdateCodec {
                     writeAttributes(encoder, content.baseAttributes)
                 }
             }
+        }
+    }
+
+    private fun StoreItem.expandPackedValues(): List<StoreItem> {
+        val values = when (val packed = content) {
+            is ItemContent.ArrayValues -> packed.values
+            is ItemContent.MapEntries -> packed.values
+            else -> return listOf(this)
+        }
+        return values.mapIndexed { index, value ->
+            val clock = checkedClockAdd(id.clock, index.toLong(), "private packed map clock")
+            copy(
+                id = Id(id.client, clock),
+                origin = if (index == 0) origin else Id(id.client, clock - 1),
+                content = if (parentSub == null) ItemContent.Value(value) else ItemContent.MapEntry(value),
+            )
         }
     }
 

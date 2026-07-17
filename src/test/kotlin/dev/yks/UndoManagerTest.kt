@@ -5,6 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -805,18 +806,33 @@ class UndoManagerTest {
 
         text.insert(0, "ab")
 
-        val undoStackItem = assertNotNull(undoManager.undo())
-
-        assertEquals("a", text.toString())
-        assertEquals(2, undoStackItem.insertedCount)
-        assertTrue(undoManager.canRedo)
-
-        val redoStackItem = assertNotNull(undoManager.redo())
-
+        assertNull(undoManager.undo())
         assertEquals("ab", text.toString())
-        assertEquals(1, redoStackItem.deletedCount)
-        assertTrue(redoStackItem.deletes.has(1, 1))
-        assertFalse(redoStackItem.deletes.has(1, 0))
+        assertFalse(undoManager.canRedo)
+        assertNull(undoManager.redo())
+    }
+
+    @Test
+    fun deleteFilterRunsOnceForPackedTextLikeUpstream() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        var calls = 0
+        val undoManager = UndoManager(
+            text,
+            UndoManagerOptions(
+                captureTimeoutMillis = 0,
+                deleteFilter = {
+                    calls++
+                    true
+                },
+            ),
+        )
+
+        text.insert(0, "x".repeat(20_000))
+        assertNotNull(undoManager.undo())
+
+        assertEquals(1, calls)
+        assertEquals("", text.toString())
     }
 
     @Test

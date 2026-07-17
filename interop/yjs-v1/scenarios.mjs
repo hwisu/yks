@@ -4,6 +4,7 @@ export const scenarioNames = [
   'hello',
   'array',
   'map',
+  'map-history',
   'nested-map',
   'nested-map-update',
   'nested-map-replace-update',
@@ -45,6 +46,14 @@ export const createScenarioDocument = name => {
       const map = doc.getMap('meta')
       map.set('title', 'hello')
       map.set('count', 2)
+      break
+    }
+    case 'map-history': {
+      doc.gc = false
+      const map = doc.getMap('map')
+      doc.transact(() => {
+        for (let index = 0; index < 5_000; index += 1) map.set('key', index)
+      })
       break
     }
     case 'nested-map': {
@@ -200,6 +209,8 @@ export const materializeScenario = (doc, name) => {
       return doc.getArray('items')
     case 'map':
       return doc.getMap('meta')
+    case 'map-history':
+      return doc.getMap('map')
     case 'nested-map':
     case 'nested-map-update':
     case 'nested-map-replace-update':

@@ -991,3 +991,118 @@ Validation:
   and its regression threshold is tightened from 2.0x/absolute fallback to 1.5x for every scenario.
 - In the final 30-warmup/50-sample run every YKS workload is at least as fast as Yjs; the highest
   observed YKS/Yjs ratio is 0.94x for GC middle-edit workloads.
+
+## 2026-07-17 structural hot-path parity follow-up
+
+The Hocuspocus `yks.todo.md` audit exposed workloads that the original nine-scenario gate did not
+cover. The store and type paths now follow the same structural boundaries as Yjs instead of
+materializing or scanning the whole logical document:
+
+- parent children, map winners/keys, root names, and nested type owners have maintained indices;
+- `YArray`/XML length and indexed access use the maintained sequence counters/index;
+- native rich-text format structs remain markers and rendered attributes are resolved lazily,
+  rather than rewriting every text struct after remote integration;
+- packed text, snapshot, relative-position, renderer, undo-filter, and update-range traversal use
+  clock-range cursors instead of allocating a `StoreItem` for every UTF-16 unit;
+- observer cleanup is bounded to changed clients, parents, and split candidates; transaction
+  update/item/struct DTOs are materialized only when a consumer reads them;
+- the order-statistic sequence recalculates only the `RootKind` values actually present in that
+  parent, and adjacent-anchor local integration skips conflict-set allocation;
+- `BlockSet` ordering no longer calls `indexOf` from its comparator, and synthetic update-parent
+  resolution is iterative.
+
+Eight adversarial scenarios were added to both the cross-runtime parity gate and JMH:
+formatted 5,004-struct apply, 3,000 nested deletes, 5,000 map entries, a packed
+5,000-replacement single-key map history, 10,000 roots,
+100,000 array index reads, 500 observed fragmented edits, and packed clock-range snapshot delta.
+The gate now has 17 scenarios, 50 warmups, 30 samples, a strict 1.5x ratio above the documented
+6 ms microbenchmark budget, and a JVM warmup quiescence window outside the measured interval.
+
+Three consecutive full runs passed. The final run included:
+
+| Scenario | Yjs | YKS | YKS/Yjs |
+|---|---:|---:|---:|
+| apply 5,000 structs | 2.454 ms | 2.046 ms | 0.83x |
+| append 5,000 chars | 9.973 ms | 4.875 ms | 0.49x |
+| GC middle edit 1,000 | 4.087 ms | 3.114 ms | 0.76x |
+| batched middle edit 1,000 | 14.987 ms | 3.290 ms | 0.22x |
+| formatted apply 5,004 | 2.303 ms | 1.923 ms | 0.84x |
+| map apply 5,000 | 3.979 ms | 3.458 ms | 0.87x |
+| create/read 10,000 roots | 2.699 ms | 2.090 ms | 0.77x |
+| observed fragmented edit 500 | 2.112 ms | 2.646 ms | 1.25x |
+
+Short cached-read, nested-delete, indexed-array, and clock-range scenarios all remained below the
+6 ms absolute budget. The previously reported 24.3-second valid-update apply and repeated linear
+sequence scans are no longer present.
+
+An additional adversarial audit found that Yjs packs 4,999 superseded values from a single-key
+5,000-replacement map transaction into one `ContentAny` struct. YKS now keeps that map history as
+one packed clock range, including split/state-vector/snapshot and standard-wire behavior, instead
+of expanding it to 4,999 `StoreItem` objects. The warmed YKS apply fell from 182.8 ms to 0.95 ms;
+Yjs measured about 0.42 ms for the same update.
+
+## 2026-07-17 exhaustive structural performance audit completion
+
+The 17-scenario follow-up above was expanded again after checking every standard content kind,
+materialized shared-type read path, observer snapshot boundary, root/type registry lookup, local
+map replacement, XML navigation, undo filtering, and the exact four regressions recorded in
+`../hocuspocus/yks.todo.md`.
+
+Additional structural changes:
+
+- standard `ContentAny`/`ContentJSON` array runs remain packed as `ArrayValues`; indexed reads,
+  interior anchors, split/state-vector/snapshot/update selection, delta/event rendering, undo, and
+  V1/V2 writers operate directly on the packed range;
+- local primitive array batches are packed immediately, matching Yjs's one-struct wire shape;
+- same-key local map replacement directly registers the known adjacent merge boundary instead of
+  rebuilding and sorting the entire key history after every set;
+- observed maps capture only changed keys, and `YDoc` maintains a set of snapshot-interested types
+  instead of scanning every materialized root on every transaction;
+- nested-owner checks, XML sibling/insert-after, generic list insertion, and undo right-origin
+  inference use maintained indices/order-statistic neighbors;
+- snapshot update encoding slices packed ranges at state-vector/delete boundaries, while the
+  public struct view exposes logical array units needed for packed-interior references;
+- packed `UndoManager.deleteFilter` runs once per physical Yjs item and uses clock-range coverage,
+  avoiding one callback/allocation per UTF-16 unit.
+
+The official cross-runtime gate now contains 28 scenarios. Three consecutive default runs
+(50 warmups and 30 samples) passed all 28 against pinned Yjs 13.6.31. After the final
+nested-parent, observer snapshot, subdoc-cache, and streaming UTF-16 audit changes, another
+default run also passed 28/28. The third consecutive run included:
+
+| Scenario | Yjs | YKS |
+|---|---:|---:|
+| apply 5,000 structs | 2.268 ms | 2.238 ms |
+| apply into open roots | 2.064 ms | 3.252 ms |
+| append 5,000 chars | 9.834 ms | 4.527 ms |
+| 1,000 middle edits | 3.964 ms | 2.689 ms |
+| formatted apply | 2.333 ms | 2.217 ms |
+| 5,000-key map apply | 4.205 ms | 4.257 ms |
+| packed map-history apply | 0.462 ms | 0.365 ms |
+| packed array apply | 0.458 ms | 0.264 ms |
+| local 5,000-value array insert | 0.326 ms | 0.499 ms |
+| local 5,000 same-key map sets | 22.939 ms | 5.311 ms |
+| 1,000 concurrent inserts into open root | 1.270 ms | 0.920 ms |
+| 1,000 edits with 10,000 materialized roots | 6.150 ms | 4.733 ms |
+| observed 5,000-key map edit | 0.066 ms | 0.392 ms |
+
+Sub-millisecond ratios remain governed by the documented 6 ms process-level budget. All workloads
+passed that budget; non-micro workloads passed the strict 1.5x ratio. Selected allocation-guided
+JMH results include packed array apply at 0.052 ms/op and 288,297 B/op, packed map-history apply at
+0.060 ms/op and 302,753 B/op, 1,000 concurrent inserts into an open root at 0.616 ms/op and
+2,208,775 B/op, and an observed 5,000-key map edit at 0.008 ms/op and 31,890 B/op. The latter
+reuses the prepared map so fixture construction is not counted as operation allocation.
+
+Final validation:
+
+- `./gradlew clean check consumerSmokeTest compileJmhJava`: 687 Kotlin tests and consumer passed;
+- `npm run test:interop`: Yjs 107/107 and Yrs 4/4 passed;
+- `npm run interop:check-clean`: passed;
+- `npm run benchmark:performance:check`: 28/28 passed in three consecutive audit runs and once
+  more on the final source state;
+- the exact Hocuspocus snapshot, generic-list, search-marker, and event-count regressions pass.
+
+No known standard Yjs workload retains the original whole-document/whole-sequence structural scan
+as its primary path. YKS still intentionally differs in JVM API shape, private lossless metadata,
+browser-only APIs, and implementation language/runtime; those are compatibility adaptations, not
+known performance-parity blockers.

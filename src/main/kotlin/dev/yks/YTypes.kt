@@ -106,6 +106,7 @@ sealed class AbstractYType protected constructor(
     )
 
     internal fun restoreMutableState(state: YTypeMutableState) {
+        if (doc !== state.doc) doc.removeTypeSnapshotInterest(this)
         doc = state.doc
         name = state.name
         binding = state.binding
@@ -117,6 +118,7 @@ sealed class AbstractYType protected constructor(
         preliminaryOperations.addAll(state.preliminaryOperations)
         preliminaryOperationValues.clear()
         preliminaryOperationValues.addAll(state.preliminaryOperationValues)
+        doc.refreshTypeSnapshotInterest(this)
     }
 
     internal fun markDetached() {
@@ -135,9 +137,11 @@ sealed class AbstractYType protected constructor(
             is YTypeBinding.Root -> error("root shared types cannot be inserted as nested content")
             is YTypeBinding.Nested -> error("shared type is already integrated")
         }
+        if (doc !== target) doc.removeTypeSnapshotInterest(this)
         doc = target
         name = reservedName
         binding = YTypeBinding.Reserved(target, reservedName)
+        doc.refreshTypeSnapshotInterest(this)
     }
 
     internal fun integrateReserved(target: YDoc, ownerId: Id?) {
@@ -148,9 +152,11 @@ sealed class AbstractYType protected constructor(
     }
 
     internal fun markDecodedNested(target: YDoc, nestedName: String, ownerId: Id?) {
+        if (doc !== target) doc.removeTypeSnapshotInterest(this)
         doc = target
         name = nestedName
         binding = YTypeBinding.Nested(target, nestedName, ownerId)
+        doc.refreshTypeSnapshotInterest(this)
     }
 
     internal fun warnIfPreliminary(): Boolean {
@@ -272,22 +278,38 @@ sealed class AbstractYType protected constructor(
 
     fun observe(listener: (YEvent) -> Unit): Subscription {
         observers.add(listener)
-        return Subscription { observers.remove(listener) }
+        doc.refreshTypeSnapshotInterest(this)
+        return Subscription {
+            observers.remove(listener)
+            doc.refreshTypeSnapshotInterest(this)
+        }
     }
 
     fun observe(listener: (YEvent, YTransactionEvent?) -> Unit): Subscription {
         transactionObservers.add(listener)
-        return Subscription { transactionObservers.remove(listener) }
+        doc.refreshTypeSnapshotInterest(this)
+        return Subscription {
+            transactionObservers.remove(listener)
+            doc.refreshTypeSnapshotInterest(this)
+        }
     }
 
     fun observeDeep(listener: (YEvent) -> Unit): Subscription {
         deepObservers.add(listener)
-        return Subscription { deepObservers.remove(listener) }
+        doc.refreshTypeSnapshotInterest(this)
+        return Subscription {
+            deepObservers.remove(listener)
+            doc.refreshTypeSnapshotInterest(this)
+        }
     }
 
     fun observeDeep(listener: (YEvent, YTransactionEvent?) -> Unit): Subscription {
         deepTransactionObservers.add(listener)
-        return Subscription { deepTransactionObservers.remove(listener) }
+        doc.refreshTypeSnapshotInterest(this)
+        return Subscription {
+            deepTransactionObservers.remove(listener)
+            doc.refreshTypeSnapshotInterest(this)
+        }
     }
 
     /**
@@ -298,32 +320,42 @@ sealed class AbstractYType protected constructor(
      */
     fun observeDeepEvents(listener: (List<YEvent>, YTransactionEvent?) -> Unit): Subscription {
         deepEventListObservers.add(listener)
-        return Subscription { deepEventListObservers.remove(listener) }
+        doc.refreshTypeSnapshotInterest(this)
+        return Subscription {
+            deepEventListObservers.remove(listener)
+            doc.refreshTypeSnapshotInterest(this)
+        }
     }
 
     fun unobserve(listener: (YEvent) -> Unit) {
         observers.remove(listener)
+        doc.refreshTypeSnapshotInterest(this)
     }
 
     fun unobserve(listener: (YEvent, YTransactionEvent?) -> Unit) {
         transactionObservers.remove(listener)
+        doc.refreshTypeSnapshotInterest(this)
     }
 
     fun unobserveDeep(listener: (YEvent) -> Unit) {
         deepObservers.remove(listener)
+        doc.refreshTypeSnapshotInterest(this)
     }
 
     fun unobserveDeep(listener: (YEvent, YTransactionEvent?) -> Unit) {
         deepTransactionObservers.remove(listener)
+        doc.refreshTypeSnapshotInterest(this)
     }
 
     fun unobserveDeepEvents(listener: (List<YEvent>, YTransactionEvent?) -> Unit) {
         deepEventListObservers.remove(listener)
+        doc.refreshTypeSnapshotInterest(this)
     }
 
     fun on(eventName: String, listener: (YTypeEvent) -> Unit): Subscription {
         val listeners = eventListeners.getOrPut(eventName) { mutableListOf() }
         listeners.add(listener)
+        doc.refreshTypeSnapshotInterest(this)
         return Subscription { off(eventName, listener) }
     }
 
@@ -343,6 +375,7 @@ sealed class AbstractYType protected constructor(
         if (listeners.isEmpty()) {
             eventListeners.remove(eventName)
         }
+        doc.refreshTypeSnapshotInterest(this)
     }
 
     fun emit(eventName: String, event: YTypeEvent = YTypeEvent(name = eventName, target = this)) {
@@ -362,6 +395,7 @@ sealed class AbstractYType protected constructor(
         clearCache()
         emitTypeEvent(YTypeEvent(name = "destroy", target = this))
         eventListeners.clear()
+        doc.removeTypeSnapshotInterest(this)
     }
 
     internal fun emit(event: YEvent) {
@@ -437,10 +471,14 @@ sealed class AbstractYType protected constructor(
     open fun toJSON(): Any? = toJson()
 
     val delta: YDeepDelta
-        get() = deltaCache ?: renderDeepDelta().also { deltaCache = it }
+        get() = deltaCache ?: renderDeepDelta().also {
+            deltaCache = it
+            doc.refreshTypeSnapshotInterest(this)
+        }
 
     fun clearCache() {
         deltaCache = null
+        doc.refreshTypeSnapshotInterest(this)
     }
 
     fun useRenderer(renderer: AbstractRenderer): AbstractYType {
@@ -577,10 +615,7 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
     val size: Int
         get() {
             if (warnIfPreliminary()) return 0
-            return doc.visibleSequence(name).count { item ->
-                item.content is ItemContent.Value ||
-                    (item.content is ItemContent.XmlType && item.content.kind == RootKind.Array)
-            }
+            return doc.visibleLength(name, RootKind.Array).toNonNegativeInt("array length")
         }
 
     val length: Int get() = size
@@ -607,13 +642,35 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
             val anchors = doc.insertionAnchors(name, RootKind.Array, start)
             var origin = anchors.first
             val rightOrigin = anchors.second
-            values.forEach { raw ->
-                val stored = doc.storeValue(raw, parent = name)
-                val content = if (raw is AbstractYType) {
-                    ItemContent.XmlType(stored as YValue.TypeRef, raw.xmlNodeNameOrEmpty(), RootKind.Array)
-                } else {
-                    ItemContent.Value(stored)
+            val contents = buildList {
+                val packed = mutableListOf<YValue>()
+                fun flushPacked() {
+                    when (packed.size) {
+                        0 -> Unit
+                        1 -> add(ItemContent.Value(packed.single()))
+                        else -> add(ItemContent.ArrayValues(packed.toList()))
+                    }
+                    packed.clear()
                 }
+                values.forEach { raw ->
+                    val stored = doc.storeValue(raw, parent = name)
+                    when {
+                        raw is AbstractYType -> {
+                            flushPacked()
+                            add(ItemContent.XmlType(stored as YValue.TypeRef, raw.xmlNodeNameOrEmpty(), RootKind.Array))
+                        }
+                        stored is YValue.BinaryValue || stored is YValue.SubdocRef || stored is YValue.TypeRef -> {
+                            // Yjs emits ContentBinary, ContentDoc, and ContentType as individual
+                            // Items and packs all remaining generic values into one ContentAny.
+                            flushPacked()
+                            add(ItemContent.Value(stored))
+                        }
+                        else -> packed.add(stored)
+                    }
+                }
+                flushPacked()
+            }
+            contents.forEach { content ->
                 val item = StoreItem(
                     id = doc.nextId(),
                     origin = origin,
@@ -623,7 +680,7 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
                     content = content,
                 )
                 doc.integrateLocal(item)
-                origin = item.id
+                origin = item.lastId
             }
         }
     }
@@ -772,7 +829,14 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
 
     fun get(index: Int): Any? {
         if (index < 0) return null
-        return toList().getOrNull(index)
+        val (item, offset) = doc.visibleSequencePositionAt(name, RootKind.Array, index) ?: return null
+        return when (val content = item.content) {
+            is ItemContent.Value -> doc.valueToAny(content.value)
+            is ItemContent.ArrayValues ->
+                doc.valueToAny(content.values[offset.toNonNegativeInt("array value offset")])
+            is ItemContent.XmlType -> doc.typeFromXmlType(content)
+            else -> null
+        }
     }
 
     fun slice(start: Int = 0, end: Int = size): List<Any?> {
@@ -788,12 +852,14 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         return doc.visibleSequence(name)
             .filter { item ->
                 item.content is ItemContent.Value ||
+                    item.content is ItemContent.ArrayValues ||
                     (item.content is ItemContent.XmlType && item.content.kind == RootKind.Array)
             }
-            .map { item ->
+            .flatMap { item ->
                 when (val content = item.content) {
-                    is ItemContent.Value -> doc.valueToAny(content.value)
-                    is ItemContent.XmlType -> doc.typeFromXmlType(content)
+                    is ItemContent.Value -> listOf(doc.valueToAny(content.value))
+                    is ItemContent.ArrayValues -> content.values.map(doc::valueToAny)
+                    is ItemContent.XmlType -> listOf(doc.typeFromXmlType(content))
                     else -> error("item content is not an array value: ${content::class.simpleName}")
                 }
             }
@@ -898,12 +964,14 @@ class YArray internal constructor(doc: YDoc, name: String) : AbstractYType(doc, 
         return doc.visibleSequence(name)
             .filter { item ->
                 item.content is ItemContent.Value ||
+                    item.content is ItemContent.ArrayValues ||
                     (item.content is ItemContent.XmlType && item.content.kind == RootKind.Array)
             }
-            .map { item ->
+            .flatMap { item ->
                 when (val content = item.content) {
-                    is ItemContent.Value -> doc.valueToJson(content.value)
-                    is ItemContent.XmlType -> doc.typeFromXmlType(content).toJson()
+                    is ItemContent.Value -> listOf(doc.valueToJson(content.value))
+                    is ItemContent.ArrayValues -> content.values.map(doc::valueToJson)
+                    is ItemContent.XmlType -> listOf(doc.typeFromXmlType(content).toJson())
                     else -> error("item content is not an array value: ${content::class.simpleName}")
                 }
             }
@@ -1390,6 +1458,22 @@ open class YText internal constructor(
         val delta = YTextDelta()
         var pendingText = StringBuilder()
         var pendingAttributes: Map<String, Any?>? = null
+        val activeNativeAttributes = linkedMapOf<String, YValue>()
+        var activeWithoutNulls: Map<String, YValue> = emptyMap()
+
+        fun renderedAttributes(content: ItemContent): Map<String, Any?> {
+            val stored = content.storedTextAttributes()
+            val rendered = if (stored.isEmpty()) {
+                activeWithoutNulls
+            } else {
+                stored.toMutableMap().also { values ->
+                    activeNativeAttributes.forEach { (key, value) ->
+                        if (value == YValue.Null) values.remove(key) else values[key] = value
+                    }
+                }.toSortedMap()
+            }
+            return textAttributesToPublic(rendered)
+        }
 
         fun flush() {
             if (pendingText.isNotEmpty()) {
@@ -1404,23 +1488,28 @@ open class YText internal constructor(
                 // Upstream Y.Text.toDelta packs pending text at every visible ContentFormat
                 // marker, even when the marker leaves the effective attributes unchanged.
                 flush()
+                val marker = item.content
+                activeNativeAttributes[marker.key] = marker.value
+                activeWithoutNulls = activeNativeAttributes
+                    .filterValues { value -> value != YValue.Null }
+                    .toSortedMap()
                 return@forEach
             }
             when (val content = item.content) {
                 is ItemContent.Text -> {
-                    val attributes = textAttributesToPublic(content.textAttributes())
+                    val attributes = renderedAttributes(content)
                     if (pendingAttributes != null && pendingAttributes != attributes) flush()
                     pendingAttributes = attributes
                     pendingText.append(content.value)
                 }
                 is ItemContent.TextEmbed -> {
-                    val attributes = textAttributesToPublic(content.textAttributes())
+                    val attributes = renderedAttributes(content)
                     flush()
                     delta.insertEmbed(doc.valueToAny(content.value), attributes)
                     pendingAttributes = null
                 }
                 is ItemContent.XmlType -> {
-                    val attributes = textAttributesToPublic(content.textAttributes())
+                    val attributes = renderedAttributes(content)
                     flush()
                     delta.insertEmbed(doc.typeFromXmlType(content), attributes)
                     pendingAttributes = null
@@ -1484,9 +1573,20 @@ open class YText internal constructor(
             yChangeEndClock = null
         }
 
-        doc.sequence(name).flatMap(StoreItem::logicalUnits).forEach { item ->
+        fun snapshotBoundaries(item: StoreItem): Iterable<Long> = buildList {
+            listOfNotNull(snapshot, prevSnapshot).forEach { target ->
+                target.sv[item.id.client]?.let(::add)
+                target.ds.rangesFor(item.id.client).forEach { range ->
+                    add(range.clock)
+                    add(range.end)
+                }
+            }
+        }
+
+        ClockRangeCursor(doc.sequence(name)).forEachRange(::snapshotBoundaries) { source, startClock, endClock ->
+            val item = source.clockRangeView(startClock, endClock)
             if (item.content.kind != kind || !item.isVisibleAt(snapshot) && !item.isVisibleAt(prevSnapshot)) {
-                return@forEach
+                return@forEachRange true
             }
             when (val content = item.content) {
                 is ItemContent.NativeTextFormat -> {
@@ -1545,13 +1645,16 @@ open class YText internal constructor(
                 }
                 is ItemContent.TextFormat,
                 is ItemContent.Value,
+                is ItemContent.ArrayValues,
                 is ItemContent.MapEntry,
+                is ItemContent.MapEntries,
                 is ItemContent.XmlNode,
                 is ItemContent.Deleted -> {
                     flush()
                     resetYChange()
                 }
             }
+            true
         }
         flush()
         return delta
@@ -1562,12 +1665,15 @@ open class YText internal constructor(
 
     fun toList(): List<Any?> {
         if (warnIfPreliminary()) return emptyList()
-        return textItems().map { item ->
-            when (val content = item.content) {
-                is ItemContent.Text -> content.value
-                is ItemContent.TextEmbed -> doc.valueToAny(content.value)
-                is ItemContent.XmlType -> doc.typeFromXmlType(content)
-                else -> null
+        return buildList(length) {
+            doc.sequence(name).forEach { item ->
+                if (item.deleted || !item.countable || item.content.kind != kind) return@forEach
+                when (val content = item.content) {
+                    is ItemContent.Text -> content.value.forEach { character -> add(character.toString()) }
+                    is ItemContent.TextEmbed -> add(doc.valueToAny(content.value))
+                    is ItemContent.XmlType -> add(doc.typeFromXmlType(content))
+                    else -> Unit
+                }
             }
         }
     }
@@ -1584,7 +1690,13 @@ open class YText internal constructor(
 
     fun get(index: Int): Any? {
         if (index < 0) return null
-        return toList().getOrNull(index)
+        val (item, offset) = doc.visibleSequencePositionAt(name, kind, index) ?: return null
+        return when (val content = item.content) {
+            is ItemContent.Text -> content.value[offset.toNonNegativeInt("text item offset")].toString()
+            is ItemContent.TextEmbed -> doc.valueToAny(content.value)
+            is ItemContent.XmlType -> doc.typeFromXmlType(content)
+            else -> null
+        }
     }
 
     fun <T> map(transform: (Any?) -> T): List<T> = toList().map(transform)
@@ -1650,8 +1762,6 @@ open class YText internal constructor(
         }
     }
 
-    private fun textItems(): List<StoreItem> = doc.visibleSequence(name).filter { it.content.kind == kind }
-
     private fun insertTextEntries(
         index: Int,
         entries: List<ItemContent>,
@@ -1690,15 +1800,7 @@ open class YText internal constructor(
             insertTextEntries(index, entries)
             return
         }
-        val visible = textItems()
-        val ambient = visible.getOrNull(index)?.content?.textAttributes() ?: run {
-            val active = linkedMapOf<String, YValue>()
-            doc.sequence(name).forEach { item ->
-                val marker = item.content as? ItemContent.NativeTextFormat
-                if (!item.deleted && marker?.kind == kind) active.applyTextFormatAttributes(mapOf(marker.key to marker.value))
-            }
-            active
-        }
+        val ambient = attributesAt(index)
         val keys = (ambient.keys + attributes.keys).toSortedSet()
         val desired = keys.associateWith { key -> attributes[key] ?: YValue.Null }
         val restore = keys.associateWith { key -> ambient[key] ?: YValue.Null }
@@ -1715,16 +1817,30 @@ open class YText internal constructor(
     }
 
     private fun formatNativeRange(start: Int, length: Int, attributes: Map<String, YValue>) {
-        val visible = textItems()
-        val desired = visible.map { item -> item.content.textAttributes().toMutableMap() }
-        for (index in start until start + length) {
-            desired[index].applyTextFormatAttributes(attributes)
+        if (length <= 0) return
+        // Split only the two range boundaries. The remaining pass is per physical CRDT struct,
+        // not per UTF-16 unit, so a packed 20k string stays O(number of format runs).
+        doc.insertionAnchors(name, kind, start)
+        doc.insertionAnchors(name, kind, start + length)
+        val visible = doc.visibleSequence(name).filter { item -> item.content.kind == kind }
+        var position = 0
+        val desired = visible.map { item ->
+            val current = doc.renderedTextAttributes(item).toMutableMap()
+            val itemEnd = checkedClockAdd(position.toLong(), item.length, "text format item end")
+                .toNonNegativeInt("text format item end")
+            if (position >= start && itemEnd <= start + length) {
+                current.applyTextFormatAttributes(attributes)
+            }
+            position = itemEnd
+            current
         }
-        canonicalizeNativeFormatting(desired)
+        canonicalizeNativeFormatting(visible, desired)
     }
 
-    private fun canonicalizeNativeFormatting(desired: List<Map<String, YValue>>) {
-        val visible = textItems()
+    private fun canonicalizeNativeFormatting(
+        visible: List<StoreItem>,
+        desired: List<Map<String, YValue>>,
+    ) {
         require(desired.size == visible.size) { "text formatting state must cover every visible item" }
         val nativeMarkers = doc.sequence(name)
             .filter { item ->
@@ -1733,6 +1849,7 @@ open class YText internal constructor(
         doc.deleteItemsByIds(nativeMarkers.map { item -> item.id })
 
         val active = linkedMapOf<String, YValue>()
+        var position = 0
         visible.forEachIndexed { index, item ->
             val base = item.content.baseTextAttributes()
             val target = desired[index]
@@ -1748,23 +1865,39 @@ open class YText internal constructor(
                     active[key] = markerValue
                 }
             }
-            insertNativeFormatMarkers(index, changes)
+            insertNativeFormatMarkers(position, changes)
+            position = checkedClockAdd(position.toLong(), item.length, "text format position")
+                .toNonNegativeInt("text format position")
         }
         val terminalChanges = active
             .filterValues { value -> value != YValue.Null }
             .keys
             .associateWith { YValue.Null }
-        insertNativeFormatMarkers(visible.size, terminalChanges)
+        insertNativeFormatMarkers(position, terminalChanges)
     }
 
     private fun insertTransientFormatMarkers(index: Int, attributes: Map<String, YValue>) {
         if (attributes.isEmpty()) return
-        val ambient = textItems().getOrNull(index)?.content?.textAttributes().orEmpty()
+        val ambient = attributesAt(index)
         val changes = attributes.filter { (key, value) -> (ambient[key] ?: YValue.Null) != value }
         if (changes.isEmpty()) return
         val lastMarker = insertNativeFormatMarkers(index, changes)
         val restore = changes.keys.associateWith { key -> ambient[key] ?: YValue.Null }
         insertNativeFormatMarkers(index, restore, originOverride = lastMarker)
+    }
+
+    private fun attributesAt(index: Int): Map<String, YValue> {
+        doc.visibleSequencePositionAt(name, kind, index)?.first?.let { item ->
+            return doc.renderedTextAttributes(item)
+        }
+        val active = linkedMapOf<String, YValue>()
+        doc.sequence(name).forEach { item ->
+            val marker = item.content as? ItemContent.NativeTextFormat
+            if (!item.deleted && marker?.kind == kind) {
+                active.applyTextFormatAttributes(mapOf(marker.key to marker.value))
+            }
+        }
+        return active
     }
 
     private fun insertNativeFormatMarkers(

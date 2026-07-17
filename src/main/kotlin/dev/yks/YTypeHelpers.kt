@@ -34,7 +34,7 @@ class ItemTextListPosition(
             ).toNonNegativeInt("text list position index")
         }
         left = item
-        right = logicalTypeStructs(type).nextAfter(item)
+        right = nextLogicalTypeItem(type, item)
         return this
     }
 
@@ -229,14 +229,9 @@ fun typeListInsertGenericsAfter(type: AbstractYType, referenceItem: Item?, conte
     } else {
         require(referenceItem.parent == type.name) { "reference item must belong to the parent type" }
         require(referenceItem.kind == type.kind) { "reference item kind does not match the parent type" }
-        val structs = getTypeStructs(type)
-        val position = structs.indexOfFirst { it.id == referenceItem.id }
-        require(position >= 0) { "reference item must belong to the parent type" }
-        structs.asSequence()
-            .take(position + 1)
-            .filter { item -> !item.deleted && item.countable }
-            .fold(0L) { length, item -> checkedClockAdd(length, item.length, "list insertion index") }
-            .toNonNegativeInt("list insertion index")
+        requireNotNull(type.doc.visibleSequenceIndexAfter(type.name, type.kind, referenceItem.id)) {
+            "reference item must belong to the parent type"
+        }
     }
     typeListInsertGenerics(type, index, content)
 }
@@ -288,25 +283,30 @@ internal fun renderedSequenceIndexToVisibleIndex(
     val target = index.coerceAtLeast(0)
     var rendered = 0
     var visible = 0
-    type.doc.sequence(type.name)
-        .filter { item -> item.content.kind == type.kind && item.countable }
-        .flatMap(StoreItem::logicalUnits)
-        .forEach { item ->
-            val renderedLength = rendererContentLength(renderer, item.toItemStruct(type.doc))
-                .toNonNegativeInt("rendered sequence length")
-            if (renderedLength > 0 && rendered + renderedLength > target) {
-                return visible + (target - rendered)
-            }
-            rendered = checkedClockAdd(
-                rendered.toLong(),
-                renderedLength.toLong(),
-                "rendered sequence index",
-            ).toNonNegativeInt("rendered sequence index")
-            if (!item.deleted) {
-                visible = checkedClockAdd(visible.toLong(), item.length, "visible sequence index")
-                    .toNonNegativeInt("visible sequence index")
-            }
+    var resolved: Int? = null
+    ClockRangeCursor(type.doc.sequence(type.name)).forEachRange(
+        boundaries = { item -> renderer.clockBoundaries(item) },
+    ) { source, startClock, endClock ->
+        val item = source.clockRangeView(startClock, endClock)
+        if (item.content.kind != type.kind || !item.countable) return@forEachRange true
+        val renderedLength = rendererContentLength(renderer, item.toItemStruct(type.doc))
+            .toNonNegativeInt("rendered sequence length")
+        if (renderedLength > 0 && rendered + renderedLength > target) {
+            resolved = visible + (target - rendered)
+            return@forEachRange false
         }
+        rendered = checkedClockAdd(
+            rendered.toLong(),
+            renderedLength.toLong(),
+            "rendered sequence index",
+        ).toNonNegativeInt("rendered sequence index")
+        if (!item.deleted) {
+            visible = checkedClockAdd(visible.toLong(), item.length, "visible sequence index")
+                .toNonNegativeInt("visible sequence index")
+        }
+        true
+    }
+    resolved?.let { return it }
     if (clampToEnd && target >= rendered) return visible
     require(target == rendered) { "index is out of bounds" }
     return visible
@@ -322,13 +322,14 @@ private fun collectRendererAttributedDeletedIds(
     val targetEnd = checkedClockAdd(targetStart, length.toLong(), "rendered delete range end")
     val deleteIds = createIdSet()
     var rendered = 0L
-    type.doc.sequence(type.name)
-        .filter { item -> item.content.kind == type.kind && item.countable }
-        .flatMap(StoreItem::logicalUnits)
-        .forEach { item ->
+    ClockRangeCursor(type.doc.sequence(type.name)).forEachRange(
+        boundaries = { item -> renderer.clockBoundaries(item) },
+    ) { source, startClock, endClock ->
+            val item = source.clockRangeView(startClock, endClock)
+            if (item.content.kind != type.kind || !item.countable) return@forEachRange true
             val struct = item.toItemStruct(type.doc)
             val renderedLength = rendererContentLength(renderer, struct)
-            if (renderedLength <= 0) return@forEach
+            if (renderedLength <= 0) return@forEachRange true
             val itemStart = rendered
             val itemEnd = checkedClockAdd(rendered, renderedLength, "rendered item end")
             if (item.deleted && itemEnd > targetStart && itemStart < targetEnd) {
@@ -362,9 +363,16 @@ private fun collectRendererAttributedDeletedIds(
                 }
             }
             rendered = itemEnd
-            if (rendered >= targetEnd) return@forEach
-        }
+            rendered < targetEnd
+    }
     return deleteIds
+}
+
+private fun AbstractRenderer.clockBoundaries(item: StoreItem): List<Long> = buildList {
+    attributed.ranges(item.id.client).forEach { range ->
+        add(range.clock)
+        add(range.end)
+    }
 }
 
 fun typeMapSet(parent: AbstractYType, key: String, value: Any?): Any? =
@@ -508,9 +516,35 @@ private fun ItemTextListPosition.moveTo(parent: YText, index: Int, formats: Map<
     this.index = next.index
 }
 
-private fun List<Item>.nextAfter(item: Item): Item? {
-    val index = indexOfFirst { candidate -> candidate.id == item.id }
-    return if (index >= 0) getOrNull(index + 1) else null
+private fun nextLogicalTypeItem(type: AbstractYType, item: Item): Item? {
+    val containing = type.doc.getItem(item.id) ?: return null
+    val nextClock = checkedClockAdd(item.id.clock, item.length, "next logical item clock")
+    if (
+        nextClock < containing.clockEnd() &&
+        (containing.content is ItemContent.Text || containing.content is ItemContent.ArrayValues)
+    ) {
+        return containing.clockRangeView(
+            nextClock,
+            checkedClockAdd(nextClock, 1, "next logical item end"),
+        ).toItemStruct(type.doc)
+    }
+    var next = type.doc.store.sequenceNeighbors(containing).second
+    while (next != null && next.content.kind != type.kind) {
+        next = type.doc.store.sequenceNeighbors(next).second
+    }
+    return next?.let { candidate ->
+        if (
+            candidate.length > 1 &&
+            (candidate.content is ItemContent.Text || candidate.content is ItemContent.ArrayValues)
+        ) {
+            candidate.clockRangeView(
+                candidate.id.clock,
+                checkedClockAdd(candidate.id.clock, 1, "first logical item end"),
+            ).toItemStruct(type.doc)
+        } else {
+            candidate.toItemStruct(type.doc)
+        }
+    }
 }
 
 private fun logicalTypeStructs(type: AbstractYType): List<Item> = getTypeStructs(type).flatMap { item ->

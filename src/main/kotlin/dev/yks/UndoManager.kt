@@ -321,16 +321,19 @@ class UndoManager private constructor(
     private fun applyStackItem(stackItem: StackItem): AppliedStackItem {
         captureDisabled = true
         try {
-            val insertedItemsToDelete = stackItem.insertedItems
-                .flatMap(StoreItem::logicalUnits)
-                .filter { options.deleteFilter(it.toItemStruct(doc)) }
-            val insertedIdsToDelete = insertedItemsToDelete.map { item -> item.id }.toSet()
+            // Yjs invokes deleteFilter once per physical Item, even when ContentString/ContentAny
+            // spans many clocks. Keeping packed ranges intact avoids allocating one Item per
+            // character/value and preserves the upstream filter contract.
+            val insertedItemsToDelete = stackItem.insertedItems.filter { item ->
+                options.deleteFilter(item.toItemStruct(doc))
+            }
+            val insertedIdsToDelete = insertedItemsToDelete.toIdSet()
             val restoreCandidates = stackItem.deletedItems.filter { restore ->
                 val source = restore.item
                 val key = source.parentSub ?: return@filter true
                 if (options.shouldIgnoreRemoteAttributeChanges()) return@filter true
                 val currentId = doc.currentVisibleMapItemId(source.parent, key) ?: return@filter true
-                currentId == source.id || currentId in insertedIdsToDelete
+                currentId == source.id || insertedIdsToDelete.hasId(currentId)
             }
             val restoreCandidatesById = restoreCandidates.associate { restore -> restore.item.id to restore.item }
             val restoreEligibility = mutableMapOf<Id, Boolean>()

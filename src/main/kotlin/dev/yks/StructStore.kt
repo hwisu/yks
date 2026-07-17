@@ -24,11 +24,20 @@ class StructStore(private val owner: YDoc? = null) {
     private var allItemsCache: List<StoreItem>? = null
     private var deleteSetCache: DeleteSet? = null
     private var parentItemIdsCache: Map<String, Id>? = null
+    private val itemsByParent: MutableMap<String, LinkedHashMap<Id, StoreItem>> = mutableMapOf()
+    private val mapItemsByParentKey:
+        MutableMap<Pair<String, String>, LinkedHashMap<Id, StoreItem>> = mutableMapOf()
+    private val mapKeysByParent: MutableMap<String, LinkedHashSet<String>> = mutableMapOf()
+    private val nestedOwnersByName: MutableMap<String, LinkedHashMap<Id, StoreItem>> = mutableMapOf()
     private val sequenceCache: MutableMap<String, IndexedSequence> = mutableMapOf()
     private val mapEntriesCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
     private val mapOrderCache: MutableMap<Pair<String, String>, List<StoreItem>> = mutableMapOf()
+    private val mapOrderPositions: MutableMap<Pair<String, String>, Map<Id, Int>> = mutableMapOf()
+    private val mapCurrentCache: MutableMap<Pair<String, String>, StoreItem?> = mutableMapOf()
     private val visibleLengths: MutableMap<String, LongArray> = mutableMapOf()
     private val visibleNativeTextFormats: MutableMap<String, MutableSet<Id>> = mutableMapOf()
+    private val visibleLegacyTextFormats: MutableMap<String, MutableSet<Id>> = mutableMapOf()
+    private val renderedTextAttributes: MutableMap<String, Map<Id, Map<String, YValue>>> = mutableMapOf()
     private val visibleTextCache: MutableMap<Pair<String, RootKind>, String> = mutableMapOf()
     private var lookupHintClient: Long = -1
     private var lookupHintIndex: Int = -1
@@ -106,14 +115,27 @@ class StructStore(private val owner: YDoc? = null) {
         allItemsCache = null
         deleteSetCache = null
         parentItemIdsCache = null
+        itemsByParent.clear()
+        mapItemsByParentKey.clear()
+        mapKeysByParent.clear()
+        nestedOwnersByName.clear()
         sequenceCache.clear()
         mapEntriesCache.clear()
         mapOrderCache.clear()
+        mapOrderPositions.clear()
+        mapCurrentCache.clear()
         visibleLengths.clear()
         visibleNativeTextFormats.clear()
+        visibleLegacyTextFormats.clear()
+        renderedTextAttributes.clear()
         visibleTextCache.clear()
         clearLookupHint()
-        clientItems.values.forEach { items -> items.forEach(::addDerivedState) }
+        clientItems.values.forEach { items ->
+            items.forEach { item ->
+                addStructuralIndex(item)
+                addDerivedState(item)
+            }
+        }
         version = snapshot.version
         sequenceBuildCount = snapshot.sequenceBuildCount
     }
@@ -257,7 +279,21 @@ class StructStore(private val owner: YDoc? = null) {
                 }
                 content.copy(value = leftValue) to content.copy(value = rightValue)
             }
-            else -> error("only packed text or deleted store items can require splitting")
+            is ItemContent.MapEntries -> {
+                val splitIndex = diff.toNonNegativeInt("packed map split offset")
+                fun mapContent(values: List<YValue>): ItemContent =
+                    if (values.size == 1) ItemContent.MapEntry(values.single()) else content.copy(values = values)
+                mapContent(content.values.subList(0, splitIndex).toList()) to
+                    mapContent(content.values.subList(splitIndex, content.values.size).toList())
+            }
+            is ItemContent.ArrayValues -> {
+                val splitIndex = diff.toNonNegativeInt("packed array split offset")
+                fun arrayContent(values: List<YValue>): ItemContent =
+                    if (values.size == 1) ItemContent.Value(values.single()) else content.copy(values = values)
+                arrayContent(content.values.subList(0, splitIndex).toList()) to
+                    arrayContent(content.values.subList(splitIndex, content.values.size).toList())
+            }
+            else -> error("only packed text, values, or deleted store items can require splitting")
         }
         val left = item.copy(content = leftContent)
         val right = item.copy(
@@ -332,7 +368,11 @@ class StructStore(private val owner: YDoc? = null) {
             areSequenceAdjacent(left, right)
         } else {
             val logicalOrder = owner?.mapItemOrder(left.parent, left.parentSub) ?: return false
-            val logicalLeftIndex = logicalOrder.indexOfFirst { item -> item.id == left.id }
+            val logicalLeftIndex = cachedMapItemIndex(
+                left.parent,
+                left.parentSub,
+                left.id,
+            ) { logicalOrder }
             logicalLeftIndex >= 0 && logicalOrder.getOrNull(logicalLeftIndex + 1)?.id == right.id
         }
         if (
@@ -389,6 +429,56 @@ class StructStore(private val owner: YDoc? = null) {
         return updated
     }
 
+    /**
+     * Replaces content whose structural shape is unchanged.
+     *
+     * Native Yjs formatting changes only rendered attributes. Updating these in one pass avoids
+     * detaching and reinserting every sequence node while preserving transaction rollback state.
+     */
+    internal fun replaceEquivalentContents(contents: Map<Id, ItemContent>): List<StoreItem> {
+        if (contents.isEmpty()) return emptyList()
+        val updatedItems = linkedMapOf<Id, StoreItem>()
+        val affectedParents = linkedSetOf<String>()
+        val affectedMapKeys = linkedSetOf<Pair<String, String>>()
+        contents.keys.mapTo(linkedSetOf()) { id -> id.client }.forEach clientLoop@{ client ->
+            val structs = clientItems[client] ?: return@clientLoop
+            captureClientBeforeMutation(client)
+            structs.indices.forEach structLoop@{ index ->
+                val previous = structs[index]
+                val nextContent = contents[previous.id] ?: return@structLoop
+                if (previous.content == nextContent) return@structLoop
+                require(previous.content.kind == nextContent.kind) {
+                    "equivalent content replacement cannot change kind"
+                }
+                require(previous.length == nextContent.clockLength) {
+                    "equivalent content replacement cannot change clock length"
+                }
+                val updated = previous.copy(content = nextContent)
+                structs[index] = updated
+                updatedItems[updated.id] = updated
+                affectedParents.add(updated.parent)
+                updated.parentSub?.let { key -> affectedMapKeys.add(updated.parent to key) }
+            }
+        }
+        if (updatedItems.isEmpty()) return emptyList()
+
+        allItemsCache = null
+        version++
+        affectedParents.forEach { parent ->
+            itemsByParent[parent]?.replaceAll { id, item -> updatedItems[id] ?: item }
+            sequenceCache[parent]?.replaceItems(updatedItems)
+            RootKind.entries.forEach { kind -> visibleTextCache.remove(parent to kind) }
+        }
+        affectedMapKeys.forEach { cacheKey ->
+            mapItemsByParentKey[cacheKey]?.replaceAll { id, item -> updatedItems[id] ?: item }
+            mapEntriesCache.remove(cacheKey)
+            mapOrderCache.remove(cacheKey)
+            mapOrderPositions.remove(cacheKey)
+            mapCurrentCache.remove(cacheKey)
+        }
+        return updatedItems.values.toList()
+    }
+
     fun getClock(client: Long): Long {
         owner?.ensureThreadAccess()
         val structs = clientItems[client] ?: return 0
@@ -432,6 +522,26 @@ class StructStore(private val owner: YDoc? = null) {
 
     internal fun itemsForClient(client: Long): List<StoreItem> = clientItems[client].orEmpty()
 
+    internal fun itemsForParent(parent: String): List<StoreItem> =
+        itemsByParent[parent]?.values?.toList().orEmpty()
+
+    internal fun hasParent(parent: String): Boolean = itemsByParent[parent]?.isNotEmpty() == true
+
+    internal fun parentNames(): Set<String> = itemsByParent.keys
+
+    internal fun firstItemForParent(parent: String, sequenceOnly: Boolean = false): StoreItem? {
+        val items = itemsByParent[parent]?.values ?: return null
+        return if (sequenceOnly) items.firstOrNull { item -> item.parentSub == null } else items.firstOrNull()
+    }
+
+    internal fun mapKeysForParent(parent: String): Set<String> =
+        mapKeysByParent[parent].orEmpty()
+
+    internal fun firstOwnerForNested(name: String): StoreItem? =
+        nestedOwnersByName[name]?.values?.minByOrNull { item -> item.id }
+
+    internal fun hasNestedOwner(name: String): Boolean = nestedOwnersByName[name]?.isNotEmpty() == true
+
     internal fun firstItemEndingAfter(client: Long, clock: Long): Int =
         clientItems[client]?.findFirstEndingAfter(clock) ?: 0
 
@@ -452,7 +562,10 @@ class StructStore(private val owner: YDoc? = null) {
                     val item = structs[index++]
                     when {
                         item.id.clock >= targetClock -> add(item)
-                        item.content is ItemContent.Deleted || item.content is ItemContent.Text -> {
+                        item.content is ItemContent.Deleted ||
+                            item.content is ItemContent.Text ||
+                            item.content is ItemContent.ArrayValues ||
+                            item.content is ItemContent.MapEntries -> {
                             val remaining = item.endClock() - targetClock
                             val content = when (val current = item.content) {
                                 is ItemContent.Deleted -> current.copy(length = remaining)
@@ -460,6 +573,20 @@ class StructStore(private val owner: YDoc? = null) {
                                     val offset = (targetClock - item.id.clock)
                                         .toNonNegativeInt("text state-vector offset")
                                     current.copy(value = ContentString(current.value).splice(offset.toLong()).str)
+                                }
+                                is ItemContent.MapEntries -> {
+                                    val offset = (targetClock - item.id.clock)
+                                        .toNonNegativeInt("packed map state-vector offset")
+                                    val values = current.values.drop(offset)
+                                    if (values.size == 1) ItemContent.MapEntry(values.single())
+                                    else current.copy(values = values)
+                                }
+                                is ItemContent.ArrayValues -> {
+                                    val offset = (targetClock - item.id.clock)
+                                        .toNonNegativeInt("packed array state-vector offset")
+                                    val values = current.values.drop(offset)
+                                    if (values.size == 1) ItemContent.Value(values.single())
+                                    else current.copy(values = values)
                                 }
                                 else -> error("unreachable packed content")
                             }
@@ -528,17 +655,21 @@ class StructStore(private val owner: YDoc? = null) {
 
     internal fun markDeleted(items: Iterable<StoreItem>): Boolean {
         var changed = false
+        val changedSequenceIds = linkedMapOf<String, MutableList<Id>>()
         items.forEach { item ->
             if (!item.deleted) {
                 captureDeletedBeforeMutation(item)
                 removeDerivedState(item)
                 item.deleted = true
-                if (item.parentSub == null) sequenceCache[item.parent]?.refresh(item.id)
+                if (item.parentSub == null && sequenceCache[item.parent] != null) {
+                    changedSequenceIds.getOrPut(item.parent) { mutableListOf() }.add(item.id)
+                }
                 deleteSetCache = null
                 version++
                 changed = true
             }
         }
+        changedSequenceIds.forEach { (parent, ids) -> sequenceCache[parent]?.refreshAll(ids) }
         return changed
     }
 
@@ -581,12 +712,36 @@ class StructStore(private val owner: YDoc? = null) {
     internal fun sequenceAnchors(parent: String, kind: RootKind, index: Long): Pair<StoreItem?, StoreItem?> =
         sequenceIndex(parent).anchorsAt(kind, index)
 
+    internal fun visibleSequenceIndexAfter(parent: String, kind: RootKind, id: Id): Long? =
+        sequenceIndex(parent).visibleIndexAfter(kind, id)
+
     internal fun visibleItemsInRange(parent: String, index: Long, length: Long): List<StoreItem> =
         sequenceIndex(parent).visibleItemsInRange(index, length)
 
     internal fun hasVisibleNativeTextFormat(parent: String): Boolean {
         owner?.ensureThreadAccess()
         return visibleNativeTextFormats[parent]?.isNotEmpty() == true
+    }
+
+    internal fun hasVisibleLegacyTextFormat(parent: String): Boolean {
+        owner?.ensureThreadAccess()
+        return visibleLegacyTextFormats[parent]?.isNotEmpty() == true
+    }
+
+    /**
+     * Resolves native Yjs ContentFormat markers lazily, like Y.Text's linked-list readers.
+     *
+     * Standard updates keep formatting in marker structs. Caching the rendered attributes avoids
+     * rewriting every countable struct during update integration while retaining O(1) lookups for
+     * Kotlin APIs that need the attributes of a particular logical text item.
+     */
+    internal fun renderedTextAttributes(item: StoreItem): Map<String, YValue> {
+        owner?.ensureThreadAccess()
+        if (!hasVisibleNativeTextFormat(item.parent)) return item.content.storedTextAttributes()
+        val containing = getStoreItem(item.id) ?: item
+        return renderedTextAttributes.getOrPut(item.parent) {
+            buildRenderedTextAttributes(item.parent)
+        }[containing.id] ?: item.content.storedTextAttributes()
     }
 
     internal fun visibleText(parent: String, kind: RootKind): String {
@@ -622,8 +777,31 @@ class StructStore(private val owner: YDoc? = null) {
 
     private fun buildSequence(parent: String): List<StoreItem> {
         sequenceBuildCount++
-        val items = allItems().filter { it.parent == parent && it.parentSub == null }
+        val indexed = itemsForParent(parent).filter { it.parentSub == null }
+        val items = if (indexed.zipWithNext().all { (left, right) -> left.id <= right.id }) {
+            indexed
+        } else {
+            indexed.sortedBy { item -> item.id }
+        }
         if (items.size < 2) return items
+        if (
+            items.zipWithNext().all { (left, right) ->
+                left.id.client == right.id.client &&
+                    right.origin == left.lastId &&
+                    left.rightOrigin == right.rightOrigin
+            }
+        ) {
+            return items
+        }
+        if (
+            items.zipWithNext().all { (previous, next) ->
+                previous.id.client == next.id.client &&
+                    next.origin == null &&
+                    next.rightOrigin == previous.id
+            }
+        ) {
+            return items.asReversed()
+        }
 
         // Rebuild the linked sequence using the same conflict scan as Item.integrate in Yjs.
         // A simple origin-child traversal is insufficient: an item's rightOrigin may constrain
@@ -739,28 +917,59 @@ class StructStore(private val owner: YDoc? = null) {
 
     internal fun mapEntries(parent: String, key: String): List<StoreItem> =
         mapEntriesCache.getOrPut(parent to key) {
-            allItems()
-                .filter { it.parent == parent && it.parentSub == key }
-                .sortedWith(compareBy<StoreItem> { it.id.clock }.thenBy { it.id.client })
+            val items = mapItemsByParentKey[parent to key]?.values.orEmpty()
+            if (items.size < 2) {
+                items.toList()
+            } else {
+                items.sortedWith(compareBy<StoreItem> { item -> item.id.clock }.thenBy { item -> item.id.client })
+            }
         }
 
     internal fun cachedMapOrder(parent: String, key: String, compute: () -> List<StoreItem>): List<StoreItem> =
         mapOrderCache.getOrPut(parent to key, compute)
 
+    internal fun cachedMapItemIndex(
+        parent: String,
+        key: String,
+        id: Id,
+        computeOrder: () -> List<StoreItem>,
+    ): Int {
+        val cacheKey = parent to key
+        val order = mapOrderCache.getOrPut(cacheKey, computeOrder)
+        val positions = mapOrderPositions.getOrPut(cacheKey) {
+            order.mapIndexed { index, item -> item.id to index }.toMap()
+        }
+        return positions[id] ?: -1
+    }
+
+    internal fun cachedCurrentMapItem(parent: String, key: String, compute: () -> StoreItem?): StoreItem? {
+        val cacheKey = parent to key
+        if (mapCurrentCache.containsKey(cacheKey)) return mapCurrentCache[cacheKey]
+        return compute().also { current -> mapCurrentCache[cacheKey] = current }
+    }
+
+    internal fun cacheCurrentMapItem(parent: String, key: String, item: StoreItem?) {
+        mapCurrentCache[parent to key] = item
+    }
+
     private fun invalidateNonSequenceCaches(item: StoreItem) {
         allItemsCache = null
         deleteSetCache = null
-        parentItemIdsCache = null
+        if (item.parentSub == null) renderedTextAttributes.remove(item.parent)
         item.parentSub?.let { key ->
             val cacheKey = item.parent to key
             mapEntriesCache.remove(cacheKey)
             mapOrderCache.remove(cacheKey)
+            mapOrderPositions.remove(cacheKey)
+            mapCurrentCache.remove(cacheKey)
         }
     }
 
     private fun recordAdded(item: StoreItem) {
         invalidateNonSequenceCaches(item)
+        if (item.content.directTypeRef() != null) parentItemIdsCache = null
         version++
+        addStructuralIndex(item)
         addDerivedState(item)
         if (item.parentSub == null) {
             sequenceCache[item.parent]?.integrate(item)
@@ -773,15 +982,67 @@ class StructStore(private val owner: YDoc? = null) {
         additionallyRemoved: List<StoreItem> = emptyList(),
     ) {
         invalidateNonSequenceCaches(previous)
+        if (
+            previous.content.directTypeRef() != null ||
+            additionallyRemoved.any { item -> item.content.directTypeRef() != null } ||
+            replacements.any { item -> item.content.directTypeRef() != null }
+        ) {
+            parentItemIdsCache = null
+        }
         version++
+        removeStructuralIndex(previous)
+        additionallyRemoved.forEach(::removeStructuralIndex)
+        replacements.forEach(::addStructuralIndex)
         removeDerivedState(previous)
         additionallyRemoved.forEach(::removeDerivedState)
         replacements.forEach(::addDerivedState)
         sequenceCache[previous.parent]?.replace(previous, replacements, additionallyRemoved)
     }
 
+    private fun addStructuralIndex(item: StoreItem) {
+        itemsByParent.getOrPut(item.parent) { linkedMapOf() }[item.id] = item
+        item.content.directTypeRef()?.name?.let { name ->
+            nestedOwnersByName.getOrPut(name) { linkedMapOf() }[item.id] = item
+        }
+        item.parentSub?.let { key ->
+            mapItemsByParentKey.getOrPut(item.parent to key) {
+                linkedMapOf()
+            }[item.id] = item
+            mapKeysByParent.getOrPut(item.parent) { linkedSetOf() }.add(key)
+        }
+    }
+
+    private fun removeStructuralIndex(item: StoreItem) {
+        itemsByParent[item.parent]?.let { items ->
+            items.remove(item.id)
+            if (items.isEmpty()) itemsByParent.remove(item.parent)
+        }
+        item.content.directTypeRef()?.name?.let { name ->
+            nestedOwnersByName[name]?.let { owners ->
+                owners.remove(item.id)
+                if (owners.isEmpty()) nestedOwnersByName.remove(name)
+            }
+        }
+        item.parentSub?.let { key ->
+            val cacheKey = item.parent to key
+            mapItemsByParentKey[cacheKey]?.let { items ->
+                items.remove(item.id)
+                if (items.isEmpty()) {
+                    mapItemsByParentKey.remove(cacheKey)
+                    mapKeysByParent[item.parent]?.let { keys ->
+                        keys.remove(key)
+                        if (keys.isEmpty()) mapKeysByParent.remove(item.parent)
+                    }
+                }
+            }
+        }
+    }
+
     private fun addDerivedState(item: StoreItem) {
-        if (item.parentSub == null) visibleTextCache.remove(item.parent to item.content.kind)
+        if (item.parentSub == null) {
+            visibleTextCache.remove(item.parent to item.content.kind)
+            renderedTextAttributes.remove(item.parent)
+        }
         if (item.parentSub != null || item.deleted) return
         if (item.countable) {
             val lengths = visibleLengths.getOrPut(item.parent) { LongArray(RootKind.entries.size) }
@@ -791,10 +1052,16 @@ class StructStore(private val owner: YDoc? = null) {
         if (item.content is ItemContent.NativeTextFormat) {
             visibleNativeTextFormats.getOrPut(item.parent) { linkedSetOf() }.add(item.id)
         }
+        if (item.content is ItemContent.TextFormat) {
+            visibleLegacyTextFormats.getOrPut(item.parent) { linkedSetOf() }.add(item.id)
+        }
     }
 
     private fun removeDerivedState(item: StoreItem) {
-        if (item.parentSub == null) visibleTextCache.remove(item.parent to item.content.kind)
+        if (item.parentSub == null) {
+            visibleTextCache.remove(item.parent to item.content.kind)
+            renderedTextAttributes.remove(item.parent)
+        }
         if (item.parentSub != null || item.deleted) return
         if (item.countable) {
             val lengths = checkNotNull(visibleLengths[item.parent]) { "missing visible length for ${item.parent}" }
@@ -810,9 +1077,49 @@ class StructStore(private val owner: YDoc? = null) {
                 if (ids.isEmpty()) visibleNativeTextFormats.remove(item.parent)
             }
         }
+        if (item.content is ItemContent.TextFormat) {
+            visibleLegacyTextFormats[item.parent]?.let { ids ->
+                ids.remove(item.id)
+                if (ids.isEmpty()) visibleLegacyTextFormats.remove(item.parent)
+            }
+        }
     }
 
-    internal fun mergeTextItems(ids: List<Id>): StoreItem? {
+    private fun buildRenderedTextAttributes(parent: String): Map<Id, Map<String, YValue>> {
+        val active = linkedMapOf<String, YValue>()
+        var activeWithoutNulls: Map<String, YValue> = emptyMap()
+        return buildMap {
+            sequenceIndex(parent).forEach { item ->
+                if (item.deleted) return@forEach
+                when (val content = item.content) {
+                    is ItemContent.NativeTextFormat -> {
+                        active[content.key] = content.value
+                        activeWithoutNulls = active
+                            .filterValues { value -> value != YValue.Null }
+                            .toSortedMap()
+                    }
+                    is ItemContent.Text,
+                    is ItemContent.TextEmbed,
+                    is ItemContent.XmlType -> {
+                        val stored = content.storedTextAttributes()
+                        val attributes = if (stored.isEmpty()) {
+                            activeWithoutNulls
+                        } else {
+                            stored.toMutableMap().also { values ->
+                                active.forEach { (key, value) ->
+                                    if (value == YValue.Null) values.remove(key) else values[key] = value
+                                }
+                            }.toSortedMap()
+                        }
+                        put(item.id, attributes)
+                    }
+                    else -> Unit
+                }
+            }
+        }
+    }
+
+    internal fun mergeCompatibleItems(ids: List<Id>): StoreItem? {
         if (ids.size < 2 || ids.any { id -> id.client != ids.first().client }) return null
         val structs = clientItems[ids.first().client] ?: return null
         val firstIndex = structs.findStartIndex(ids.first().clock)
@@ -820,11 +1127,17 @@ class StructStore(private val owner: YDoc? = null) {
         val items = structs.subList(firstIndex, firstIndex + ids.size).toList()
         if (items.map(StoreItem::id) != ids) return null
         val firstItem = items.first()
-        val firstContent = firstItem.content as? ItemContent.Text ?: return null
+        val firstContent = firstItem.content
+        if (
+            firstContent !is ItemContent.Text &&
+            firstContent !is ItemContent.Value &&
+            firstContent !is ItemContent.ArrayValues &&
+            firstContent !is ItemContent.MapEntry &&
+            firstContent !is ItemContent.MapEntries
+        ) return null
         for (index in 1 until items.size) {
             val left = items[index - 1]
             val right = items[index]
-            val content = right.content as? ItemContent.Text ?: return null
             if (
                 left.endClock() != right.id.clock ||
                 right.origin != left.lastId ||
@@ -835,20 +1148,67 @@ class StructStore(private val owner: YDoc? = null) {
                 firstItem.requiresClockContinuity != right.requiresClockContinuity ||
                 firstItem.isGc != right.isGc ||
                 firstItem.unresolvedParent != right.unresolvedParent ||
-                firstItem.countable != right.countable ||
-                firstContent.kind != content.kind ||
-                firstContent.attributes != content.attributes ||
-                firstContent.baseAttributes != content.baseAttributes
+                firstItem.countable != right.countable
             ) return null
+            when (firstContent) {
+                is ItemContent.Text -> {
+                    val content = right.content as? ItemContent.Text ?: return null
+                    if (
+                        firstContent.kind != content.kind ||
+                        firstContent.attributes != content.attributes ||
+                        firstContent.baseAttributes != content.baseAttributes
+                    ) return null
+                }
+                is ItemContent.MapEntry,
+                is ItemContent.MapEntries -> if (
+                    right.content !is ItemContent.MapEntry &&
+                    right.content !is ItemContent.MapEntries
+                ) return null
+                is ItemContent.Value,
+                is ItemContent.ArrayValues -> if (
+                    right.content !is ItemContent.Value &&
+                    right.content !is ItemContent.ArrayValues
+                ) return null
+                else -> return null
+            }
         }
 
         captureClientBeforeMutation(firstItem.id.client)
         clearLookupHint(firstItem.id.client)
-        val mergedValueLength = items.sumOf(StoreItem::length).toNonNegativeInt("merged text length")
-        val mergedValue = buildString(mergedValueLength) {
-            items.forEach { item -> append((item.content as ItemContent.Text).value) }
+        val mergedContent = when (firstContent) {
+            is ItemContent.Text -> {
+                val mergedValueLength = items.sumOf(StoreItem::length).toNonNegativeInt("merged text length")
+                firstContent.copy(
+                    value = buildString(mergedValueLength) {
+                        items.forEach { item -> append((item.content as ItemContent.Text).value) }
+                    },
+                )
+            }
+            is ItemContent.MapEntry,
+            is ItemContent.MapEntries -> {
+                val values = items.flatMap { item ->
+                    when (val content = item.content) {
+                        is ItemContent.MapEntry -> listOf(content.value)
+                        is ItemContent.MapEntries -> content.values
+                        else -> error("incompatible packed map content")
+                    }
+                }
+                ItemContent.MapEntries(values)
+            }
+            is ItemContent.Value,
+            is ItemContent.ArrayValues -> {
+                val values = items.flatMap { item ->
+                    when (val content = item.content) {
+                        is ItemContent.Value -> listOf(content.value)
+                        is ItemContent.ArrayValues -> content.values
+                        else -> error("incompatible packed array content")
+                    }
+                }
+                ItemContent.ArrayValues(values)
+            }
+            else -> return null
         }
-        val merged = firstItem.copy(content = firstContent.copy(value = mergedValue))
+        val merged = firstItem.copy(content = mergedContent)
         structs[firstIndex] = merged
         structs.subList(firstIndex + 1, firstIndex + items.size).clear()
         recordReplacement(firstItem, listOf(merged), additionallyRemoved = items.drop(1))
@@ -885,10 +1245,20 @@ private class IndexedSequence(
     private var last: Node? = null
     private var treeRoot: Node? = null
     private var materialized: List<StoreItem>? = null
+    private val firstVisibleByKind: Array<Node?> = arrayOfNulls(RootKind.entries.size)
+    private val firstVisibleComputed: BooleanArray = BooleanArray(RootKind.entries.size)
+    private var positionHintKind: RootKind? = null
+    private var positionHintIndex: Long = -1
+    private var positionHintItemStart: Long = -1
+    private var positionHintNode: Node? = null
     private var priorityState: Long = 0x6A09E667F3BCC909L
+    private var usedKindMask: Int = 0
 
     init {
-        items.forEach(::append)
+        items.forEach { item ->
+            includeKind(item)
+            append(item)
+        }
         materialized = items.toList()
     }
 
@@ -927,10 +1297,40 @@ private class IndexedSequence(
     }
 
     fun refresh(id: Id) {
+        invalidateVisibleEdges()
         var current = nodesByStart[id]
+        if (current != null && current === positionHintNode) {
+            val kind = positionHintKind
+            var next = current.right
+            while (next != null && (kind == null || next.item.visibleLength(kind) == 0L)) next = next.right
+            positionHintNode = next
+        } else {
+            invalidatePositionHint()
+        }
         while (current != null) {
             recalculate(current)
             current = current.treeParent
+        }
+    }
+
+    fun refreshAll(ids: List<Id>) {
+        if (ids.isEmpty()) return
+        if (ids.size == 1) {
+            refresh(ids.single())
+            return
+        }
+        invalidateVisibleEdges()
+        invalidatePositionHint()
+        if (ids.size <= 8) {
+            ids.forEach { id ->
+                var current = nodesByStart[id]
+                while (current != null) {
+                    recalculate(current)
+                    current = current.treeParent
+                }
+            }
+        } else {
+            recalculateSubtree(treeRoot)
         }
     }
 
@@ -945,6 +1345,32 @@ private class IndexedSequence(
         var leftNode = if (right == null) last else nodesByStart[right.id]?.left
         while (leftNode != null && leftNode.item.content.kind != kind) leftNode = leftNode.left
         return leftNode?.item to right
+    }
+
+    fun visibleIndexAfter(kind: RootKind, id: Id): Long? {
+        val containing = resolveStoreItem(id) ?: return null
+        val node = nodesByStart[containing.id] ?: return null
+        var index = visibleLengthForKind(node.treeLeft, kind)
+        var current = node
+        var parent = current.treeParent
+        while (parent != null) {
+            if (current === parent.treeRight) {
+                index = checkedClockAdd(
+                    index,
+                    visibleLengthForKind(parent.treeLeft, kind),
+                    "sequence item prefix",
+                )
+                index = checkedClockAdd(index, parent.item.visibleLength(kind), "sequence item prefix")
+            }
+            current = parent
+            parent = current.treeParent
+        }
+        if (node.item.visibleLength(kind) > 0L) {
+            val interiorEnd = checkedClockAdd(id.clock - containing.id.clock, 1, "sequence interior end")
+                .coerceAtMost(containing.length)
+            index = checkedClockAdd(index, interiorEnd, "sequence index after item")
+        }
+        return index
     }
 
     fun visibleItemsInRange(index: Long, length: Long): List<StoreItem> {
@@ -965,8 +1391,17 @@ private class IndexedSequence(
     }
 
     fun integrate(item: StoreItem) {
+        invalidateVisibleEdges()
+        includeKind(item)
+        val hintedNode = positionHintNode
+        val hintedKind = positionHintKind
         var left = find(item.origin)
         val right = find(item.rightOrigin)
+        val immediateRight = if (left == null) first else left.right
+        if (immediateRight === right) {
+            insertWithHint(left, item, hintedNode, hintedKind)
+            return
+        }
         var other = if (left == null) first else left.right
         val conflictingItems = hashSetOf<Node>()
         val itemsBeforeOrigin = hashSetOf<Node>()
@@ -996,11 +1431,33 @@ private class IndexedSequence(
             other = other.right
         }
 
-        insertAfter(left, newNode(item))
+        insertWithHint(left, item, hintedNode, hintedKind)
+    }
+
+    private fun insertWithHint(
+        left: Node?,
+        item: StoreItem,
+        hintedNode: Node?,
+        hintedKind: RootKind?,
+    ) {
+        val inserted = newNode(item)
+        insertAfter(left, inserted)
+        when {
+            hintedKind == null -> invalidatePositionHint()
+            item.visibleLength(hintedKind) == 0L -> Unit
+            inserted.right === hintedNode -> {
+                positionHintNode = inserted
+                positionHintItemStart = positionHintIndex
+            }
+            else -> invalidatePositionHint()
+        }
         materialized = null
     }
 
     fun replace(previous: StoreItem, replacements: List<StoreItem>, additionallyRemoved: List<StoreItem>) {
+        invalidateVisibleEdges()
+        invalidatePositionHint()
+        replacements.forEach(::includeKind)
         val previousNode = nodesByStart[previous.id] ?: return
         val removedIds = additionallyRemoved.mapTo(hashSetOf()) { item -> item.id }
         val insertionLeft = previousNode.left
@@ -1029,6 +1486,18 @@ private class IndexedSequence(
             if (insertionRight == null) last = insertionLeft
         }
         materialized = null
+    }
+
+    fun replaceItems(replacements: Map<Id, StoreItem>) {
+        var changed = false
+        replacements.forEach { (id, replacement) ->
+            nodesByStart[id]?.let { node ->
+                includeKind(replacement)
+                node.item = replacement
+                changed = true
+            }
+        }
+        if (changed) materialized = null
     }
 
     private fun append(item: StoreItem) {
@@ -1083,6 +1552,21 @@ private class IndexedSequence(
         kind: RootKind?,
     ): Pair<StoreItem, Long>? {
         require(index >= 0) { "sequence index is out of bounds" }
+        if (kind != null && positionHintKind == kind && positionHintIndex == index) {
+            return positionHintNode?.item?.let { item -> item to positionHintItemStart }
+        }
+        if (index == 0L && kind != null) {
+            val kindIndex = kind.ordinal
+            if (!firstVisibleComputed[kindIndex]) {
+                var candidate = first
+                while (candidate != null && candidate.item.visibleLength(kind) == 0L) {
+                    candidate = candidate.right
+                }
+                firstVisibleByKind[kindIndex] = candidate
+                firstVisibleComputed[kindIndex] = true
+            }
+            return firstVisibleByKind[kindIndex]?.item?.let { item -> item to 0L }
+        }
         var current = treeRoot
         var precedingLength = 0L
         while (current != null) {
@@ -1092,6 +1576,12 @@ private class IndexedSequence(
             if (index < itemStart) {
                 current = current.treeLeft
             } else if (itemLength > 0 && index < checkedClockAdd(itemStart, itemLength, "sequence item end")) {
+                if (kind != null) {
+                    positionHintKind = kind
+                    positionHintIndex = index
+                    positionHintItemStart = itemStart
+                    positionHintNode = current
+                }
                 return current.item to itemStart
             } else {
                 precedingLength = checkedClockAdd(itemStart, itemLength, "sequence position")
@@ -1099,6 +1589,25 @@ private class IndexedSequence(
             }
         }
         return null
+    }
+
+    private fun invalidateVisibleEdges() {
+        firstVisibleComputed.fill(false)
+        firstVisibleByKind.fill(null)
+    }
+
+    private fun invalidatePositionHint() {
+        positionHintKind = null
+        positionHintIndex = -1
+        positionHintItemStart = -1
+        positionHintNode = null
+    }
+
+    private fun recalculateSubtree(node: Node?) {
+        if (node == null) return
+        recalculateSubtree(node.treeLeft)
+        recalculateSubtree(node.treeRight)
+        recalculate(node)
     }
 
     private fun visibleLengthForKind(node: Node?, kind: RootKind): Long =
@@ -1115,18 +1624,26 @@ private class IndexedSequence(
     private fun StoreItem.visibleLength(kind: RootKind?): Long =
         if (!deleted && countable && (kind == null || content.kind == kind)) length else 0L
 
+    private fun includeKind(item: StoreItem) {
+        usedKindMask = usedKindMask or (1 shl item.content.kind.ordinal)
+    }
+
     private fun recalculate(node: Node) {
         node.treeSize = 1 + (node.treeLeft?.treeSize ?: 0) + (node.treeRight?.treeSize ?: 0)
-        RootKind.entries.forEach { kind ->
-            var length = visibleLengthForKind(node.treeLeft, kind)
-            if (!node.item.deleted && node.item.countable && node.item.content.kind == kind) {
+        var remainingKinds = usedKindMask
+        while (remainingKinds != 0) {
+            val kindIndex = Integer.numberOfTrailingZeros(remainingKinds)
+            val kind = RootKind.entries[kindIndex]
+            var length = node.treeLeft?.treeVisibleLengths?.get(kindIndex) ?: 0L
+            if (!node.item.deleted && node.item.countable && node.item.content.kind.ordinal == kindIndex) {
                 length = checkedClockAdd(length, node.item.length, "sequence node length")
             }
-            node.treeVisibleLengths[kind.ordinal] = checkedClockAdd(
+            node.treeVisibleLengths[kindIndex] = checkedClockAdd(
                 length,
-                visibleLengthForKind(node.treeRight, kind),
+                node.treeRight?.treeVisibleLengths?.get(kindIndex) ?: 0L,
                 "sequence subtree length",
             )
+            remainingKinds = remainingKinds and (remainingKinds - 1)
         }
     }
 

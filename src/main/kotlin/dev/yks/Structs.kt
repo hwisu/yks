@@ -314,7 +314,27 @@ fun nextID(doc: YDoc): Id = doc.nextId()
 fun nextID(transaction: YTransaction): Id = nextID(transaction.doc)
 
 fun getTypeStructs(type: AbstractYType): List<ItemStruct> =
-    type.doc.typeChildren(type).map { item -> item.toItemStruct(type.doc) }
+    type.doc.typeChildren(type).flatMap { item ->
+        item.toItemStruct(type.doc).logicalAnyValueViews()
+    }
+
+private fun ItemStruct.logicalAnyValueViews(): List<ItemStruct> {
+    val values = when (val value = content) {
+        is ContentAny -> value.arr.map { element -> ContentAny(listOf(element)) }
+        is ContentJSON -> value.arr.map { element -> ContentJSON(listOf(element)) }
+        else -> return listOf(this)
+    }
+    if (values.size <= 1) return listOf(this)
+    return values.mapIndexed { offset, value ->
+        val clock = checkedClockAdd(id.clock, offset.toLong(), "logical value item clock")
+        copy(
+            id = Id(id.client, clock),
+            length = 1,
+            origin = if (offset == 0) origin else Id(id.client, clock - 1),
+            content = value,
+        )
+    }
+}
 
 fun getItem(store: StructStore, id: Id): ItemStruct = store.getItem(id)
 
@@ -448,8 +468,7 @@ private fun collectDeletedItemContent(
 ) {
     if (!item.deleted || item.content is ItemContent.Deleted) return
     item.content.directTypeRef()?.let { ref ->
-        doc.store.allItems()
-            .filter { child -> child.parent == ref.name }
+        doc.store.itemsForParent(ref.name)
             .forEach { child -> collectDeletedItemContent(doc, child, collected) }
     }
     if (doc.store.collectItemContent(item.id) != null) {

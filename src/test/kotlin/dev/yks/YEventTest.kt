@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -69,6 +70,28 @@ class YEventTest {
             ),
             xmlEvent?.arrayDelta,
         )
+    }
+
+    @Test
+    fun mapObserverCapturesOnlyChangedKeysWithoutLosingMultiKeyBeforeValues() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val map = doc.getMap("map")
+        map.set("updated", "before")
+        map.set("deleted", "gone")
+        var observed: YEvent? = null
+        map.observe { event -> observed = event }
+
+        doc.transact {
+            map.set("updated", "after")
+            map.delete("deleted")
+            map.set("added", "new")
+        }
+
+        val event = assertNotNull(observed)
+        assertEquals(setOf("updated", "deleted", "added"), event.keysChanged)
+        assertEquals(YMapChange(YMapChangeAction.Update, "before", "after"), event.mapChanges["updated"])
+        assertEquals(YMapChange(YMapChangeAction.Delete, "gone", null), event.mapChanges["deleted"])
+        assertEquals(YMapChange(YMapChangeAction.Add, null, "new"), event.mapChanges["added"])
     }
 
     @Test

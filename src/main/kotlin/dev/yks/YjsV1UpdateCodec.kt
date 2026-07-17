@@ -497,7 +497,15 @@ internal object UpdateCodec {
                 encoder.writeString(toJsonLiteral(content.value.toAny()))
             }
             is ItemContent.Value -> writeValueContent(encoder, content.value)
+            is ItemContent.ArrayValues -> {
+                encoder.writeVarUInt(content.values.size.toLong())
+                content.values.forEach { value -> writeLib0Any(encoder, value.toAny()) }
+            }
             is ItemContent.MapEntry -> writeValueContent(encoder, content.value)
+            is ItemContent.MapEntries -> {
+                encoder.writeVarUInt(content.values.size.toLong())
+                content.values.forEach { value -> writeLib0Any(encoder, value.toAny()) }
+            }
             is ItemContent.XmlNode -> {
                 encoder.writeVarUInt(1)
                 writeLib0Any(encoder, content.value.toEventJson())
@@ -524,7 +532,15 @@ internal object UpdateCodec {
                 encoder.writeJSON(content.value.toAny())
             }
             is ItemContent.Value -> writeValueContentV2(encoder, content.value)
+            is ItemContent.ArrayValues -> {
+                encoder.writeLen(content.values.size.toLong())
+                content.values.forEach { value -> encoder.writeAny(value.toAny()) }
+            }
             is ItemContent.MapEntry -> writeValueContentV2(encoder, content.value)
+            is ItemContent.MapEntries -> {
+                encoder.writeLen(content.values.size.toLong())
+                content.values.forEach { value -> encoder.writeAny(value.toAny()) }
+            }
             is ItemContent.XmlNode -> {
                 encoder.writeLen(1)
                 encoder.writeAny(content.value.toEventJson())
@@ -832,6 +848,12 @@ private fun StoreItem.hasCompatibleKnownParentKind(parentKind: RootKind): Boolea
         parentSub != null -> true
         else -> parentKind == RootKind.Map || parentKind == RootKind.XmlHook
     }
+    is ItemContent.MapEntries -> when {
+        parentSub != null && parentKind == RootKind.XmlFragment -> false
+        parentSub != null -> true
+        else -> parentKind == RootKind.Map || parentKind == RootKind.XmlHook
+    }
+    is ItemContent.ArrayValues -> parentSub == null && parentKind == RootKind.Array
     is ItemContent.Value -> parentKind == RootKind.Array
     is ItemContent.Text,
     is ItemContent.TextEmbed,
@@ -888,7 +910,9 @@ private class StandardUpdateIndex(items: List<StoreItem>) {
                 }
             }
             ParentProfile(
-                allMapEntries = parentItems.all { item -> item.content is ItemContent.MapEntry },
+                allMapEntries = parentItems.all { item ->
+                    item.content is ItemContent.MapEntry || item.content is ItemContent.MapEntries
+                },
                 allArraySequence = sequence.all { item -> item.content.kind == RootKind.Array },
                 sequenceEmpty = sequence.isEmpty(),
                 textLikeKind = textLikeKind,
@@ -973,6 +997,14 @@ private fun StoreItem.hasCompatibleV1ParentKind(
             else -> nestedKind?.let { kind -> kind == RootKind.Map || kind == RootKind.XmlHook }
                 ?: (profile?.allMapEntries == true)
         }
+        is ItemContent.MapEntries -> when {
+            parentSub != null && nestedKind == RootKind.XmlFragment -> false
+            parentSub != null -> true
+            else -> nestedKind?.let { kind -> kind == RootKind.Map || kind == RootKind.XmlHook }
+                ?: (profile?.allMapEntries == true)
+        }
+        is ItemContent.ArrayValues -> nestedKind?.let { kind -> kind == RootKind.Array }
+            ?: (profile?.allArraySequence == true)
         is ItemContent.Value -> nestedKind?.let { kind -> kind == RootKind.Array }
             ?: (profile?.allArraySequence == true)
         is ItemContent.Text,
@@ -1000,7 +1032,9 @@ private fun StoreItem.hasCompatibleV1ParentKind(
 
 private fun ItemContent.isSupportedStandardContent(isV2: Boolean): Boolean = when (this) {
     is ItemContent.Value -> kind == RootKind.Array && value.isSupportedAnyValue(topLevel = true)
+    is ItemContent.ArrayValues -> values.all { value -> value.isSupportedAnyValue(topLevel = true) }
     is ItemContent.MapEntry -> value.isSupportedAnyValue(topLevel = true)
+    is ItemContent.MapEntries -> values.all { value -> value.isSupportedAnyValue(topLevel = true) }
     is ItemContent.Text ->
         kind in setOf(RootKind.Text, RootKind.XmlText) &&
             baseAttributes.isEmpty()
@@ -1152,23 +1186,24 @@ private fun List<StoreItem>.withClockSkips(): List<EncodedStruct> {
 }
 
 private fun List<StoreItem>.hasValidTextSurrogatePairs(): Boolean {
-    data class TextUnit(val itemIndex: Int, val char: Char)
-    val units = flatMapIndexed { itemIndex, item ->
-        (item.content as? ItemContent.Text)?.value?.map { char -> TextUnit(itemIndex, char) }.orEmpty()
-    }
-    units.forEachIndexed { index, unit ->
-        when {
-            unit.char.isHighSurrogate() -> {
-                val next = units.getOrNull(index + 1) ?: return false
-                if (!next.char.isLowSurrogate()) return false
-                if (unit.itemIndex != next.itemIndex && !this[unit.itemIndex].canPackTextWith(this[next.itemIndex])) {
-                    return false
+    var highSurrogateItem: StoreItem? = null
+    for (item in this) {
+        val text = (item.content as? ItemContent.Text)?.value ?: continue
+        for (char in text) {
+            val pendingItem = highSurrogateItem
+            if (pendingItem != null) {
+                if (!char.isLowSurrogate()) return false
+                if (pendingItem !== item && !pendingItem.canPackTextWith(item)) return false
+                highSurrogateItem = null
+            } else {
+                when {
+                    char.isHighSurrogate() -> highSurrogateItem = item
+                    char.isLowSurrogate() -> return false
                 }
             }
-            unit.char.isLowSurrogate() && units.getOrNull(index - 1)?.char?.isHighSurrogate() != true -> return false
         }
     }
-    return true
+    return highSurrogateItem == null
 }
 
 private fun StoreItem.canPackTextWith(right: StoreItem): Boolean {
@@ -1533,8 +1568,26 @@ private fun WireContent.toSingleItemContentOrNull(kind: RootKind): ItemContent? 
     is WireContent.Embed -> ItemContent.TextEmbed(YValue.from(value), kind = kind)
     is WireContent.Format -> toItemContent(kind)
     is WireContent.Binary -> value.toSequenceContent(kind)
-    is WireContent.Json,
-    is WireContent.AnyContent -> null
+    is WireContent.Json -> if (values.size > 1) {
+        val packedValues = values.map(YValue::from)
+        when (kind) {
+            RootKind.Array -> ItemContent.ArrayValues(packedValues)
+            RootKind.Map -> ItemContent.MapEntries(packedValues)
+            else -> null
+        }
+    } else {
+        null
+    }
+    is WireContent.AnyContent -> if (values.size > 1) {
+        val packedValues = values.map(YValue::from)
+        when (kind) {
+            RootKind.Array -> ItemContent.ArrayValues(packedValues)
+            RootKind.Map -> ItemContent.MapEntries(packedValues)
+            else -> null
+        }
+    } else {
+        null
+    }
     is WireContent.Type ->
         if (
             kind == RootKind.XmlFragment ||
@@ -1601,7 +1654,9 @@ private fun ItemContent.yjsContentRef(): Int = when (this) {
     is ItemContent.XmlType -> contentTypeRefNumber
     is ItemContent.XmlNode -> contentAnyRefNumber
     is ItemContent.Value -> value.yjsContentRef()
+    is ItemContent.ArrayValues -> contentAnyRefNumber
     is ItemContent.MapEntry -> value.yjsContentRef()
+    is ItemContent.MapEntries -> contentAnyRefNumber
 }
 
 private fun YValue.yjsContentRef(): Int = when (this) {

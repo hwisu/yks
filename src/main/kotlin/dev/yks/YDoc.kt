@@ -186,6 +186,7 @@ class YDoc(
     private var cachedFullV1Update: CachedFullUpdate? = null
     private val rootTypes = linkedMapOf<String, AbstractYType>()
     private val unopenedRootEntries = linkedMapOf<String, YUnopenedRoot>()
+    private val snapshotInterestedTypes = linkedSetOf<AbstractYType>()
     private val shareView: Map<String, AbstractYType> = object : AbstractMap<String, AbstractYType>() {
         override val entries: Set<Map.Entry<String, AbstractYType>>
             get() = rootNames().mapTo(linkedSetOf()) { name ->
@@ -199,6 +200,7 @@ class YDoc(
     private val nestedTypes = linkedMapOf<String, AbstractYType>()
     private val nestedNames = linkedSetOf<String>()
     private val referencedNestedNames = linkedSetOf<String>()
+    private var visibleSubdocRefsCache: List<YValue.SubdocRef>? = null
     private val pendingNestedReferenceStack = mutableListOf<MutableSet<String>>()
     private val pendingStoreParentStack = mutableListOf<String?>()
     private val pendingPreliminaryAttachments = linkedMapOf<String, AbstractYType>()
@@ -932,9 +934,41 @@ class YDoc(
     internal fun deleteSet(): DeleteSet = withDocumentAccess { store.deleteSet() }
 
     internal fun encodeSnapshotAsUpdate(snapshot: Snapshot): ByteArray = withDocumentAccess {
-        val items = store.allItems()
-            .filter { item -> item.id.clock < (snapshot.sv[item.id.client] ?: 0) }
-            .map { item -> item.copy(deleted = snapshot.ds.hasId(item.id)) }
+        val items = buildList {
+            ClockRangeCursor(store.allItems()).forEachRange(
+                boundaries = { item ->
+                    if (item.isGc) {
+                        emptyList()
+                    } else {
+                        buildList {
+                            snapshot.sv[item.id.client]?.let(::add)
+                            snapshot.ds.rangesFor(item.id.client).forEach { range ->
+                                add(range.clock)
+                                add(range.end)
+                            }
+                        }
+                    }
+                },
+            ) { source, startClock, endClock ->
+                val snapshotClock = snapshot.sv[source.id.client] ?: 0
+                if (startClock >= snapshotClock) return@forEachRange true
+                if (source.isGc) {
+                    // Yjs cannot split GC content and writes the complete packed GC struct when
+                    // its start is covered by the snapshot state vector.
+                    add(source.copy())
+                    return@forEachRange true
+                }
+                val boundedEnd = minOf(endClock, snapshotClock)
+                if (boundedEnd > startClock) {
+                    add(
+                        source.clockRangeView(startClock, boundedEnd).copy(
+                            deleted = snapshot.ds.hasId(Id(source.id.client, startClock)),
+                        ),
+                    )
+                }
+                true
+            }
+        }
         UpdateCodec.encodeLossless(
             DocumentUpdate(items, snapshot.deleteSet, store.parentItemIds(), store.parentKinds()),
         )
@@ -972,15 +1006,20 @@ class YDoc(
 
     fun encodeStateAsUpdateLossless(encodedStateVector: ByteArray = ByteArray(0)): ByteArray = withDocumentAccess {
         val stateVector = decodeStateVector(encodedStateVector)
+        val items = losslessItems(store.itemsSince(stateVector))
+        val update = DocumentUpdate(
+            items,
+            store.deleteSet(),
+            store.parentItemIds(),
+            store.parentKinds(),
+        )
+        val encoded = UpdateCodec.encodeLossless(update)
         val updates = mutableListOf(
-            UpdateCodec.encodeLossless(
-                DocumentUpdate(
-                    store.itemsSince(stateVector),
-                    store.deleteSet(),
-                    store.parentItemIds(),
-                    store.parentKinds(),
-                ),
-            ),
+            if (encoded.hasPrivateEnvelope()) {
+                UpdateCodec.encodeLossless(update.copy(items = materializeRenderedTextAttributes(items)))
+            } else {
+                encoded
+            },
         )
         pendingDeleteSetUpdate()?.let(updates::add)
         pendingStructsView()?.update
@@ -1015,15 +1054,20 @@ class YDoc(
 
     internal fun encodeStateAsUpdateV2Lossless(encodedStateVector: ByteArray = ByteArray(0)): ByteArray = withDocumentAccess {
         val stateVector = decodeStateVector(encodedStateVector)
+        val items = losslessItems(store.itemsSince(stateVector))
+        val update = DocumentUpdate(
+            items,
+            store.deleteSet(),
+            store.parentItemIds(),
+            store.parentKinds(),
+        )
+        val encoded = UpdateCodec.encodeV2Lossless(update)
         val updates = mutableListOf(
-            UpdateCodec.encodeV2Lossless(
-                DocumentUpdate(
-                    store.itemsSince(stateVector),
-                    store.deleteSet(),
-                    store.parentItemIds(),
-                    store.parentKinds(),
-                ),
-            ),
+            if (encoded.hasPrivateEnvelope()) {
+                UpdateCodec.encodeV2Lossless(update.copy(items = materializeRenderedTextAttributes(items)))
+            } else {
+                encoded
+            },
         )
         pendingDeleteSetUpdate()
             ?.let(UpdateCodec::decode)
@@ -1036,6 +1080,26 @@ class YDoc(
             ?.let(updates::add)
         if (updates.size == 1) updates.single() else mergeUpdatesV2Lossless(updates)
     }
+
+    private fun losslessItems(items: List<StoreItem>): List<StoreItem> {
+        val markerParents = items.asSequence()
+            .filter { item -> item.content is ItemContent.NativeTextFormat }
+            .map { item -> item.parent }
+            .toSet()
+        return materializeRenderedTextAttributes(items) { item -> item.parent !in markerParents }
+    }
+
+    private fun materializeRenderedTextAttributes(
+        items: List<StoreItem>,
+        predicate: (StoreItem) -> Boolean = { true },
+    ): List<StoreItem> = items.map { item ->
+        if (!predicate(item)) return@map item
+        val content = item.content.withRenderedTextAttributes(renderedTextAttributes(item)) ?: return@map item
+        if (content == item.content) item else item.copy(content = content)
+    }
+
+    private fun ByteArray.hasPrivateEnvelope(): Boolean =
+        size >= 3 && this[0] == 'Y'.code.toByte() && this[1] == 'K'.code.toByte() && this[2] == 'S'.code.toByte()
 
     fun applyUpdate(update: ByteArray, origin: Any? = null) {
         withDocumentAccess {
@@ -1081,12 +1145,38 @@ class YDoc(
         ensureThreadAccess()
         return store.sequence(parent)
             .filter { !it.deleted && it.countable }
-            .flatMap(StoreItem::logicalUnits)
     }
 
     internal fun visibleLength(parent: String, kind: RootKind): Long {
         ensureThreadAccess()
         return store.visibleLength(parent, kind)
+    }
+
+    internal fun visibleSequenceItemAt(parent: String, kind: RootKind, index: Int): StoreItem? {
+        ensureThreadAccess()
+        if (index < 0) return null
+        return store.visibleSequenceItemAt(parent, kind, index.toLong())?.first
+    }
+
+    internal fun visibleSequencePositionAt(parent: String, kind: RootKind, index: Int): Pair<StoreItem, Long>? {
+        ensureThreadAccess()
+        if (index < 0) return null
+        val (item, itemStart) = store.visibleSequenceItemAt(parent, kind, index.toLong()) ?: return null
+        return item to (index.toLong() - itemStart)
+    }
+
+    internal fun visibleSequenceIndexAfter(parent: String, kind: RootKind, id: Id): Int? =
+        store.visibleSequenceIndexAfter(parent, kind, id)?.toNonNegativeInt("visible sequence index")
+
+    internal fun renderedTextAttributes(item: StoreItem): Map<String, YValue> {
+        ensureThreadAccess()
+        return store.renderedTextAttributes(item)
+    }
+
+    private fun renderedTextItem(item: StoreItem): StoreItem {
+        val attributes = renderedTextAttributes(item)
+        val content = item.content.withRenderedTextAttributes(attributes) ?: return item
+        return if (content == item.content) item else item.copy(content = content)
     }
 
     internal fun visibleText(parent: String, kind: RootKind): String {
@@ -1101,7 +1191,9 @@ class YDoc(
 
     internal fun typeChildren(type: AbstractYType): List<StoreItem> {
         require(type.doc === this) { "type must belong to this document" }
-        return sequence(type.name).filter { item -> item.content.kind == type.kind }
+        return sequence(type.name)
+            .filter { item -> item.content.kind == type.kind }
+            .map(::renderedTextItem)
     }
 
     internal fun directNestedChildTypes(type: AbstractYType): List<AbstractYType> {
@@ -1111,6 +1203,11 @@ class YDoc(
 
     internal fun parentOf(type: AbstractYType): AbstractYType? {
         require(type.doc === this) { "type must belong to this document" }
+        store.firstOwnerForNested(type.name)?.let { owner ->
+            typeForParent(owner.parent)?.let { return it }
+        }
+        // Private lossless values may contain nested type references below a JSON-like
+        // container. Standard Yjs ContentType references always take the indexed path above.
         val candidates = (rootNames().mapNotNull(::rootType) + nestedNames.mapNotNull(::typeForParent))
             .distinctBy { it.name }
         return candidates.firstOrNull { candidate ->
@@ -1158,6 +1255,7 @@ class YDoc(
         idSet: IdSet,
         predicate: (StoreItem) -> Boolean = { true },
         deletedOverride: Boolean? = null,
+        materializeTextAttributes: Boolean = false,
     ): List<StoreItem> {
         val items = mutableListOf<StoreItem>()
         idSet.ranges().forEach { (client, range) ->
@@ -1170,7 +1268,12 @@ class YDoc(
                 val itemEnd = checkedClockAdd(item.id.clock, item.length)
                 val start = maxOf(item.id.clock, range.clock)
                 val end = minOf(itemEnd, range.end)
-                val selected = item.sliceClocks(start, end)
+                var selected = item.sliceClocks(start, end)
+                if (materializeTextAttributes) {
+                    item.content.withRenderedTextAttributes(renderedTextAttributes(item))?.let { content ->
+                        selected = selected.copy(content = content)
+                    }
+                }
                 items.add(if (deletedOverride == null) selected else selected.copy(deleted = deletedOverride))
             }
         }
@@ -1234,17 +1337,16 @@ class YDoc(
 
     internal fun typeRefItemId(type: AbstractYType): Id? {
         require(type.doc === this) { "type must belong to this document" }
-        return store.allItems().firstOrNull { item ->
-            val ref = item.content.directTypeRef()
-            ref?.name == type.name && ref.kind == type.kind
-        }?.id
+        return store.firstOwnerForNested(type.name)
+            ?.takeIf { item -> item.content.directTypeRef()?.kind == type.kind }
+            ?.id
     }
 
     internal fun rootType(name: String): AbstractYType? = rootTypes[name]
 
     fun rootNames(): Set<String> {
         ensureThreadAccess()
-        return (rootTypes.keys + unopenedRootEntries.keys + store.allItems().map { it.parent })
+        return (rootTypes.keys + unopenedRootEntries.keys + store.parentNames())
             .filterNot { it in nestedNames }
             .filterNot { it.startsWith("__yjs_gc__:") }
             .toSortedSet()
@@ -1256,7 +1358,8 @@ class YDoc(
     }
 
     private fun unopenedRoot(name: String): YUnopenedRoot? {
-        if (name !in rootNames()) return null
+        unopenedRootEntries[name]?.let { return it }
+        if (name in nestedNames || name.startsWith("__yjs_gc__:") || !store.hasParent(name)) return null
         return unopenedRootEntries.getOrPut(name) { YUnopenedRoot(this, name) }
     }
 
@@ -1426,36 +1529,27 @@ class YDoc(
     }
 
     internal fun insertionAnchors(parent: String, kind: RootKind, index: Int): Pair<Id?, Id?> {
-        if (kind == RootKind.Text || kind == RootKind.XmlText) {
-            val visibleLength = store.visibleLength(parent, kind)
-            require(index.toLong() <= visibleLength) { "insert index is out of bounds" }
-            if (index.toLong() == visibleLength) {
-                val left = store.lastSequenceItem(parent, kind)
-                registerVirtualInsertionSplitCandidate(left, null)
-                return left?.lastId to null
-            }
-            val position = store.visibleSequenceItemAt(parent, kind, index.toLong())
-            if (position != null && index.toLong() > position.second) {
-                val containing = position.first
-                val splitClock = checkedClockAdd(
-                    containing.id.clock,
-                    index.toLong() - position.second,
-                    "text insertion split clock",
-                )
-                store.getStoreItemCleanStart(Id(containing.id.client, splitClock)) { right ->
-                    currentTransaction?.mergeStructs?.add(right.id)
-                }
-            }
-            val (left, right) = store.sequenceAnchors(parent, kind, index.toLong())
-            registerVirtualInsertionSplitCandidate(left, right)
-            return left?.lastId to right?.id
+        val targetIndex = index.toLong()
+        val visibleLength = store.visibleLength(parent, kind)
+        require(targetIndex <= visibleLength) { "insert index is out of bounds" }
+        if (targetIndex == visibleLength) {
+            val left = store.lastSequenceItem(parent, kind)
+            registerVirtualInsertionSplitCandidate(left, null)
+            return left?.lastId to null
         }
-        val full = sequence(parent).filter { it.content.kind == kind && it.countable }
-        val visible = full.filter { !it.deleted }
-        require(index <= visible.size) { "insert index is out of bounds" }
-        val right = visible.getOrNull(index)
-        val rightIndex = right?.let { full.indexOf(it) } ?: full.size
-        val left = full.getOrNull(rightIndex - 1)
+        val position = store.visibleSequenceItemAt(parent, kind, targetIndex)
+        if (position != null && targetIndex > position.second) {
+            val containing = position.first
+            val splitClock = checkedClockAdd(
+                containing.id.clock,
+                targetIndex - position.second,
+                "sequence insertion split clock",
+            )
+            store.getStoreItemCleanStart(Id(containing.id.client, splitClock)) { right ->
+                currentTransaction?.mergeStructs?.add(right.id)
+            }
+        }
+        val (left, right) = store.sequenceAnchors(parent, kind, targetIndex)
         registerVirtualInsertionSplitCandidate(left, right)
         return left?.lastId to right?.id
     }
@@ -1493,12 +1587,20 @@ class YDoc(
     internal fun mapValueAtSnapshot(type: AbstractYType, key: String, snapshot: Snapshot): YValue? {
         ensureThreadAccess()
         require(type.doc === this) { "type must belong to this document" }
-        val item = mapItemOrder(type.name, key)
-            .asReversed()
-            .firstOrNull { item -> item.id.clock < (snapshot.sv[item.id.client] ?: 0) }
-            ?: return null
-        if (snapshot.ds.hasId(item.id)) return null
-        return item.content.mapContentValue()
+        mapItemOrder(type.name, key).asReversed().forEach { item ->
+            val visibleEnd = minOf(item.clockEnd(), snapshot.sv[item.id.client] ?: 0)
+            if (visibleEnd <= item.id.clock) return@forEach
+            val visibleClock = visibleEnd - 1
+            if (snapshot.ds.hasId(Id(item.id.client, visibleClock))) return null
+            return when (val content = item.content) {
+                is ItemContent.MapEntries -> {
+                    val index = (visibleClock - item.id.clock).toNonNegativeInt("snapshot map offset")
+                    content.values[index]
+                }
+                else -> content.mapContentValue()
+            }
+        }
+        return null
     }
 
     internal fun mapAtSnapshot(type: AbstractYType, snapshot: Snapshot): Map<String, YValue> {
@@ -1515,27 +1617,18 @@ class YDoc(
         currentMapItem(parent, key)?.takeUnless { item -> item.deleted }?.id
 
     private fun currentMapItem(parent: String, key: String): StoreItem? =
-        mapItemOrder(parent, key).lastOrNull()
+        store.cachedCurrentMapItem(parent, key) { mapItemOrder(parent, key).lastOrNull() }
 
     internal fun mapItemKeys(parent: String): Set<String> =
         mapKeysInInsertionOrder(parent).toCollection(linkedSetOf())
 
     private fun mapKeysInInsertionOrder(parent: String): List<String> {
         val remembered = mapKeyOrders[parent].orEmpty()
-        if (remembered.isEmpty()) {
-            return store.allItems().asSequence()
-                .filter { item -> item.parent == parent && item.parentSub != null }
-                .mapNotNull { item -> item.parentSub }
-                .distinct()
-                .toList()
-        }
+        val indexed = store.mapKeysForParent(parent)
+        if (remembered.isEmpty()) return indexed.toList()
         // The fallback makes this robust to internal test/store construction that bypasses
         // YDoc integration. Normal local and remote integration only take the remembered path.
-        val missing = store.allItems().asSequence()
-            .filter { item -> item.parent == parent && item.parentSub != null }
-            .mapNotNull { item -> item.parentSub }
-            .filterNot(remembered::contains)
-            .distinct()
+        val missing = indexed.asSequence().filterNot(remembered::contains)
         return remembered.toList() + missing.toList()
     }
 
@@ -1548,6 +1641,7 @@ class YDoc(
 
     private fun ItemContent.mapContentValue(): YValue? = when (this) {
         is ItemContent.MapEntry -> value
+        is ItemContent.MapEntries -> values.last()
         is ItemContent.XmlType -> ref.takeIf { kind == RootKind.Map || kind == RootKind.XmlHook }
         else -> null
     }
@@ -1559,7 +1653,15 @@ class YDoc(
 
     private fun buildMapItemOrder(parent: String, key: String): List<StoreItem> {
         val entries = store.mapEntries(parent, key)
-        if (entries.isEmpty()) return emptyList()
+        if (entries.size < 2) return entries
+        if (entries.zipWithNext().all { (left, right) -> right.origin == left.lastId }) {
+            return entries
+        }
+        val sharedOrigin = entries.first().origin
+        val sharedRightOrigin = entries.first().rightOrigin
+        if (entries.all { item -> item.origin == sharedOrigin && item.rightOrigin == sharedRightOrigin }) {
+            return entries.sortedBy { item -> item.id }
+        }
         val entriesByClient = entries.groupBy { item -> item.id.client }
             .mapValues { (_, clientEntries) -> clientEntries.sortedBy { item -> item.id.clock } }
 
@@ -1678,12 +1780,34 @@ class YDoc(
         return textItems
     }
 
-    internal fun arrayAtSnapshot(type: YArray, snapshot: Snapshot): List<Any?> =
-        sequenceAtSnapshot(type, snapshot).map(::arrayItemValue)
+    internal fun arrayAtSnapshot(type: YArray, snapshot: Snapshot): List<Any?> = buildList {
+        fun boundaries(item: StoreItem): Iterable<Long> = buildList {
+            snapshot.sv[item.id.client]?.let(::add)
+            snapshot.ds.rangesFor(item.id.client).forEach { range ->
+                add(range.clock)
+                add(range.end)
+            }
+        }
+        ClockRangeCursor(sequence(type.name)).forEachRange(::boundaries) { source, startClock, endClock ->
+            val item = source.clockRangeView(startClock, endClock)
+            if (item.content.kind == type.kind && item.countable && item.isVisibleIn(snapshot)) {
+                addAll(arrayItemValues(item))
+            }
+            true
+        }
+    }
 
     internal fun arrayItemValue(item: StoreItem): Any? = when (val content = item.content) {
         is ItemContent.Value -> valueToAny(content.value)
+        is ItemContent.ArrayValues -> valueToAny(content.values.last())
         is ItemContent.XmlType -> typeFromXmlType(content)
+        else -> error("item content is not an array value: ${content::class.simpleName}")
+    }
+
+    internal fun arrayItemValues(item: StoreItem): List<Any?> = when (val content = item.content) {
+        is ItemContent.Value -> listOf(valueToAny(content.value))
+        is ItemContent.ArrayValues -> content.values.map(::valueToAny)
+        is ItemContent.XmlType -> listOf(typeFromXmlType(content))
         else -> error("item content is not an array value: ${content::class.simpleName}")
     }
 
@@ -1831,14 +1955,15 @@ class YDoc(
         }
         transact {
             val previousMapCurrent = item.parentSub?.let { key -> currentMapItem(item.parent, key) }
-            captureParentBefore(item.parent, item.content.kind)
+            captureParentBefore(item.parent, item.content.kind, item.parentSub)
             check(store.add(item)) { "duplicate local item id: ${item.id}" }
             rememberMapKey(item)
+            item.parentSub?.let { key -> store.cacheCurrentMapItem(item.parent, key, item) }
             rememberNestedRefs(item.content)
             if (shouldReapplyTextFormatsAfter(item)) {
                 reapplyTextFormats(item.parent)
             }
-            currentTransaction?.recordAdded(item, item.content.hasSubdocRefs())
+            recordAddedItem(item)
             currentTransaction?.markChanged(item.parent, item.parentSub)
             attachAndReplayPreliminaryTypes(item.content, item.id)
             deletePreviousMapCurrentIfSuperseded(item, previousMapCurrent)
@@ -1847,10 +1972,10 @@ class YDoc(
 
     private fun integrateLocalTextFormat(item: StoreItem) {
         transact {
-            captureParentBefore(item.parent, item.content.kind)
+            captureParentBefore(item.parent, item.content.kind, item.parentSub)
             check(store.add(item)) { "duplicate local item id: ${item.id}" }
             applyTextFormat(item)
-            currentTransaction?.recordAdded(item, item.content.hasSubdocRefs())
+            recordAddedItem(item)
             currentTransaction?.markChanged(item.parent, item.parentSub)
         }
     }
@@ -1991,7 +2116,7 @@ class YDoc(
                 if (sourcePosition != null) {
                     previousRestoredByParent[parentKey] = sourcePosition to item.id
                 }
-                currentTransaction?.recordAdded(item, item.content.hasSubdocRefs())
+                recordAddedItem(item)
                 currentTransaction?.markChanged(item.parent, item.parentSub)
             }
             rememberRedoneRangeEnds(restoredPairs, originalPositions)
@@ -2028,33 +2153,55 @@ class YDoc(
         return RestoreItem(anchored.copy(deleted = false), anchorAfterOriginal = true)
     }
 
-    private fun applyDeleteSet(deleteSet: DeleteSet) {
+    private fun applyDeleteSet(
+        deleteSet: DeleteSet,
+        deferredTextFormatParents: MutableSet<String>? = null,
+        registerMergeCandidates: Boolean = true,
+    ) {
         if (deleteSet.isEmpty) return
         val expandedDeleteSet = expandDeleteSetWithNestedTypeContent(deleteSet)
-        registerVirtualSplitMergeCandidates(expandedDeleteSet)
+        if (registerMergeCandidates) registerVirtualSplitMergeCandidates(expandedDeleteSet)
         store.splitAtDeleteSetBoundaries(expandedDeleteSet) { right ->
             currentTransaction?.mergeStructs?.add(right.id)
         }
         val newlyDeletedItems = store.itemsStartingIn(expandedDeleteSet).filterNot { it.deleted }
-        val newlyDeleted = newlyDeletedItems.map { it.copy(deleted = false) }
-        newlyDeleted.forEach { captureParentBefore(it.parent, it.content.kind) }
+        val captureDeletedItems = hasTransactionConsumers()
+        val newlyDeleted = if (captureDeletedItems) {
+            newlyDeletedItems.map { it.copy(deleted = false) }
+        } else {
+            emptyList()
+        }
+        if (needsTransactionSnapshots()) {
+            newlyDeleted.forEach { captureParentBefore(it.parent, it.content.kind, it.parentSub) }
+        }
+        val newlyDeletedSet = DeleteSet.empty().also { transactionDeleteSet ->
+            newlyDeletedItems.forEach { item -> transactionDeleteSet.add(item.id, item.length) }
+        }
+        val textFormatParents = newlyDeletedItems
+            .filter { item -> item.content.isTextFormatControl() }
+            .mapTo(linkedSetOf()) { item -> item.parent }
         pendingDeletes.addAll(expandedDeleteSet)
         val changed = store.markDeleted(newlyDeletedItems)
         if (changed) {
-            val newlyDeletedSet = DeleteSet.empty().also { transactionDeleteSet ->
-                newlyDeleted.forEach { item -> transactionDeleteSet.add(item.id, item.length) }
-            }
             currentTransaction?.deleteSet?.addAll(newlyDeletedSet)
-            newlyDeleted.forEach {
-                currentTransaction?.recordDeleted(it, it.content.hasSubdocRefs())
-                currentTransaction?.markChanged(it.parent, it.parentSub)
+            newlyDeletedItems.forEachIndexed { index, item ->
+                val captured = newlyDeleted.getOrNull(index)
+                val deletedContent = captured?.content ?: item.content
+                val hasSubdocRefs = deletedContent.hasSubdocRefs()
+                if (hasSubdocRefs) visibleSubdocRefsCache = null
+                if (captured != null) {
+                    currentTransaction?.recordDeleted(captured, hasSubdocRefs)
+                } else {
+                    currentTransaction?.recordDeletedMetadata(hasSubdocRefs)
+                }
+                currentTransaction?.markChanged(item.parent, item.parentSub)
             }
-            newlyDeleted
-                .filter { item -> item.content.isTextFormatControl() }
-                .map { item -> item.parent }
-                .toSet()
-                .forEach { parent ->
-                    reapplyTextFormats(parent)
+            textFormatParents.forEach { parent ->
+                    if (deferredTextFormatParents == null) {
+                        reapplyTextFormats(parent)
+                    } else {
+                        deferredTextFormatParents.add(parent)
+                    }
                     currentTransaction?.markChanged(parent, null)
                 }
         }
@@ -2066,7 +2213,7 @@ class YDoc(
         val touchedItems = store.itemsOverlapping(deleteSet)
         val checkedPairs = hashSetOf<Pair<Id, Id>>()
         touchedItems
-            .filter { item -> item.parentSub == null }
+            .filter { item -> item.parentSub == null && item.content.virtualMergeClass() != null }
             .forEach { item ->
                 val (left, right) = store.sequenceNeighbors(item)
                 listOfNotNull(left?.let { it to item }, right?.let { item to it }).forEach { (pairLeft, pairRight) ->
@@ -2083,9 +2230,10 @@ class YDoc(
             }
 
         if (touchedItems.none { item -> item.parentSub != null }) return
-        store.allItems().groupBy { item -> item.parent to item.parentSub }.forEach { (parentKey, _) ->
-            val (parent, parentSub) = parentKey
-            if (parentSub == null) return@forEach
+        touchedItems.asSequence()
+            .mapNotNull { item -> item.parentSub?.let { key -> item.parent to key } }
+            .distinct()
+            .forEach { (parent, parentSub) ->
             val logicalItems = mapItemOrder(parent, parentSub)
             logicalItems.zipWithNext().forEach { (left, right) ->
                 val leftWillBeDeleted = !left.deleted && deleteSet.contains(left.id)
@@ -2110,8 +2258,9 @@ class YDoc(
             val item = queue.removeFirst()
             if (!visited.add(item.id)) continue
             val ref = item.content.directTypeRef() ?: continue
-            store.allItems()
-                .filter { child -> child.parent == ref.name && !child.deleted }
+            store.itemsForParent(ref.name)
+                .asSequence()
+                .filterNot { child -> child.deleted }
                 .forEach { child ->
                     if (!expanded.contains(child.id)) {
                         expanded.add(child.id, child.length)
@@ -2124,6 +2273,8 @@ class YDoc(
 
     private fun integrateRemote(items: List<StoreItem>) {
         val storeInitiallyEmpty = currentTransaction?.beforeState?.isEmpty() == true
+        val textFormatParents = linkedSetOf<String>()
+        val changedMapKeys = linkedSetOf<Pair<String, String>>()
         if (pendingItems.isEmpty() && storeInitiallyEmpty) {
             items.forEach { item -> pendingItems.add(resolveRemoteParentAlias(item, checkStoreAnchors = false)) }
         } else if (pendingItems.isEmpty()) {
@@ -2161,31 +2312,41 @@ class YDoc(
                 if (canIntegrate(item)) {
                     iterator.remove()
                     cleanRemoteOrigins(item)
-                    if (captureSnapshots) captureParentBefore(item.parent, item.content.kind)
+                    if (captureSnapshots) captureParentBefore(item.parent, item.content.kind, item.parentSub)
                     if (store.add(item)) {
                         rememberMapKey(item)
+                        item.parentSub?.let { key -> changedMapKeys.add(item.parent to key) }
                         if (shouldReapplyTextFormatsAfter(item)) {
-                            reapplyTextFormats(item.parent)
+                            textFormatParents.add(item.parent)
                         }
                         rememberNestedRefs(item.content)
-                        currentTransaction?.recordAdded(item, item.content.hasSubdocRefs())
+                        recordAddedItem(item)
                         currentTransaction?.markChanged(item.parent, item.parentSub)
-                        deletePreviousMapCurrentIfSuperseded(
-                            item,
-                            item.parentSub?.let { key ->
-                                mapItemOrder(item.parent, key).dropLast(1).lastOrNull()
-                            },
-                        )
                     }
                     madeProgress = true
                 }
             }
             if (pendingItems.isEmpty()) break
         } while (madeProgress)
+        val supersededMapItems = DeleteSet.empty()
+        changedMapKeys.forEach { (parent, key) ->
+            val order = mapItemOrder(parent, key)
+            val current = order.lastOrNull()
+            store.cacheCurrentMapItem(parent, key, current)
+            order.asSequence()
+                .filterNot { item -> item.deleted || item.id == current?.id }
+                .forEach { item -> supersededMapItems.add(item.id, item.length) }
+        }
+        if (!supersededMapItems.isEmpty) {
+            applyDeleteSet(supersededMapItems, deferredTextFormatParents = textFormatParents)
+        }
         // Pending delete ranges may point inside a newly integrated packed item. Apply them only
         // after struct integration, matching Yjs and allowing the normal boundary-split path to
         // select the exact UTF-16 clock range.
-        if (!pendingDeletes.isEmpty) applyDeleteSet(pendingDeletes.copy())
+        if (!pendingDeletes.isEmpty) {
+            applyDeleteSet(pendingDeletes.copy(), deferredTextFormatParents = textFormatParents)
+        }
+        textFormatParents.forEach(::reapplyTextFormats)
     }
 
     private fun cleanRemoteOrigins(item: StoreItem) {
@@ -2267,7 +2428,16 @@ class YDoc(
         if (currentMapItem(item.parent, key)?.id != item.id) return
         val deleteSet = DeleteSet.empty()
         deleteSet.add(previousMapCurrent.id, previousMapCurrent.length)
-        applyDeleteSet(deleteSet)
+        val directlyMergeable = previousMapCurrent.canVirtuallyMerge(
+            previousMapCurrent,
+            item,
+            logicallyAdjacent = true,
+        )
+        if (directlyMergeable) currentTransaction?.mergeStructs?.add(item.id)
+        // A same-client primitive map replacement is already known to be the exact adjacent pair.
+        // Rebuilding and scanning the complete key history for every set makes a transaction of N
+        // replacements quadratic. Complex/concurrent map values keep the general boundary scan.
+        applyDeleteSet(deleteSet, registerMergeCandidates = !directlyMergeable)
     }
 
     private fun canIntegrate(item: StoreItem): Boolean {
@@ -2296,26 +2466,40 @@ class YDoc(
     }
 
     private fun shouldReapplyTextFormatsAfter(item: StoreItem): Boolean =
-        item.content.isTextFormatControl() ||
-            item.content.isTextCountable() &&
-            store.hasVisibleNativeTextFormat(item.parent)
+        item.content is ItemContent.TextFormat ||
+            store.hasVisibleLegacyTextFormat(item.parent) &&
+            (item.content is ItemContent.NativeTextFormat || item.content.isTextCountable())
 
     private fun reapplyTextFormats(parent: String): List<StoreItem> {
-        val changed = mutableListOf<StoreItem>()
+        if (!store.hasVisibleLegacyTextFormat(parent)) return emptyList()
         val activeNativeAttributes = linkedMapOf<String, YValue>()
+        var activeEffectiveAttributes: Map<String, YValue> = emptyMap()
+        val nativeReplacements = linkedMapOf<Id, ItemContent>()
         sequence(parent).toList().forEach { item ->
             if (item.deleted) return@forEach
             when (val content = item.content) {
-                is ItemContent.NativeTextFormat -> activeNativeAttributes[content.key] = content.value
+                is ItemContent.NativeTextFormat -> {
+                    activeNativeAttributes[content.key] = content.value
+                    activeEffectiveAttributes = activeNativeAttributes
+                        .filterValues { value -> value != YValue.Null }
+                        .toSortedMap()
+                }
                 is ItemContent.Text,
                 is ItemContent.TextEmbed,
                 is ItemContent.XmlType -> {
-                    val attributes = content.effectiveTextAttributes(activeNativeAttributes)
-                    setTextAttributes(item, attributes)?.let(changed::add)
+                    val attributes = if (content.baseTextAttributesOrEmpty().isEmpty()) {
+                        activeEffectiveAttributes
+                    } else {
+                        content.effectiveTextAttributes(activeNativeAttributes)
+                    }
+                    content.withTextAttributesOrNull(attributes)
+                        ?.takeIf { nextContent -> nextContent != content }
+                        ?.let { nextContent -> nativeReplacements[item.id] = nextContent }
                 }
                 else -> Unit
             }
         }
+        val changed = store.replaceEquivalentContents(nativeReplacements).toMutableList()
         sequence(parent).toList()
             .filter { item -> !item.deleted && item.content is ItemContent.TextFormat }
             .sortedWith(textFormatApplicationOrder)
@@ -2503,8 +2687,8 @@ class YDoc(
         }
         store.mergeDeletedItems(transaction.deleteSet)
         store.mergeSplitCandidates(transaction.mergeStructs)
-        mergeNewTextItemsUnobserved(transaction.beforeState, afterState)
-        mergeTextSplitCandidatesUnobserved(transaction.mergeStructs)
+        mergeNewItemsUnobserved(transaction.beforeState, afterState)
+        mergeSplitCandidatesUnobserved(transaction.mergeStructs)
         collectSubdocEvent(transaction)?.removed?.forEach { subdoc ->
             if (!subdoc.isDestroyed) subdoc.destroy()
         }
@@ -2517,7 +2701,7 @@ class YDoc(
      * scan on that suffix mirrors Yjs' cleanup pass and avoids rebuilding every logical parent
      * for transactions that have no observers.
      */
-    private fun mergeNewTextItemsUnobserved(beforeState: StateVector, afterState: StateVector) {
+    private fun mergeNewItemsUnobserved(beforeState: StateVector, afterState: StateVector) {
         afterState.forEach { (client, afterClock) ->
             val beforeClock = beforeState[client] ?: 0
             if (beforeClock == afterClock) return@forEach
@@ -2526,16 +2710,19 @@ class YDoc(
             while (true) {
                 val clientItems = store.itemsForClient(client)
                 if (index >= clientItems.size) break
-                val left = clientItems[index - 1]
-                val right = clientItems[index]
-                if (
-                    left.canVirtuallyMerge(
-                        left,
-                        right,
-                        logicallyAdjacent = store.areSequenceAdjacent(left, right),
-                    ) &&
-                    store.mergeTextItems(listOf(left.id, right.id)) != null
-                ) {
+                val mergeIds = mutableListOf(clientItems[index - 1].id)
+                var cursor = index
+                while (cursor < clientItems.size) {
+                    val left = clientItems[cursor - 1]
+                    val right = clientItems[cursor]
+                    if (
+                        !left.canVirtuallyMergeIgnoringAdjacency(left, right) ||
+                        !areLogicallyAdjacent(left, right)
+                    ) break
+                    mergeIds.add(right.id)
+                    cursor++
+                }
+                if (mergeIds.size > 1 && store.mergeCompatibleItems(mergeIds) != null) {
                     // The merged item may also merge with the item now at this index.
                     continue
                 }
@@ -2545,7 +2732,7 @@ class YDoc(
     }
 
     /** Re-packs temporary text splits in reverse split order, matching Yjs cleanup. */
-    private fun mergeTextSplitCandidatesUnobserved(candidates: List<Id>) {
+    private fun mergeSplitCandidatesUnobserved(candidates: List<Id>) {
         candidates.asReversed().forEach { candidate ->
             val clientItems = store.itemsForClient(candidate.client)
             if (clientItems.size < 2) return@forEach
@@ -2555,13 +2742,10 @@ class YDoc(
             if (right.id != candidate) return@forEach
             val left = clientItems[rightIndex - 1]
             if (
-                left.canVirtuallyMerge(
-                    left,
-                    right,
-                    logicallyAdjacent = store.areSequenceAdjacent(left, right),
-                )
+                left.canVirtuallyMergeIgnoringAdjacency(left, right) &&
+                areLogicallyAdjacent(left, right)
             ) {
-                store.mergeTextItems(listOf(left.id, right.id))
+                store.mergeCompatibleItems(listOf(left.id, right.id))
             }
         }
     }
@@ -2608,7 +2792,7 @@ class YDoc(
             updateV2LosslessEventListeners.isNotEmpty() ||
             eventListeners.isNotEmpty() ||
             docOnlyEventListeners["beforeAllTransactions"].orEmpty().isNotEmpty() ||
-            materializedTypes().any { type -> type.needsTransactionSnapshot }
+            snapshotInterestedTypes.isNotEmpty()
 
     private fun hasSimpleStandardUpdateConsumersOnly(): Boolean =
         updateListeners.isNotEmpty() &&
@@ -2621,36 +2805,46 @@ class YDoc(
             !needsTransactionSnapshots()
 
     private fun createTransactionEvent(transaction: Transaction): YTransactionEvent {
-        val update = UpdateCodec.encodeLossless(
-            DocumentUpdate(
-                transaction.addedItems,
-                transaction.deleteSet,
-                store.parentItemIds(),
-                store.parentKinds(),
-            ),
-        )
-        val insertSet = transaction.addedItems.toIdSet()
-        val deleteIdSet = transaction.deleteSet.toIdSet()
+        val updateItems = transaction.addedItems.toList()
+        val updateDeleteSet = transaction.deleteSet.copy()
+        val updateParentItemIds = store.parentItemIds().toMap()
+        val updateParentKinds = store.parentKinds().toMap()
+        val deferredUpdate = lazy(LazyThreadSafetyMode.NONE) {
+            UpdateCodec.encodeLossless(
+                DocumentUpdate(
+                    updateItems.map { item -> item.copy(requiresClockContinuity = true) },
+                    updateDeleteSet,
+                    updateParentItemIds,
+                    updateParentKinds,
+                ),
+            )
+        }
         val changedParents = changedParentsFor(transaction)
         transaction.afterState = store.stateVector()
-        transaction.update = update
+        transaction.deferUpdate { deferredUpdate.value }
+        val eventItems = YTransactionEventItems(
+            added = transaction.addedItems.toList(),
+            deleted = transaction.deletedItems.toList(),
+        )
         val subdocEvent = collectSubdocEvent(transaction)
         return YTransactionEvent(
             doc = this,
             origin = transaction.origin,
             local = transaction.local,
-            update = update,
+            update = null,
+            updateProvider = { deferredUpdate.value },
             beforeState = transaction.beforeState,
             afterState = transaction.afterState,
-            insertSet = insertSet,
+            insertSet = null,
             deleteSet = transaction.deleteSet.copy(),
-            deleteIdSet = deleteIdSet,
+            deleteIdSet = null,
             cleanUps = transaction.cleanUps.copy(),
             meta = transaction.meta,
-            addedStructs = transaction.addedItems.map { it.toItemStruct(this) },
-            deletedStructs = transaction.deletedItems.map { it.copy(deleted = true).toItemStruct(this) },
-            addedItems = transaction.addedItems.map { it.copy() },
-            deletedItems = transaction.deletedItems.map { it.copy(deleted = false) },
+            addedStructs = null,
+            deletedStructs = null,
+            addedItems = null,
+            deletedItems = null,
+            eventItems = eventItems,
             changedParents = changedParents,
             changedTypes = changedParents.mapNotNull { typeForParent(it) }.toSet(),
             subdocsAdded = subdocEvent?.added?.toCollection(linkedSetOf()) ?: emptySet(),
@@ -2714,51 +2908,57 @@ class YDoc(
         // then still performs all cleanup work from finally.
         if (firstError == null) {
             val observerCallbacks = mutableListOf<() -> Unit>()
-            val eventUpdateItems = store.itemsSince(transaction.beforeState)
-            val eventLosslessUpdate = UpdateCodec.encodeLossless(
-                DocumentUpdate(
-                    eventUpdateItems,
-                    transaction.deleteSet,
-                    store.parentItemIds(),
-                    store.parentKinds(),
-                ),
-            )
             transactionListeners.toList().forEach { listener ->
                 observerCallbacks.add { listener(event) }
             }
-            val effectiveInsertSet = createIdSet().also { ids ->
-                eventUpdateItems.forEach { item ->
-                    val representative = mergedStructRepresentatives[item.id] ?: item.id
-                    if (representative.clock >= (transaction.beforeState[representative.client] ?: 0)) {
-                        ids.add(item.id, item.length)
+            if (snapshotInterestedTypes.isNotEmpty()) {
+                val eventUpdateItems = store.itemsSince(transaction.beforeState)
+                val eventLosslessUpdate = UpdateCodec.encodeLossless(
+                    DocumentUpdate(
+                        eventUpdateItems,
+                        transaction.deleteSet,
+                        store.parentItemIds(),
+                        store.parentKinds(),
+                    ),
+                )
+                val effectiveInsertSet = createIdSet().also { ids ->
+                    eventUpdateItems.forEach { item ->
+                        val representative = mergedStructRepresentatives[item.id] ?: item.id
+                        if (representative.clock >= (transaction.beforeState[representative.client] ?: 0)) {
+                            ids.add(item.id, item.length)
+                        }
                     }
                 }
-            }
-            val effectiveDeleteSet = createDeleteSet().also { deletes ->
-                store.allItems().forEach { item ->
-                    val representative = mergedStructRepresentatives[item.id] ?: item.id
-                    if (transaction.deleteSet.contains(representative)) {
-                        deletes.add(item.id, item.length)
+                val effectiveDeleteSet = createDeleteSet().also { deletes ->
+                    store.itemsOverlapping(transaction.deleteSet).forEach { item ->
+                        val representative = mergedStructRepresentatives[item.id] ?: item.id
+                        if (transaction.deleteSet.contains(representative)) {
+                            deletes.add(item.id, item.length)
+                        }
+                    }
+                    mergedStructRepresentatives.forEach { (member, representative) ->
+                        if (!transaction.deleteSet.contains(representative)) return@forEach
+                        store.getStoreItem(member)?.let { item -> deletes.add(item.id, item.length) }
                     }
                 }
-            }
-            val directEvents = linkedMapOf<String, YEvent>()
-            event.changedParents.forEach { parent ->
-                typeForParent(parent)?.let { type ->
-                    val yEvent = createEvent(
-                        type,
-                        transaction,
-                        event,
-                        transaction.beforeParents[parent],
-                        effectiveInsertSet,
-                        effectiveDeleteSet,
-                        eventLosslessUpdate,
-                    )
-                    directEvents[parent] = yEvent
-                    observerCallbacks.add { type.emit(yEvent) }
+                val directEvents = linkedMapOf<String, YEvent>()
+                event.changedParents.forEach { parent ->
+                    typeForParent(parent)?.let { type ->
+                        val yEvent = createEvent(
+                            type,
+                            transaction,
+                            event,
+                            transaction.beforeParents[parent],
+                            effectiveInsertSet,
+                            effectiveDeleteSet,
+                            eventLosslessUpdate,
+                        )
+                        directEvents[parent] = yEvent
+                        observerCallbacks.add { type.emit(yEvent) }
+                    }
                 }
+                observerCallbacks.add { emitDeepEvents(transaction, eventLosslessUpdate, directEvents) }
             }
-            observerCallbacks.add { emitDeepEvents(transaction, eventLosslessUpdate, directEvents) }
             afterTransactionListeners.toList().forEach { listener ->
                 observerCallbacks.add { listener(event) }
             }
@@ -2874,11 +3074,14 @@ class YDoc(
         candidates: List<Id>,
         representatives: MutableMap<Id, Id>,
     ) {
+        if (candidates.isEmpty() || representatives.isEmpty()) return
+        val membersByRepresentative = representatives.entries.groupBy(
+            keySelector = { entry -> entry.value },
+            valueTransform = { entry -> entry.key },
+        )
         candidates.forEach { candidate ->
             val representative = representatives[candidate] ?: return@forEach
-            representatives.entries
-                .filter { (_, value) -> value == representative }
-                .forEach { (id, _) -> representatives[id] = id }
+            membersByRepresentative[representative].orEmpty().forEach { id -> representatives[id] = id }
         }
     }
 
@@ -2888,8 +3091,6 @@ class YDoc(
         afterState: StateVector,
         representatives: MutableMap<Id, Id>,
     ) {
-        val allItems = store.allItems()
-        val linkedPairs = currentLogicalPairs(allItems)
         val physicallyMergeableTextGroups = mutableListOf<List<Id>>()
         afterState.forEach { (client, afterClock) ->
             val beforeClock = beforeState[client] ?: 0
@@ -2904,11 +3105,11 @@ class YDoc(
                 var groupStart = index
                 while (
                     groupStart > 0 &&
-                    clientItems[groupStart - 1].canVirtuallyMerge(
+                    clientItems[groupStart - 1].canVirtuallyMergeIgnoringAdjacency(
                         clientItems[groupStart - 1],
                         clientItems[groupStart],
-                        linkedPairs,
-                    )
+                    ) &&
+                    areLogicallyAdjacent(clientItems[groupStart - 1], clientItems[groupStart])
                 ) {
                     groupStart--
                 }
@@ -2927,7 +3128,7 @@ class YDoc(
             }
         }
         physicallyMergeableTextGroups.forEach { ids ->
-            store.mergeTextItems(ids)
+            store.mergeCompatibleItems(ids)
         }
     }
 
@@ -2937,54 +3138,88 @@ class YDoc(
         representatives: MutableMap<Id, Id>,
     ) {
         if (candidates.isEmpty()) return
-        val candidateSet = candidates.toSet()
-        val allItems = store.allItems()
-        val linkedPairs = currentLogicalPairs(allItems)
-        allItems.groupBy { item -> item.parent to item.parentSub }.forEach { (parentKey, _) ->
-            val (parent, parentSub) = parentKey
-            val logicalItems = if (parentSub == null) store.sequence(parent) else mapItemOrder(parent, parentSub)
-            var index = 0
-            while (index < logicalItems.size) {
-                var end = index
-                while (
-                    end + 1 < logicalItems.size &&
-                    logicalItems[end].canVirtuallyMerge(logicalItems[end], logicalItems[end + 1], linkedPairs)
-                ) {
-                    end++
+        val processed = hashSetOf<Id>()
+        candidates.asReversed().forEach { candidate ->
+            val seed = store.getStoreItem(candidate) ?: return@forEach
+            if (!processed.add(seed.id)) return@forEach
+            val group = ArrayDeque<StoreItem>().also { items -> items.add(seed) }
+
+            if (seed.parentSub == null) {
+                var current = seed
+                while (true) {
+                    val left = store.sequenceNeighbors(current).first ?: break
+                    if (!left.canVirtuallyMerge(left, current, logicallyAdjacent = true)) break
+                    group.addFirst(left)
+                    processed.add(left.id)
+                    current = left
                 }
-                val group = logicalItems.subList(index, end + 1)
-                if (group.any { item -> candidateSet.any { candidate -> item.containsClock(candidate) } }) {
-                    val representative = group.first().id
-                    group.forEach { item -> representatives[item.id] = representative }
+                current = seed
+                while (true) {
+                    val right = store.sequenceNeighbors(current).second ?: break
+                    if (!current.canVirtuallyMerge(current, right, logicallyAdjacent = true)) break
+                    group.addLast(right)
+                    processed.add(right.id)
+                    current = right
                 }
-                index = end + 1
+            } else {
+                val logicalItems = mapItemOrder(seed.parent, checkNotNull(seed.parentSub))
+                val seedIndex = store.cachedMapItemIndex(
+                    seed.parent,
+                    checkNotNull(seed.parentSub),
+                    seed.id,
+                ) { logicalItems }
+                if (seedIndex >= 0) {
+                    var index = seedIndex
+                    while (
+                        index > 0 &&
+                        logicalItems[index - 1].canVirtuallyMerge(
+                            logicalItems[index - 1],
+                            logicalItems[index],
+                            logicallyAdjacent = true,
+                        )
+                    ) {
+                        group.addFirst(logicalItems[--index])
+                    }
+                    index = seedIndex
+                    while (
+                        index + 1 < logicalItems.size &&
+                        logicalItems[index].canVirtuallyMerge(
+                            logicalItems[index],
+                            logicalItems[index + 1],
+                            logicallyAdjacent = true,
+                        )
+                    ) {
+                        group.addLast(logicalItems[++index])
+                    }
+                }
+            }
+            if (group.size > 1) {
+                val representative = group.first().id
+                group.forEach { item -> representatives[item.id] = representative }
             }
         }
     }
 
-    private fun currentLogicalPairs(allItems: List<StoreItem>): Set<Pair<Id, Id>> = buildSet {
-        allItems.groupBy { item -> item.parent to item.parentSub }.forEach { (parentKey, _) ->
-            val (parent, parentSub) = parentKey
-            val logicalItems = if (parentSub == null) store.sequence(parent) else mapItemOrder(parent, parentSub)
-            logicalItems.zipWithNext().forEach { (left, right) -> add(left.id to right.id) }
-        }
+    private fun areLogicallyAdjacent(left: StoreItem, right: StoreItem): Boolean {
+        if (left.parent != right.parent || left.parentSub != right.parentSub) return false
+        val key = left.parentSub
+        if (key == null) return store.areSequenceAdjacent(left, right)
+        val logicalItems = mapItemOrder(left.parent, key)
+        val index = store.cachedMapItemIndex(left.parent, key, left.id) { logicalItems }
+        return index >= 0 && logicalItems.getOrNull(index + 1)?.id == right.id
     }
-
-    private fun StoreItem.containsClock(id: Id): Boolean =
-        this.id.client == id.client &&
-            id.clock >= this.id.clock &&
-            id.clock < checkedClockAdd(this.id.clock, length, "virtual candidate item end")
-
-    private fun StoreItem.canVirtuallyMerge(
-        previous: StoreItem,
-        right: StoreItem,
-        linkedPairs: Set<Pair<Id, Id>>,
-    ): Boolean = canVirtuallyMerge(previous, right, (previous.id to right.id) in linkedPairs)
 
     private fun StoreItem.canVirtuallyMerge(
         previous: StoreItem,
         right: StoreItem,
         logicallyAdjacent: Boolean,
+    ): Boolean {
+        return logicallyAdjacent && canVirtuallyMergeIgnoringAdjacency(previous, right)
+    }
+
+    private fun StoreItem.canVirtuallyMergeIgnoringAdjacency(
+        previous: StoreItem,
+        right: StoreItem,
     ): Boolean {
         val previousLastId = Id(
             previous.id.client,
@@ -2993,7 +3228,6 @@ class YDoc(
         val mergeClass = content.virtualMergeClass() ?: return false
         return id.client == right.id.client &&
             checkedClockAdd(previous.id.clock, previous.length, "virtual merged item end") == right.id.clock &&
-            logicallyAdjacent &&
             right.origin == previousLastId &&
             rightOrigin == right.rightOrigin &&
             deleted == right.deleted &&
@@ -3012,12 +3246,22 @@ class YDoc(
             is YValue.SubdocRef -> null
             else -> VirtualMergeClass.Any
         }
+        is ItemContent.ArrayValues -> if (
+            values.any { value ->
+                value is YValue.BinaryValue || value is YValue.TypeRef || value is YValue.SubdocRef
+            }
+        ) null else VirtualMergeClass.Any
         is ItemContent.MapEntry -> when (value) {
             is YValue.BinaryValue,
             is YValue.TypeRef,
             is YValue.SubdocRef -> null
             else -> VirtualMergeClass.Any
         }
+        is ItemContent.MapEntries -> if (
+            values.any { value ->
+                value is YValue.BinaryValue || value is YValue.TypeRef || value is YValue.SubdocRef
+            }
+        ) null else VirtualMergeClass.Any
         is ItemContent.XmlNode -> VirtualMergeClass.Any
         is ItemContent.Text -> VirtualMergeClass.String
         is ItemContent.Deleted -> VirtualMergeClass.Deleted
@@ -3110,7 +3354,9 @@ class YDoc(
         directEvents: Map<String, YEvent>,
     ) {
         if (directEvents.isEmpty()) return
-        val deepTypes = materializedTypes().filter { it.hasDeepObservers || it.hasDeltaListeners || it.hasDeltaCache }
+        val deepTypes = snapshotInterestedTypes.filter {
+            type -> type.hasDeepObservers || type.hasDeltaListeners || type.hasDeltaCache
+        }
         if (deepTypes.isEmpty()) return
         val grouped = linkedMapOf<AbstractYType, MutableList<YEvent>>()
         directEvents.forEach { (changedParent, directEvent) ->
@@ -3167,7 +3413,7 @@ class YDoc(
         callAllYksCallbacks(callbacks)
     }
 
-    private fun captureParentBefore(parent: String, kindHint: RootKind) {
+    private fun captureParentBefore(parent: String, kindHint: RootKind, keyHint: String? = null) {
         val transaction = currentTransaction ?: return
         if (!needsTransactionSnapshots()) return
         val existing = transaction.beforeParents[parent]
@@ -3177,21 +3423,39 @@ class YDoc(
             kindHint
         }
         if (
-            (snapshotKind == RootKind.Map && existing?.mapSnapshot() != null) ||
+            (
+                snapshotKind == RootKind.Map &&
+                    existing?.mapSnapshot()?.let { snapshot ->
+                        snapshot.complete || keyHint != null && keyHint in snapshot.capturedKeys
+                    } == true
+            ) ||
             (snapshotKind != RootKind.Map && existing?.sequenceSnapshot()?.kind == snapshotKind)
         ) {
             return
         }
         val captured = when (snapshotKind) {
-            RootKind.Map -> ParentSnapshot.MapSnapshot(
-                values = visibleMap(parent),
-                itemIds = visibleMapItemIds(parent),
-            )
+            RootKind.Map -> if (keyHint == null) {
+                ParentSnapshot.MapSnapshot(
+                    values = visibleMap(parent),
+                    itemIds = visibleMapItemIds(parent),
+                    capturedKeys = mapKeysInInsertionOrder(parent).toSet(),
+                    complete = true,
+                )
+            } else {
+                ParentSnapshot.MapSnapshot(
+                    values = visibleMapValue(parent, keyHint)?.let { value -> mapOf(keyHint to value) }.orEmpty(),
+                    itemIds = currentVisibleMapItemId(parent, keyHint)?.let { id -> mapOf(keyHint to id) }.orEmpty(),
+                    capturedKeys = setOf(keyHint),
+                )
+            }
             RootKind.Array,
-            RootKind.Text,
             RootKind.XmlFragment,
-            RootKind.XmlElement,
-            RootKind.XmlText -> ParentSnapshot.SequenceSnapshot(snapshotKind, visibleSequence(parent))
+            RootKind.XmlElement -> ParentSnapshot.SequenceSnapshot(snapshotKind, emptyList())
+            RootKind.Text,
+            RootKind.XmlText -> ParentSnapshot.SequenceSnapshot(
+                snapshotKind,
+                visibleSequence(parent).map(::renderedTextItem),
+            )
             RootKind.XmlHook -> error("XML hook snapshots use map semantics")
         }
         transaction.beforeParents[parent] = existing?.merge(captured) ?: captured
@@ -3203,7 +3467,21 @@ class YDoc(
             transactionEventListeners["beforeObserverCalls"].orEmpty().isNotEmpty() ||
             eventListeners["beforeObserverCalls"].orEmpty().isNotEmpty()
         ) return true
-        return materializedTypes().any { type -> type.needsTransactionSnapshot }
+        return snapshotInterestedTypes.isNotEmpty()
+    }
+
+    internal fun refreshTypeSnapshotInterest(type: AbstractYType) {
+        ensureThreadAccess()
+        if (type.doc === this && !type.isDestroyed && type.needsTransactionSnapshot) {
+            snapshotInterestedTypes.add(type)
+        } else {
+            snapshotInterestedTypes.remove(type)
+        }
+    }
+
+    internal fun removeTypeSnapshotInterest(type: AbstractYType) {
+        ensureThreadAccess()
+        snapshotInterestedTypes.remove(type)
     }
 
     private fun createEvent(
@@ -3218,11 +3496,17 @@ class YDoc(
         val changedSubs = transaction.changedParentSubs[type.name].orEmpty()
         val changedKeys = changedSubs.filterNotNull().toSet()
         val mapChanges = before?.mapSnapshot()?.let { mapBefore ->
+            val afterValues = changedKeys
+                .mapNotNull { key -> visibleMapValue(type.name, key)?.let { value -> key to value } }
+                .toMap()
+            val afterItemIds = changedKeys
+                .mapNotNull { key -> currentVisibleMapItemId(type.name, key)?.let { id -> key to id } }
+                .toMap()
             diffMapChanges(
                 before = mapBefore.values,
-                after = visibleMap(type.name),
+                after = afterValues,
                 beforeItemIds = mapBefore.itemIds,
-                afterItemIds = visibleMapItemIds(type.name),
+                afterItemIds = afterItemIds,
                 changedKeys = changedKeys,
             )
         }.orEmpty()
@@ -3302,7 +3586,7 @@ class YDoc(
         effectiveInsertSet: IdSet,
         effectiveDeleteSet: DeleteSet,
     ): List<YArrayDeltaOp> =
-        diffSequenceEvent(type, effectiveInsertSet, effectiveDeleteSet) { item -> arrayItemValue(item) }
+        diffSequenceEvent(type, effectiveInsertSet, effectiveDeleteSet, ::arrayItemValues)
 
     private fun diffXmlDelta(
         type: YXmlSharedType,
@@ -3310,10 +3594,10 @@ class YDoc(
         effectiveDeleteSet: DeleteSet,
     ): List<YArrayDeltaOp> =
         diffSequenceEvent(type, effectiveInsertSet, effectiveDeleteSet) { item ->
-            when (val content = item.content) {
+            listOf(when (val content = item.content) {
                 is ItemContent.XmlType -> typeFromXmlType(content)
                 else -> content.toXmlEventJson(this)
-            }
+            })
         }
 
     /**
@@ -3324,7 +3608,7 @@ class YDoc(
         type: AbstractYType,
         effectiveInsertSet: IdSet,
         effectiveDeleteSet: DeleteSet,
-        insertedValue: (StoreItem) -> Any?,
+        insertedValues: (StoreItem) -> List<Any?>,
     ): List<YArrayDeltaOp> {
         val delta = mutableListOf<YArrayDeltaOp>()
         sequence(type.name)
@@ -3334,7 +3618,7 @@ class YDoc(
                 val deleted = effectiveDeleteSet.contains(item.id)
                 when {
                     item.deleted && deleted && !added -> delta.appendDelete(item.length.toDeltaLength())
-                    !item.deleted && added -> delta.appendInsert(insertedValue(item))
+                    !item.deleted && added -> insertedValues(item).forEach { value -> delta.appendInsert(value) }
                     !item.deleted -> delta.appendRetain(item.length.toDeltaLength())
                 }
             }
@@ -3353,7 +3637,25 @@ class YDoc(
         effectiveDeleteSet: DeleteSet,
     ): YTextDelta {
         val delta = YTextDelta()
-        val beforeById = before.associateBy { item -> item.id }
+        val beforeByClient = before
+            .groupBy { item -> item.id.client }
+            .mapValues { (_, items) -> items.sortedBy { item -> item.id.clock } }
+
+        fun beforeContentAt(id: Id): ItemContent? {
+            val items = beforeByClient[id.client] ?: return null
+            var low = 0
+            var high = items.size - 1
+            while (low <= high) {
+                val middle = (low + high) ushr 1
+                val candidate = items[middle]
+                when {
+                    id.clock < candidate.id.clock -> high = middle - 1
+                    id.clock >= candidate.clockEnd() -> low = middle + 1
+                    else -> return candidate.content
+                }
+            }
+            return null
+        }
 
         sequence(type.name)
             .filter { item -> item.content.kind == type.kind }
@@ -3371,13 +3673,13 @@ class YDoc(
                         appendTextEventInsert(delta, item)
                     }
                     !item.deleted -> {
-                        val oldContent = beforeById[item.id]?.content
+                        val oldContent = beforeContentAt(item.id)
                         val attributes = if (oldContent == null) {
                             emptyMap()
                         } else {
                             textAttributeDiff(
                                 oldContent.textAttributesOrEmpty(),
-                                item.content.textAttributesOrEmpty(),
+                                renderedTextAttributes(item),
                             )
                         }
                         delta.retain(item.length.toDeltaLength(), attributes)
@@ -3393,7 +3695,7 @@ class YDoc(
     }
 
     private fun appendTextEventInsert(delta: YTextDelta, item: StoreItem) {
-        val attributes = textAttributesToPublic(item.content.textAttributesOrEmpty())
+        val attributes = textAttributesToPublic(renderedTextAttributes(item))
         when (val content = item.content) {
             is ItemContent.Text -> delta.insert(content.value, attributes)
             is ItemContent.TextEmbed -> delta.insertEmbed(valueToAny(content.value), attributes)
@@ -3468,10 +3770,11 @@ class YDoc(
      * Retag the complete direct sequence here; map attributes keep map semantics.
      */
     private fun normalizeAmbiguousRootContent(name: String, kind: RootKind) {
+        if (!store.hasParent(name)) return
         var changed = false
-        store.allItems()
+        store.itemsForParent(name)
             .asSequence()
-            .filter { item -> item.parent == name && item.parentSub == null }
+            .filter { item -> item.parentSub == null }
             .forEach { item ->
                 val normalized = item.content.withRemoteParentKind(kind)
                 if (normalized != item.content) {
@@ -3511,14 +3814,10 @@ class YDoc(
         rootTypes[parent]?.let { return it }
         nestedTypes[parent]?.let { return it }
         if (parent !in nestedNames) return null
-        val kind = store.allItems().firstOrNull { it.parent == parent && it.parentSub == null }?.content?.kind
-            ?: store.allItems().firstOrNull { it.parent == parent }?.content?.kind
+        val kind = store.firstItemForParent(parent, sequenceOnly = true)?.content?.kind
+            ?: store.firstItemForParent(parent)?.content?.kind
             ?: return null
         return typeFromRef(YValue.TypeRef(kind, parent))
-    }
-
-    private fun materializedTypes(): List<AbstractYType> {
-        return (rootTypes.values + nestedTypes.values).distinctBy { it.name }
     }
 
     private fun directNestedChildren(
@@ -3589,7 +3888,7 @@ class YDoc(
             RootKind.XmlHook -> YXmlHook(this, ref.name, xmlNodeName ?: ref.name)
             RootKind.XmlText -> YXmlTextType(this, ref.name)
         }.also { type ->
-            type.markDecodedNested(this, ref.name, store.parentItemIds()[ref.name])
+            type.markDecodedNested(this, ref.name, store.firstOwnerForNested(ref.name)?.id)
             nestedTypes[ref.name] = type
         }
     }
@@ -3600,7 +3899,9 @@ class YDoc(
     private fun rememberNestedRefs(content: ItemContent) {
         when (content) {
             is ItemContent.Value -> rememberNestedRefs(content.value)
+            is ItemContent.ArrayValues -> content.values.forEach(::rememberNestedRefs)
             is ItemContent.MapEntry -> rememberNestedRefs(content.value)
+            is ItemContent.MapEntries -> content.values.forEach(::rememberNestedRefs)
             is ItemContent.TextEmbed -> rememberNestedRefs(content.value)
             is ItemContent.XmlType -> {
                 referencedNestedNames.add(content.ref.name)
@@ -3760,11 +4061,13 @@ class YDoc(
     private fun hasNestedTypeReference(name: String): Boolean =
         name in referencedNestedNames ||
             pendingNestedReferenceStack.any { pending -> name in pending } ||
-            store.allItems().any { item -> item.content.nestedTypeRefNames().contains(name) }
+            store.hasNestedOwner(name)
 
     private fun ItemContent.nestedTypeRefNames(): Set<String> = when (this) {
         is ItemContent.Value -> value.nestedTypeRefNames()
+        is ItemContent.ArrayValues -> values.flatMapTo(linkedSetOf()) { value -> value.nestedTypeRefNames() }
         is ItemContent.MapEntry -> value.nestedTypeRefNames()
+        is ItemContent.MapEntries -> values.flatMapTo(linkedSetOf()) { value -> value.nestedTypeRefNames() }
         is ItemContent.TextEmbed -> value.nestedTypeRefNames()
         is ItemContent.XmlType -> setOf(ref.name)
         is ItemContent.Text,
@@ -3878,14 +4181,24 @@ class YDoc(
     }
 
     private fun visibleSubdocRefs(): List<YValue.SubdocRef> {
+        visibleSubdocRefsCache?.let { return it }
         return store.allItems()
             .filter { !it.deleted }
             .flatMap { subdocRefs(it.content) }
+            .also { refs -> visibleSubdocRefsCache = refs }
+    }
+
+    private fun recordAddedItem(item: StoreItem) {
+        val hasSubdocRefs = item.content.hasSubdocRefs()
+        if (hasSubdocRefs) visibleSubdocRefsCache = null
+        currentTransaction?.recordAdded(item, hasSubdocRefs)
     }
 
     private fun subdocRefs(content: ItemContent): List<YValue.SubdocRef> = when (content) {
         is ItemContent.Value -> subdocRefs(content.value)
+        is ItemContent.ArrayValues -> content.values.flatMap(::subdocRefs)
         is ItemContent.MapEntry -> subdocRefs(content.value)
+        is ItemContent.MapEntries -> content.values.flatMap(::subdocRefs)
         is ItemContent.TextEmbed -> subdocRefs(content.value)
         is ItemContent.Text,
         is ItemContent.TextFormat,
@@ -3897,7 +4210,9 @@ class YDoc(
 
     private fun ItemContent.hasSubdocRefs(): Boolean = when (this) {
         is ItemContent.Value -> value.hasSubdocRefs()
+        is ItemContent.ArrayValues -> values.any { value -> value.hasSubdocRefs() }
         is ItemContent.MapEntry -> value.hasSubdocRefs()
+        is ItemContent.MapEntries -> values.any { value -> value.hasSubdocRefs() }
         is ItemContent.TextEmbed -> value.hasSubdocRefs()
         is ItemContent.Text,
         is ItemContent.TextFormat,
@@ -4029,10 +4344,7 @@ class YDoc(
         ) {
             return Id(source.id.client, sourceEnd)
         }
-        val sequence = sequence(source.parent)
-        val index = sequence.indexOfFirst { it.id == source.id }
-        if (index < 0) return null
-        return sequence.drop(index + 1).firstOrNull { it.parentSub == null }?.id
+        return containing?.let { item -> store.sequenceNeighbors(item).second?.id }
     }
 
     private fun StoreItem.isVisibleIn(snapshot: Snapshot): Boolean =
@@ -4057,7 +4369,16 @@ class YDoc(
         var hasSubdocContentChanges: Boolean = false
             private set
         var afterState: StateVector = beforeState
-        var update: ByteArray = ByteArray(0)
+        private var updateValue: ByteArray = ByteArray(0)
+        private var deferredUpdate: (() -> ByteArray)? = null
+        val update: ByteArray
+            get() {
+                deferredUpdate?.let { provider ->
+                    updateValue = provider()
+                    deferredUpdate = null
+                }
+                return updateValue
+            }
         var validatedStandardUpdate: ByteArray? = null
         val isEmpty: Boolean
             get() = addedItems.isEmpty() &&
@@ -4081,6 +4402,14 @@ class YDoc(
         fun recordDeleted(item: StoreItem, hasSubdocRefs: Boolean) {
             deletedItems.add(item)
             hasSubdocContentChanges = hasSubdocContentChanges || hasSubdocRefs
+        }
+
+        fun recordDeletedMetadata(hasSubdocRefs: Boolean) {
+            hasSubdocContentChanges = hasSubdocContentChanges || hasSubdocRefs
+        }
+
+        fun deferUpdate(provider: () -> ByteArray) {
+            deferredUpdate = provider
         }
 
         fun captureTypeState(type: AbstractYType) {
@@ -4127,8 +4456,8 @@ class YTransaction internal constructor(
     val meta: MutableMap<Any?, Any?> get() = transaction.meta
     val changedParents: Set<String> get() = doc.changedParentsFor(transaction)
     val changedTypes: Set<AbstractYType> get() = changedParents.mapNotNull { doc.typeForParent(it) }.toSet()
-    val addedItemCount: Int get() = transaction.addedItems.size
-    val deletedItemCount: Int get() = transaction.deletedItems.size
+    val addedItemCount: Int get() = transaction.addedItems.logicalEventItemCount()
+    val deletedItemCount: Int get() = transaction.deletedItems.logicalEventItemCount()
     val update: ByteArray get() = transaction.update
 
     fun adds(id: Id): Boolean = id.clock >= (beforeState[id.client] ?: 0)
@@ -4277,7 +4606,9 @@ private fun Map<String, YMapChange>.toMapDelta(): YMapDelta {
 
 internal fun ItemContent.directTypeRef(): YValue.TypeRef? = when (this) {
     is ItemContent.Value -> value as? YValue.TypeRef
+    is ItemContent.ArrayValues -> null
     is ItemContent.MapEntry -> value as? YValue.TypeRef
+    is ItemContent.MapEntries -> null
     is ItemContent.XmlType -> ref
     is ItemContent.Text,
     is ItemContent.TextEmbed,
@@ -4297,6 +4628,16 @@ private fun ItemContent.withRemoteParentKind(kind: RootKind): ItemContent = when
         else -> this
     }
     is ItemContent.MapEntry -> if (kind == RootKind.Map || kind == RootKind.XmlHook) this else ItemContent.Value(value)
+    is ItemContent.ArrayValues -> {
+        require(kind == RootKind.Array) { "packed array values cannot be retagged as $kind" }
+        this
+    }
+    is ItemContent.MapEntries -> {
+        require(kind == RootKind.Map || kind == RootKind.XmlHook) {
+            "packed map history cannot be retagged as $kind"
+        }
+        this
+    }
     is ItemContent.Text -> copy(kind = kind)
     is ItemContent.TextEmbed -> copy(kind = kind)
     is ItemContent.TextFormat -> copy(kind = kind)
@@ -4444,32 +4785,72 @@ data class YArrayDeltaOp(
     }
 }
 
+internal class YTransactionEventItems(
+    val added: List<StoreItem>,
+    val deleted: List<StoreItem>,
+)
+
 class YTransactionEvent internal constructor(
     val doc: YDoc,
     val origin: Any?,
     val local: Boolean,
-    val update: ByteArray,
+    update: ByteArray?,
+    private val updateProvider: (() -> ByteArray)? = null,
     val beforeState: StateVector,
     val afterState: StateVector,
-    val insertSet: IdSet,
+    insertSet: IdSet?,
     val deleteSet: DeleteSet,
-    val deleteIdSet: IdSet = deleteSet.toIdSet(),
+    deleteIdSet: IdSet? = null,
     val cleanUps: IdSet = createIdSet(),
     val meta: MutableMap<Any?, Any?> = linkedMapOf(),
-    val addedStructs: List<ItemStruct> = emptyList(),
-    val deletedStructs: List<ItemStruct> = emptyList(),
-    internal val addedItems: List<StoreItem>,
-    internal val deletedItems: List<StoreItem>,
+    addedStructs: List<ItemStruct>? = emptyList(),
+    deletedStructs: List<ItemStruct>? = emptyList(),
+    addedItems: List<StoreItem>?,
+    deletedItems: List<StoreItem>?,
+    internal val eventItems: YTransactionEventItems? = null,
     val changedParents: Set<String>,
     val changedTypes: Set<AbstractYType> = emptySet(),
     val subdocsAdded: Set<YDoc> = emptySet(),
     val subdocsRemoved: Set<YDoc> = emptySet(),
     val subdocsLoaded: Set<YDoc> = emptySet(),
 ) {
+    private val eagerUpdate = update
+    private val eagerInsertSet = insertSet
+    private val eagerDeleteIdSet = deleteIdSet
+    private val eagerAddedStructs = addedStructs
+    private val eagerDeletedStructs = deletedStructs
+    private val eagerAddedItems = addedItems
+    private val eagerDeletedItems = deletedItems
+
+    val update: ByteArray by lazy(LazyThreadSafetyMode.NONE) {
+        eagerUpdate ?: updateProvider?.invoke() ?: ByteArray(0)
+    }
+    val insertSet: IdSet by lazy(LazyThreadSafetyMode.NONE) {
+        eagerInsertSet ?: eventItems?.added?.toIdSet() ?: createIdSet()
+    }
+    val deleteIdSet: IdSet by lazy(LazyThreadSafetyMode.NONE) {
+        eagerDeleteIdSet ?: deleteSet.toIdSet()
+    }
+    val addedStructs: List<ItemStruct> by lazy(LazyThreadSafetyMode.NONE) {
+        eagerAddedStructs ?: eventItems?.added.orEmpty().map { item -> item.toItemStruct(doc) }
+    }
+    val deletedStructs: List<ItemStruct> by lazy(LazyThreadSafetyMode.NONE) {
+        eagerDeletedStructs
+            ?: eventItems?.deleted.orEmpty().map { item -> item.copy(deleted = true).toItemStruct(doc) }
+    }
+    internal val addedItems: List<StoreItem> by lazy(LazyThreadSafetyMode.NONE) {
+        eagerAddedItems ?: eventItems?.added.orEmpty()
+    }
+    internal val deletedItems: List<StoreItem> by lazy(LazyThreadSafetyMode.NONE) {
+        eagerDeletedItems ?: eventItems?.deleted.orEmpty()
+    }
+
     val changedParentTypes: Set<AbstractYType> get() = changedTypes
 
-    val addedItemCount: Int get() = addedItems.size
-    val deletedItemCount: Int get() = deletedItems.size
+    val addedItemCount: Int
+        get() = (eagerAddedItems ?: eventItems?.added).orEmpty().logicalEventItemCount()
+    val deletedItemCount: Int
+        get() = (eagerDeletedItems ?: eventItems?.deleted).orEmpty().logicalEventItemCount()
 
     fun adds(id: Id): Boolean = id.clock >= (beforeState[id.client] ?: 0)
 
@@ -4502,6 +4883,15 @@ private fun List<StoreItem>.toIdSet(): IdSet {
     return idSet
 }
 
+private fun List<StoreItem>.logicalEventItemCount(): Int = fold(0L) { count, item ->
+    val increment = when (item.content) {
+        is ItemContent.ArrayValues,
+        is ItemContent.MapEntries -> item.length
+        else -> 1L
+    }
+    checkedClockAdd(count, increment, "transaction item count")
+}.toNonNegativeInt("transaction item count")
+
 data class YSubdocEvent(
     val added: List<YDoc> = emptyList(),
     val removed: List<YDoc> = emptyList(),
@@ -4528,6 +4918,8 @@ internal sealed class ParentSnapshot {
     data class MapSnapshot(
         val values: Map<String, YValue>,
         val itemIds: Map<String, Id>,
+        val capturedKeys: Set<String> = values.keys + itemIds.keys,
+        val complete: Boolean = false,
     ) : ParentSnapshot()
     data class CombinedSnapshot(
         val sequence: SequenceSnapshot? = null,
@@ -4537,7 +4929,19 @@ internal sealed class ParentSnapshot {
 
 private fun ParentSnapshot.merge(other: ParentSnapshot): ParentSnapshot {
     val sequence = sequenceSnapshot() ?: other.sequenceSnapshot()
-    val map = mapSnapshot() ?: other.mapSnapshot()
+    val firstMap = mapSnapshot()
+    val secondMap = other.mapSnapshot()
+    val map = when {
+        firstMap == null -> secondMap
+        secondMap == null -> firstMap
+        else -> ParentSnapshot.MapSnapshot(
+            // This snapshot was captured earlier, so it wins for keys present in both.
+            values = secondMap.values + firstMap.values,
+            itemIds = secondMap.itemIds + firstMap.itemIds,
+            capturedKeys = firstMap.capturedKeys + secondMap.capturedKeys,
+            complete = firstMap.complete || secondMap.complete,
+        )
+    }
     return when {
         sequence != null && map != null -> ParentSnapshot.CombinedSnapshot(sequence, map)
         sequence != null -> sequence

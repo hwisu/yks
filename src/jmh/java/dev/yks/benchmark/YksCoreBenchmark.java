@@ -8,6 +8,10 @@ import dev.yks.YText;
 import dev.yks.YThreadAccessPolicy;
 import dev.yks.YUpdateLimits;
 import dev.yks.YksUpdateLimitException;
+import dev.yks.Snapshot;
+import dev.yks.SnapshotKt;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import kotlin.Unit;
@@ -37,6 +41,115 @@ public class YksCoreBenchmark {
     private int standardAppendBytes;
     private YDoc standardEmptyDocument;
     private YText readText;
+    private byte[] formattedUpdate;
+    private byte[] mapUpdate;
+    private byte[] mapHistoryUpdate;
+    private byte[] arrayUpdate;
+    private byte[] nestedUpdate;
+    private byte[] fragmentedUpdate;
+    private byte[] concurrentUpdate;
+    private dev.yks.YArray arrayRead;
+    private YText clockRangeText;
+    private Snapshot clockRangeBefore;
+    private Snapshot clockRangeAfter;
+
+    @State(Scope.Thread)
+    public static class NestedDeleteState {
+        private byte[] fixture;
+        private YDoc document;
+        private dev.yks.YArray root;
+
+        @Setup(Level.Trial)
+        public void prepareFixture() throws Exception {
+            fixture = Files.readAllBytes(Path.of("build/performance/nested-array-3000-v1.bin"));
+        }
+
+        @Setup(Level.Invocation)
+        public void prepareDocument() {
+            document = new YDoc();
+            document.setGc(false);
+            document.applyUpdate(fixture, null);
+            root = document.getArray("root");
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class ObservedFragmentedState {
+        private byte[] fixture;
+        private YDoc document;
+        private YText text;
+        private long observed;
+
+        @Setup(Level.Trial)
+        public void prepareFixture() throws Exception {
+            fixture = Files.readAllBytes(Path.of("build/performance/fragmented-text-5000-v1.bin"));
+        }
+
+        @Setup(Level.Invocation)
+        public void prepareDocument() {
+            observed = 0;
+            document = new YDoc();
+            document.setGc(false);
+            document.applyUpdate(fixture, null);
+            text = document.getText("body");
+            document.observeAfterTransactions(event -> {
+                observed++;
+                return Unit.INSTANCE;
+            });
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class ObservedMapState {
+        private byte[] fixture;
+        private dev.yks.YMap map;
+        private long observed;
+        private int nextIndex;
+        private final String[] keys = new String[5_000];
+
+        @Setup(Level.Trial)
+        public void prepareDocument() throws Exception {
+            fixture = Files.readAllBytes(Path.of("build/performance/map-5000-v1.bin"));
+            for (int index = 0; index < keys.length; index++) {
+                keys[index] = "key-" + index;
+            }
+            observed = 0;
+            YDoc document = new YDoc();
+            document.setGc(false);
+            document.applyUpdate(fixture, null);
+            map = document.getMap("map");
+            map.observe(event -> {
+                observed++;
+                return Unit.INSTANCE;
+            });
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class PackedUndoState {
+        private YText text;
+        private dev.yks.UndoManager undoManager;
+
+        @Setup(Level.Invocation)
+        public void prepareDocument() {
+            YDoc document = new YDoc();
+            text = document.getText("body");
+            undoManager = new dev.yks.UndoManager(
+                text,
+                new dev.yks.UndoManagerOptions(
+                    0,
+                    null,
+                    java.util.Collections.singleton(null),
+                    null,
+                    item -> true,
+                    false,
+                    false,
+                    null
+                )
+            );
+            text.insert(0, "x".repeat(20_000), Map.of());
+        }
+    }
 
     @State(Scope.Thread)
     public static class StandardTransactionState {
@@ -111,6 +224,28 @@ public class YksCoreBenchmark {
                 YStandardUpdatePolicy.ALLOW_LOSSLESS_EXTENSIONS
             )
         );
+
+        try {
+            formattedUpdate = Files.readAllBytes(Path.of("build/performance/formatted-text-5000-v1.bin"));
+            mapUpdate = Files.readAllBytes(Path.of("build/performance/map-5000-v1.bin"));
+            mapHistoryUpdate = Files.readAllBytes(Path.of("build/performance/map-history-5000-v1.bin"));
+            nestedUpdate = Files.readAllBytes(Path.of("build/performance/nested-array-3000-v1.bin"));
+            fragmentedUpdate = Files.readAllBytes(Path.of("build/performance/fragmented-text-5000-v1.bin"));
+            concurrentUpdate = Files.readAllBytes(Path.of("build/performance/concurrent-text-1000-v1.bin"));
+            arrayUpdate = Files.readAllBytes(Path.of("build/performance/array-5000-v1.bin"));
+            YDoc arrayDocument = new YDoc();
+            arrayDocument.applyUpdate(arrayUpdate, null);
+            arrayRead = arrayDocument.getArray("array");
+        } catch (Exception error) {
+            throw new IllegalStateException("run benchmark:performance once to generate parity fixtures", error);
+        }
+
+        YDoc clockRangeDocument = new YDoc();
+        clockRangeText = clockRangeDocument.getText("body");
+        clockRangeText.insert(0, "x".repeat(20_000), Map.of());
+        clockRangeBefore = SnapshotKt.snapshot(clockRangeDocument);
+        clockRangeText.insert(10_000, "y", Map.of());
+        clockRangeAfter = SnapshotKt.snapshot(clockRangeDocument);
     }
 
     @Benchmark
@@ -137,6 +272,15 @@ public class YksCoreBenchmark {
     @Benchmark
     public int applyFiveThousandStructs() {
         YDoc doc = new YDoc();
+        doc.applyUpdate(standardUpdate, null);
+        return doc.getText("left").getLength() + doc.getText("right").getLength();
+    }
+
+    @Benchmark
+    public int applyFiveThousandStructsToOpenRoots() {
+        YDoc doc = new YDoc();
+        doc.getText("left").toString();
+        doc.getText("right").toString();
         doc.applyUpdate(standardUpdate, null);
         return doc.getText("left").getLength() + doc.getText("right").getLength();
     }
@@ -191,5 +335,168 @@ public class YksCoreBenchmark {
         } catch (YksUpdateLimitException expected) {
             blackhole.consume(expected.getActual());
         }
+    }
+
+    @Benchmark
+    public int applyFormattedFiveThousandStructs() {
+        YDoc doc = new YDoc();
+        doc.applyUpdate(formattedUpdate, null);
+        return doc.getText("left").getLength() + doc.getText("right").getLength();
+    }
+
+    @Benchmark
+    public int deleteThreeThousandNestedTypes(NestedDeleteState state) {
+        state.root.delete(0, state.root.getLength());
+        return state.root.getLength();
+    }
+
+    @Benchmark
+    public int applyThreeThousandNestedTypes() {
+        YDoc doc = new YDoc();
+        doc.setGc(false);
+        doc.applyUpdate(nestedUpdate, null);
+        return doc.getArray("root").getLength();
+    }
+
+    @Benchmark
+    public int applyFiveThousandMapEntries() {
+        YDoc doc = new YDoc();
+        doc.applyUpdate(mapUpdate, null);
+        return doc.getMap("map").getSize();
+    }
+
+    @Benchmark
+    public long applyFiveThousandMapHistoryEntries() {
+        YDoc doc = new YDoc();
+        doc.setGc(false);
+        doc.applyUpdate(mapHistoryUpdate, null);
+        return ((Number) doc.getMap("map").get("key")).longValue();
+    }
+
+    @Benchmark
+    public long applyFiveThousandArrayValues() {
+        YDoc doc = new YDoc();
+        doc.setGc(false);
+        doc.applyUpdate(arrayUpdate, null);
+        return ((Number) doc.getArray("array").get(2_500)).longValue();
+    }
+
+    @Benchmark
+    public long insertFiveThousandArrayValues() {
+        YDoc doc = new YDoc();
+        doc.setGc(false);
+        dev.yks.YArray array = doc.getArray("array");
+        java.util.List<Integer> values = java.util.stream.IntStream.range(0, 5_000).boxed().toList();
+        array.insert(0, values);
+        return ((Number) array.get(2_500)).longValue();
+    }
+
+    @Benchmark
+    public long setFiveThousandMapHistoryEntries() {
+        YDoc doc = new YDoc();
+        doc.setGc(false);
+        dev.yks.YMap map = doc.getMap("map");
+        doc.transact(null, true, () -> {
+            for (int index = 0; index < 5_000; index++) map.set("key", index);
+            return Unit.INSTANCE;
+        });
+        return ((Number) map.get("key")).longValue();
+    }
+
+    @Benchmark
+    public int applyFiveThousandPrependedTextStructs() {
+        YDoc doc = new YDoc();
+        doc.setGc(false);
+        doc.applyUpdate(fragmentedUpdate, null);
+        return doc.getText("body").getLength();
+    }
+
+    @Benchmark
+    public int applyFiveThousandPrependedTextStructsToOpenRoot() {
+        YDoc doc = new YDoc();
+        doc.setGc(false);
+        doc.getText("body").toString();
+        doc.applyUpdate(fragmentedUpdate, null);
+        return doc.getText("body").getLength();
+    }
+
+    @Benchmark
+    public int applyOneThousandConcurrentTextInserts() {
+        YDoc doc = new YDoc();
+        doc.setGc(false);
+        doc.applyUpdate(concurrentUpdate, null);
+        return doc.getText("body").getLength();
+    }
+
+    @Benchmark
+    public int applyOneThousandConcurrentTextInsertsToOpenRoot() {
+        YDoc doc = new YDoc();
+        doc.setGc(false);
+        doc.getText("body").toString();
+        doc.applyUpdate(concurrentUpdate, null);
+        return doc.getText("body").getLength();
+    }
+
+    @Benchmark
+    public int createAndReadTenThousandRoots() {
+        YDoc doc = new YDoc();
+        for (int index = 0; index < 10_000; index++) doc.getText("root-" + index);
+        int sum = 0;
+        for (int index = 0; index < 10_000; index++) sum += doc.getText("root-" + index).getLength();
+        return doc.rootNames().size() + sum;
+    }
+
+    @Benchmark
+    public int editOneThousandTimesWithTenThousandRoots() {
+        YDoc doc = new YDoc();
+        for (int index = 0; index < 10_000; index++) doc.getText("root-" + index);
+        YText text = doc.getText("root-0");
+        for (int index = 0; index < 1_000; index++) {
+            text.insert(0, "x", Map.of());
+            text.delete(0, 1);
+        }
+        return doc.rootNames().size() + text.getLength();
+    }
+
+    @Benchmark
+    public long readArrayLengthAndFirstItemOneHundredThousandTimes() {
+        long sum = 0;
+        for (int index = 0; index < 100_000; index++) {
+            sum += arrayRead.getLength();
+            sum += ((Number) arrayRead.get(0)).longValue();
+        }
+        return sum;
+    }
+
+    @Benchmark
+    public long editObservedFragmentedTextFiveHundredTimes(ObservedFragmentedState state) {
+        state.document.transact(null, true, () -> {
+            for (int index = 0; index < 500; index++) {
+                int middle = state.text.getLength() / 2;
+                state.text.insert(middle, "y", Map.of());
+                state.text.delete(middle, 1);
+            }
+            return Unit.INSTANCE;
+        });
+        return state.observed + state.text.getLength();
+    }
+
+    @Benchmark
+    public long editObservedFiveThousandKeyMap(ObservedMapState state) {
+        String key = state.keys[state.nextIndex % state.keys.length];
+        int value = -(++state.nextIndex);
+        state.map.set(key, value);
+        return state.observed + ((Number) state.map.get(key)).longValue();
+    }
+
+    @Benchmark
+    public int undoTwentyThousandPackedCharacters(PackedUndoState state) {
+        state.undoManager.undo();
+        return state.text.getLength();
+    }
+
+    @Benchmark
+    public int readClockRangeSnapshotDelta() {
+        return clockRangeText.toDelta(clockRangeAfter, clockRangeBefore, null).getOps().size();
     }
 }

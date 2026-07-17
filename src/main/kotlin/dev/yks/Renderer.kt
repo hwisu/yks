@@ -535,7 +535,9 @@ class DiffRenderer(
 
 private fun ItemContent.nestedTypeRefs(): List<YValue.TypeRef> = when (this) {
     is ItemContent.Value -> value.nestedTypeRefs()
+    is ItemContent.ArrayValues -> values.flatMap(YValue::nestedTypeRefs)
     is ItemContent.MapEntry -> value.nestedTypeRefs()
+    is ItemContent.MapEntries -> values.flatMap(YValue::nestedTypeRefs)
     is ItemContent.TextEmbed -> value.nestedTypeRefs()
     is ItemContent.XmlType -> listOf(ref)
     is ItemContent.Text,

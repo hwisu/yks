@@ -109,6 +109,55 @@ class StructStoreTest {
     }
 
     @Test
+    fun repeatedMapHistoryStaysPackedLikeYjs() {
+        assertTimeoutPreemptively(Duration.ofSeconds(2)) {
+            val doc = YDoc(clientId = 1, gc = false)
+            val map = doc.getMap("map")
+            doc.transact {
+                repeat(5_000) { index -> map.set("key", index) }
+            }
+
+            val structs = doc.store.clients.getValue(1)
+            assertEquals(2, structs.size)
+            assertEquals(4_999L, structs.first().length)
+            assertTrue(structs.first().content is ContentAny)
+            assertEquals(4_999L, map.get("key"))
+
+            val update = doc.encodeStateAsUpdate()
+            val decoded = decodeUpdate(update)
+            assertEquals(listOf(4_999L, 1L), decoded.structs.map { struct -> struct.length })
+            assertEquals(4_999L, createDocFromUpdate(update).getMap("map").get("key"))
+        }
+    }
+
+    @Test
+    fun arrayValuesStayPackedAndSupportInteriorIndexingLikeYjs() {
+        assertTimeoutPreemptively(Duration.ofSeconds(2)) {
+            val doc = YDoc(clientId = 1, gc = false)
+            val array = doc.getArray("array")
+            array.insert(0, List(5_000) { index -> index })
+
+            val stored = doc.store.clients.getValue(1)
+            assertEquals(1, stored.size)
+            assertEquals(5_000L, stored.single().length)
+            assertEquals(2_500L, array.get(2_500))
+
+            val update = doc.encodeStateAsUpdate()
+            val decoded = decodeUpdate(update)
+            assertEquals(1, decoded.structs.size)
+            assertEquals(5_000L, decoded.structs.single().length)
+            assertTrue(decoded.structs.single().content is ContentAny)
+
+            val relay = createDocFromUpdate(update)
+            val relayedArray = relay.getArray("array")
+            assertEquals(5_000, relayedArray.length)
+            assertEquals(2_500L, relayedArray.get(2_500))
+            relayedArray.insert(2_500, listOf(-1))
+            assertEquals(listOf(2_499L, -1L, 2_500L), relayedArray.slice(2_499, 2_502))
+        }
+    }
+
+    @Test
     fun sequenceMatchesYjsGlobalConflictOrdering() {
         val updates = listOf(
             "AQEKAAgBAWEBdwJvYQA=",

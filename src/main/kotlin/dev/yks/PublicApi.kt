@@ -326,11 +326,13 @@ private fun ItemContent.baseTextAttributesForCleanup(): Map<String, YValue> = wh
 
 private fun ItemContent.logContent(doc: YDoc): String = when (this) {
     is ItemContent.Value -> "Value(${doc.valueToJson(value).logAny()})"
+    is ItemContent.ArrayValues -> "ArrayValues(${values.map(doc::valueToJson).logAny()})"
     is ItemContent.Text -> "Text(value=${value.logAny()}, attrs=${attributes.logValues(doc)})"
     is ItemContent.TextEmbed -> "TextEmbed(value=${doc.valueToJson(value).logAny()}, attrs=${attributes.logValues(doc)})"
     is ItemContent.TextFormat -> "TextFormat(target=${target.logId()}, length=$length, attrs=${attributes.logValues(doc)})"
     is ItemContent.NativeTextFormat -> "NativeTextFormat(key=${key.logAny()}, value=${doc.valueToJson(value).logAny()})"
     is ItemContent.MapEntry -> "MapEntry(${doc.valueToJson(value).logAny()})"
+    is ItemContent.MapEntries -> "MapEntries(${values.map(doc::valueToJson).logAny()})"
     is ItemContent.XmlNode -> "XmlNode(${value.toEventJson().logAny()})"
     is ItemContent.XmlType -> "XmlType(ref=${ref.kind}:${ref.name}, nodeName=${nodeName.logAny()})"
     is ItemContent.Deleted -> "Deleted(kind=$kind)"
