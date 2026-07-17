@@ -81,8 +81,8 @@ public class UndoManager private constructor(
     public constructor(doc: YDoc, options: UndoManagerOptions = UndoManagerOptions()) :
         this(doc, null, options)
 
-    private val subscription = doc.observeTransactions(::capture)
-    private val destroySubscription = doc.on("destroy") { _: YDocEvent -> close() }
+    private var subscription = doc.observeTransactions(::capture)
+    private val destroySubscription = doc.onDoc("destroy") { close() }
     private var scopeNames: MutableSet<String>? = initialScopeNames?.toMutableSet()
     private val trackedOrigins = options.trackedOrigins.toMutableSet().also { it.add(this) }
     public val undoStack: MutableList<StackItem> = mutableListOf()
@@ -346,22 +346,24 @@ public class UndoManager private constructor(
                 )
             }
             var restoredItems = emptyList<StoreItem>()
-            var deletedItems = emptyList<StoreItem>()
-            var changedParentTypes = emptySet<AbstractYType>()
-            val changedTypesSubscription = doc.observeAfterTransactions { event ->
-                if (event.origin === this) {
-                    deletedItems = event.deletedItems
-                    deletedItems.forEach { item -> keepItem(doc, item.toItemStruct(doc), keep = true) }
-                    changedParentTypes = event.changedParentTypes
-                }
-            }
+            var deletedItems: List<StoreItem>
+            var changedParentTypes: Set<AbstractYType>
+            // This manager's own transaction must not flow back through its capture observer.
+            // Removing the observer also lets YDoc use its allocation-light unobserved cleanup
+            // path when the application has no other transaction observers.
+            subscription.close()
             try {
-                doc.transact(origin = this) {
+                val mutation = doc.transactCapturingMutation(origin = this) {
                     doc.deleteItemRanges(insertedItemsToDelete)
                     restoredItems = doc.restoreItems(deletedItemsToRestore)
                 }
+                deletedItems = mutation.deletedItems
+                deletedItems.forEach { item -> keepItem(doc, item.toItemStruct(doc), keep = true) }
+                changedParentTypes = mutation.changedParentTypes
             } finally {
-                changedTypesSubscription.close()
+                if (!closed) {
+                    subscription = doc.observeTransactions(::capture)
+                }
             }
             return AppliedStackItem(
                 performedChange = restoredItems.isNotEmpty() || deletedItems.isNotEmpty(),
@@ -461,28 +463,42 @@ public class UndoManager private constructor(
     }
 
     private fun emit(eventName: String, event: UndoManagerEvent) {
-        val callbacks = eventListeners[eventName].orEmpty().toList().map { listener ->
-            { listener(event) }
-        }
-        callAllYksCallbacks(callbacks)
+        val listeners = eventListeners[eventName]?.takeIf(List<*>::isNotEmpty) ?: return
+        callAllYksCallbacks(listeners.toList()) { listener -> listener(event) }
     }
 
     private fun normalizeStackItem(stackItem: StackItem): StackItem {
+        if (
+            stackItem.explicitInserts == null &&
+            stackItem.explicitDeletes == null &&
+            stackItem.insertedItems.size + stackItem.deletedItems.size == 1
+        ) {
+            val normalized = if (stackItem.insertedItems.isNotEmpty()) {
+                StackItem(
+                    insertedItems = currentStoreSlices(stackItem.insertedItems.single())
+                        .flatMap(::normalizeCurrentInsertedItem),
+                    deletedItems = emptyList(),
+                )
+            } else {
+                StackItem(
+                    insertedItems = emptyList(),
+                    deletedItems = listOf(
+                        stackItem.deletedItems.single().let { restore ->
+                            restore.copy(item = restore.item.copy(deleted = false))
+                        },
+                    ),
+                )
+            }
+            return normalized.also { result -> result.meta.putAll(stackItem.meta) }
+        }
+
         val insertedById = linkedMapOf<Id, StoreItem>()
         val insertedItems = stackItem.explicitInserts
             ?.let { idSet -> doc.itemsForIdSet(idSet, { !it.deleted }, deletedOverride = false) }
             ?: stackItem.insertedItems.flatMap(::currentStoreSlices)
         insertedItems.forEach { item ->
-            val followedId = doc.followRedone(item.id)
-            val currentItems = if (followedId != item.id) {
-                val redoneIds = createIdSet().also { ids -> ids.add(followedId, item.length) }
-                doc.itemsForIdSet(redoneIds, { followed -> !followed.deleted }, deletedOverride = false)
-                    .ifEmpty { listOf(item) }
-            } else {
-                listOf(item)
-            }
-            currentItems.forEach { current ->
-                insertedById[current.id] = current.copy(deleted = false)
+            normalizeCurrentInsertedItem(item).forEach { current ->
+                insertedById[current.id] = current
             }
         }
         val deletedById = linkedMapOf<Id, RestoreItem>()
@@ -504,6 +520,18 @@ public class UndoManager private constructor(
             insertedItems = insertedById.values.toList(),
             deletedItems = deletedById.values.toList(),
         ).also { normalized -> normalized.meta.putAll(stackItem.meta) }
+    }
+
+    private fun normalizeCurrentInsertedItem(item: StoreItem): List<StoreItem> {
+        val followedId = doc.followRedone(item.id)
+        return if (followedId == item.id) {
+            listOf(item.copy(deleted = false))
+        } else {
+            val redoneIds = createIdSet().also { ids -> ids.add(followedId, item.length) }
+            doc.itemsForIdSet(redoneIds, { followed -> !followed.deleted }, deletedOverride = false)
+                .ifEmpty { listOf(item) }
+                .map { current -> current.copy(deleted = false) }
+        }
     }
 
     /**

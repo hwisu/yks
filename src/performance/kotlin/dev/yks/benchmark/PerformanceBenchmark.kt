@@ -42,10 +42,11 @@ private fun benchmark(
             BenchmarkSink.value = operation()
         }
     }
-    // Whole-suite runs can leave C1/C2 compilation queued behind a completed workload. Give the
-    // tiered compiler a short quiescence window so the measured samples represent warmed code
-    // instead of compiler-thread contention from an earlier scenario.
-    Thread.sleep(250)
+    // Whole-suite runs can leave both warmup garbage and C1/C2 compilation queued behind a
+    // completed workload. Collect the warmup fixtures first, then give the tiered compiler a
+    // quiescence window so measured samples do not depend on earlier scenario order.
+    System.gc()
+    Thread.sleep(500)
     val samples = DoubleArray(sampleIterations) {
         System.gc()
         if (prepare == null) {

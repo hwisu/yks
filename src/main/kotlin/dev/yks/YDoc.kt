@@ -19,6 +19,11 @@ private val docOnlyEventNames = setOf(
     "beforeAllTransactions",
 )
 
+internal data class YTransactionMutationSummary(
+    val deletedItems: List<StoreItem>,
+    val changedParentTypes: Set<AbstractYType>,
+)
+
 /**
  * Mutable Yjs-compatible document.
  *
@@ -642,11 +647,17 @@ public class YDoc(
         }
     }
 
-    private fun <T> transactWithinAccess(origin: Any?, local: Boolean, block: () -> T): T {
+    private fun <T> transactWithinAccess(
+        origin: Any?,
+        local: Boolean,
+        block: () -> T,
+        captureItems: Boolean = false,
+        onAccepted: ((Transaction) -> Unit)? = null,
+    ): T {
         val existing = currentTransaction
         if (existing != null) return block()
 
-        val transaction = Transaction(origin, local, beforeState = store.stateVector())
+        val transaction = Transaction(origin, local, beforeState = store.stateVector(), captureItems = captureItems)
         val requireAtomicStandard = local && requiresAtomicStandardTransaction()
         val rollbackSnapshot = if (requireAtomicStandard) {
             pendingAtomicPreflightSnapshot ?: captureAtomicTransactionSnapshot()
@@ -673,6 +684,7 @@ public class YDoc(
             blockCompleted = true
             if (requireAtomicStandard) validateStandardTransaction(transaction)
             transactionAccepted = true
+            onAccepted?.invoke(transaction)
         } catch (error: Throwable) {
             blockError = error
             if (rollbackSnapshot != null) {
@@ -719,6 +731,48 @@ public class YDoc(
         }
         @Suppress("UNCHECKED_CAST")
         return result as T
+    }
+
+    /**
+     * Captures the minimal mutation result needed by UndoManager without installing a temporary
+     * public transaction observer. The caller must not already be inside a document transaction.
+     */
+    internal fun transactCapturingMutation(
+        origin: Any?,
+        block: () -> Unit,
+    ): YTransactionMutationSummary = withDocumentAccess {
+        currentTransaction?.let { transaction ->
+            val addedStart = transaction.addedItems.size
+            val deletedStart = transaction.deletedItems.size
+            transaction.captureItems = true
+            block()
+            val added = transaction.addedItems.subList(addedStart, transaction.addedItems.size)
+            val deleted = transaction.deletedItems.subList(deletedStart, transaction.deletedItems.size)
+            val changedParentTypes = (added.asSequence() + deleted.asSequence())
+                .map(StoreItem::parent)
+                .distinct()
+                .mapNotNull(::typeForParent)
+                .toCollection(linkedSetOf())
+            return@withDocumentAccess YTransactionMutationSummary(
+                deletedItems = deleted.map { item -> item.copy(deleted = false) },
+                changedParentTypes = changedParentTypes,
+            )
+        }
+        var summary: YTransactionMutationSummary? = null
+        transactWithinAccess(
+            origin = origin,
+            local = true,
+            block = block,
+            captureItems = true,
+            onAccepted = { transaction ->
+                summary = YTransactionMutationSummary(
+                    deletedItems = transaction.deletedItems.map { item -> item.copy(deleted = false) },
+                    changedParentTypes = changedParentsFor(transaction)
+                        .mapNotNullTo(linkedSetOf(), ::typeForParent),
+                )
+            },
+        )
+        checkNotNull(summary)
     }
 
     public fun <T> transact(block: (YTransaction) -> T, origin: Any? = null, local: Boolean = true): T {
@@ -2217,6 +2271,9 @@ public class YDoc(
 
     internal fun restoreItems(items: List<RestoreItem>): List<StoreItem> {
         if (items.isEmpty()) return emptyList()
+        if (items.size == 1 && !items.single().item.content.isTextFormatControl()) {
+            return restoreSingleItem(items.single())
+        }
         val originalPositions = if (items.size == 1) emptyMap() else restorePositions(items)
         val sortedItems = if (items.size == 1) items else items.sortedForRestore(originalPositions)
         val restored = mutableListOf<StoreItem>()
@@ -2306,6 +2363,42 @@ public class YDoc(
                 }
         }
         return restored
+    }
+
+    private fun restoreSingleItem(original: RestoreItem): List<StoreItem> {
+        val source = original.item
+        var restored: StoreItem? = null
+        transact {
+            val mapOrigin = source.parentSub?.let { key -> currentMapItem(source.parent, key)?.id }
+            val item = StoreItem(
+                id = nextId(),
+                origin = when {
+                    source.parentSub != null -> mapOrigin
+                    original.anchorAfterOriginal -> source.id
+                    else -> source.origin?.let(::followRedone)
+                },
+                rightOrigin = when {
+                    source.parentSub != null -> null
+                    original.anchorAfterOriginal -> inferRightOrigin(source)
+                    else -> source.rightOrigin?.let(::followRedone)
+                },
+                parent = source.parent,
+                parentSub = source.parentSub,
+                content = source.content,
+                deleted = false,
+            )
+            if (!original.anchorAfterOriginal) {
+                cleanRemoteOrigins(item)
+            }
+            check(store.add(item)) { "duplicate restored item id: ${item.id}" }
+            rememberMapKey(item)
+            rememberRedone(source.id, item.id)
+            rememberRedoneRangeEnd(source.id, item.lastId)
+            recordAddedItem(item)
+            currentTransaction?.markChanged(item.parent, item.parentSub)
+            restored = item
+        }
+        return listOf(checkNotNull(restored))
     }
 
     internal fun restoreItemAtCurrentPosition(item: StoreItem): RestoreItem {
@@ -2436,14 +2529,14 @@ public class YDoc(
     }
 
     private fun expandDeleteSetWithNestedTypeContent(deleteSet: DeleteSet): DeleteSet {
-        val expanded = deleteSet.copy()
         val initialItems = store.itemsOverlapping(deleteSet)
         if (initialItems.none { item ->
                 item.content.directTypeRef()?.let { ref -> store.hasParent(ref.name) } == true
             }
         ) {
-            return expanded
+            return deleteSet
         }
+        val expanded = deleteSet.copy()
         val queue = ArrayDeque<StoreItem>()
         initialItems.forEach(queue::add)
 
@@ -3051,7 +3144,9 @@ public class YDoc(
             docOnlyEventListeners["beforeAllTransactions"].orEmpty().isNotEmpty()
 
     private fun hasTransactionConsumers(): Boolean =
-        hasNonTypeTransactionConsumers() || snapshotInterestedTypes.isNotEmpty()
+        currentTransaction?.captureItems == true ||
+            hasNonTypeTransactionConsumers() ||
+            snapshotInterestedTypes.isNotEmpty()
 
     private fun hasSimpleStandardUpdateConsumersOnly(): Boolean =
         updateListeners.isNotEmpty() &&
@@ -4693,7 +4788,12 @@ public class YDoc(
     private fun StoreItem.isVisibleIn(snapshot: Snapshot): Boolean =
         id.clock < (snapshot.sv[id.client] ?: 0) && !snapshot.ds.hasId(id)
 
-    internal class Transaction(val origin: Any?, val local: Boolean, val beforeState: StateVector) {
+    internal class Transaction(
+        val origin: Any?,
+        val local: Boolean,
+        val beforeState: StateVector,
+        var captureItems: Boolean = false,
+    ) {
         val addedItems = mutableListOf<StoreItem>()
         val deletedItems = mutableListOf<StoreItem>()
         val deleteSet = DeleteSet.empty()

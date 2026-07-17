@@ -46,6 +46,8 @@ public class DeleteSet internal constructor(
 
     public fun rangesFor(client: Long): List<DeleteRange> = clientRanges[client]?.toList().orEmpty()
 
+    internal fun rangesForTraversal(client: Long): List<DeleteRange> = clientRanges[client].orEmpty()
+
     public fun ranges(): List<Pair<Long, IdRange>> = clientRanges
         .toSortedMap()
         .flatMap { (client, ranges) -> ranges.map { range -> client to IdRange(range.clock, range.length) } }

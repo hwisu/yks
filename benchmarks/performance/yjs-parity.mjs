@@ -573,7 +573,6 @@ assert.deepEqual(
   Object.keys(yjsScenarios).sort(),
   'every performance scenario must have an explicit noise-amplifying repeat count',
 )
-const knownEngineGapScenarios = new Set(['xml_build_render_500', 'undo_redo_1000'])
 const advancedScenarioNames = new Set([
   'xml_build_render_500',
   'relative_position_resolve_10000',
@@ -583,20 +582,13 @@ const advancedScenarioNames = new Set([
 const resolvedScenarioNames = selectedScenarioNames.includes('advanced')
   ? [...advancedScenarioNames]
   : selectedScenarioNames.includes('all')
-    ? Object.keys(yjsScenarios).filter(name => !knownEngineGapScenarios.has(name))
+    ? Object.keys(yjsScenarios)
     : selectedScenarioNames
 const selectedYjsScenarios = Object.fromEntries(
   resolvedScenarioNames.map(name => {
       assert.ok(yjsScenarios[name], `unknown performance scenario: ${name}`)
       return [name, yjsScenarios[name]]
     }),
-)
-
-const yjsResults = Object.fromEntries(
-  Object.entries(selectedYjsScenarios).map(([name, operation]) => [
-    name,
-    benchmark(operation, repeatCounts[name]),
-  ]),
 )
 
 const encodedRepeatCounts = Object.entries(repeatCounts)
@@ -625,6 +617,15 @@ const marker = 'YKS_BENCHMARK_JSON='
 const resultLine = gradle.stdout.split(/\r?\n/u).find((line) => line.startsWith(marker))
 assert.ok(resultLine, `missing YKS benchmark result in:\n${gradle.stdout}`)
 const yksResults = JSON.parse(resultLine.slice(marker.length))
+// Run the JVM to completion before mutating the long-lived Yjs fixtures. Several adversarial
+// scenarios intentionally grow their documents during warmup; measuring YKS afterwards would
+// transfer that Node heap pressure into the child JVM and make results depend on scenario count.
+const yjsResults = Object.fromEntries(
+  Object.entries(selectedYjsScenarios).map(([name, operation]) => [
+    name,
+    benchmark(operation, repeatCounts[name]),
+  ]),
+)
 
 // Ratio parity is mandatory now that every sample is amplified above timer noise. Keep the
 // per-operation absolute latency budget as an independent safety condition for micro workloads;

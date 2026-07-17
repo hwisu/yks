@@ -1669,7 +1669,11 @@ public open class YText internal constructor(
         var yChangeEndClock: Long? = null
 
         fun publicAttributes(content: ItemContent): Map<String, Any?> {
-            val values = content.baseTextAttributes().toMutableMap()
+            val baseAttributes = content.baseTextAttributes()
+            if (baseAttributes.isEmpty() && formats.isEmpty()) {
+                return if (hasYChange) mapOf("ychange" to yChange) else emptyMap()
+            }
+            val values = baseAttributes.toMutableMap()
             formats.forEach { (key, value) ->
                 if (value == YValue.Null) values.remove(key) else values[key] = value
             }
@@ -1694,20 +1698,43 @@ public open class YText internal constructor(
             yChangeEndClock = null
         }
 
-        fun snapshotBoundaries(client: Long): Iterable<Long> = buildList {
-            listOfNotNull(snapshot, prevSnapshot).forEach { target ->
-                target.sv[client]?.let(::add)
-                target.ds.rangesFor(client).forEach { range ->
-                    add(range.clock)
-                    add(range.end)
+        fun snapshotBoundaries(client: Long): LongArray {
+            val snapshotClock = snapshot?.sv?.get(client)
+            val previousClock = prevSnapshot.sv[client]
+            val snapshotRanges = snapshot?.ds?.rangesForTraversal(client).orEmpty()
+            val previousRanges = prevSnapshot.ds.rangesForTraversal(client)
+            val clocks = LongArray(
+                (if (snapshotClock != null) 1 else 0) +
+                    (if (previousClock != null) 1 else 0) +
+                    (snapshotRanges.size + previousRanges.size) * 2,
+            )
+            var size = 0
+            snapshotClock?.let { clocks[size++] = it }
+            previousClock?.let { clocks[size++] = it }
+            snapshotRanges.forEach { range ->
+                clocks[size++] = range.clock
+                clocks[size++] = range.end
+            }
+            previousRanges.forEach { range ->
+                clocks[size++] = range.clock
+                clocks[size++] = range.end
+            }
+            clocks.sort(0, size)
+            var uniqueSize = 0
+            for (index in 0 until size) {
+                if (uniqueSize == 0 || clocks[index] != clocks[uniqueSize - 1]) {
+                    clocks[uniqueSize++] = clocks[index]
                 }
             }
+            return if (uniqueSize == clocks.size) clocks else clocks.copyOf(uniqueSize)
         }
 
-        ClockRangeCursor(doc.sequence(name)).forEachRange(::snapshotBoundaries) { source, startClock, endClock ->
+        ClockRangeCursor(doc.sequence(name)).forEachRangeWithClocks(
+            ::snapshotBoundaries,
+        ) { source, startClock, endClock ->
             val item = source.clockRangeView(startClock, endClock)
             if (item.content.kind != kind || !item.isVisibleAt(snapshot) && !item.isVisibleAt(prevSnapshot)) {
-                return@forEachRange true
+                return@forEachRangeWithClocks true
             }
             when (val content = item.content) {
                 is ItemContent.NativeTextFormat -> {

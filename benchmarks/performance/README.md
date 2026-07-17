@@ -17,7 +17,7 @@ profiling pass:
 BENCH_WARMUP=3 BENCH_SAMPLES=5 npm run benchmark:performance
 ```
 
-The 28 scenarios cover:
+The 37 scenarios cover:
 
 - 5,000-struct remote apply into unopened and already-open roots, repeated
   append, GC/non-GC/batched middle edits, cached length, rendering, full-state
@@ -31,13 +31,18 @@ The 28 scenarios cover:
   10,000 roots;
 - 100,000 indexed array reads, 500 observed edits in a 5,000-struct fragmented
   text, one observed edit in a 5,000-key map, and snapshot delta traversal
-  across a packed 20,000-code-unit clock range.
+  across packed and alternating delete-set clock ranges;
+- fragmented-prefix formatting, an unrelated observer, a wide deep observer,
+  XML construction/rendering, relative-position resolution, V2 merge/diff,
+  and 1,000 undo plus 1,000 redo operations.
 
-`benchmark:performance:check` requires each YKS median to be no greater than
-`max(Yjs * 1.5, 6 ms)`. The absolute budget is limited to process-level
-single-digit-millisecond workloads where V8/JVM startup and tiered-compilation
-noise dominate the ratio. The JVM quiescence window after warmup is outside the
-measured interval. JMH remains the authoritative CPU/allocation benchmark.
+`benchmark:performance:check` requires every YKS median to satisfy both
+`YKS/Yjs <= 1.5x` and, when the Yjs median is at most 6 ms, `YKS <= 6 ms`.
+Neither condition is a fallback for the other. Each JVM scenario collects its
+warmup garbage before an out-of-measurement quiescence window so queued C2
+compilation and prior scenario order do not distort the samples. JMH remains
+the authoritative CPU/allocation benchmark.
 
-The cross-runtime benchmark is not part of `check`; CI performance gates should
-run on a dedicated stable runner.
+`benchmark:performance:advanced` enforces the same gate for the four advanced
+paths. Cross-runtime performance is intentionally separate from Gradle
+`check`; CI performance gates should run on a dedicated stable runner.

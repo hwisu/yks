@@ -13,7 +13,7 @@ audited boundary.
 
 ## Install
 
-Release `0.2.0` is published as `dev.yks:yks:0.2.0` in the repository's GitHub
+Release `0.2.1` is published as `dev.yks:yks:0.2.1` in the repository's GitHub
 Packages Maven registry. GitHub requires authentication when downloading Maven
 packages, including packages attached to public repositories.
 
@@ -55,7 +55,7 @@ Then add the dependency:
 
 ```kotlin
 dependencies {
-    implementation("dev.yks:yks:0.2.0")
+    implementation("dev.yks:yks:0.2.1")
 }
 ```
 
@@ -298,7 +298,7 @@ incremental standard-update application. Results are written to
 `build/reports/jmh/results.json`.
 
 The strict cross-runtime gate uses 50 warmup batches and 30 measured batches
-for 35 workloads. Every workload must satisfy strict ratio parity
+for 37 workloads. Every workload must satisfy strict ratio parity
 (`YKS/Yjs <= 1.5x`), and micro workloads must independently remain within the
 process-level latency budget (`YKS <= 6 ms`). Neither condition is a fallback
 for the other. Each warmup uses the same explicit repeat count as a measured
@@ -306,16 +306,15 @@ sample, so the JVM is not measured in interpreted/C1 code while V8 is already
 optimized. Destructive fixtures are prepared before each invocation, outside
 the measured interval, and the JVM runner waits outside measurement after each
 workload warmup so queued tiered compilation cannot contaminate the next one.
-The separate advanced report always measures XML construction/rendering and
-1,000 undo/redo steps in addition to the strict relative-position and V2
-scenarios. UndoManager currently has a documented engine-owned CPU gap; it
-remains visible in that report without weakening the 1.5x release gate.
+The advanced command is a checked subset covering XML construction/rendering,
+relative-position resolution, V2 merge/diff, and 1,000 undo plus 1,000 redo
+steps. All four are also included in the default release gate.
 Kotlin explicit API mode, warnings-as-errors, and the committed `api/yks.api`
 baseline make accidental public or binary API drift a build failure.
 Release JARs disable file timestamps, use reproducible entry order, embed the
 exact `YKS-Revision`, and are built twice and byte-compared before publication.
 
-Pushing a tag such as `v0.2.0` runs the same gates, publishes that immutable
+Pushing a tag such as `v0.2.1` runs the same gates, publishes that immutable
 version to GitHub Packages, and verifies it again from a clean remote consumer.
 
 ## License

@@ -1311,3 +1311,37 @@ Validation:
 - `npm run benchmark:performance:check`: 35/35 strict scenarios passed;
 - advanced differential and malformed-input fuzz tests passed inside
   `interopTest`.
+
+## 2026-07-18 UndoManager parity and complete performance gate
+
+The remaining UndoManager gap was caused primarily by observer classification,
+not CRDT restoration itself. UndoManager registered its destroy callback on the
+general `YDocEvent` channel, so every undo/redo transaction was treated as
+externally observed and paid for transaction DTOs plus virtual-merge
+representative maps even when the application had no transaction observer.
+
+The manager now uses the document-only destroy channel, temporarily removes its
+own capture observer while applying a stack item, and receives a minimal
+internal mutation summary from `YDoc`. Nested transactions retain the normal
+observer semantics used by `DiffRenderer`. Single-item StackItems and
+non-format restore operations also avoid general-purpose maps, sorting, and
+range-group construction. JFR-guided warmup isolation now collects each
+scenario's garbage before the out-of-measurement C2 quiescence window.
+
+The final 50-warmup/30-sample complete 37-scenario run measured:
+
+| Scenario | Yjs | YKS | YKS/Yjs |
+|---|---:|---:|---:|
+| XML build/render 500 | 2.771 ms | 2.332 ms | 0.84x |
+| relative position resolve 10,000 | 0.640 ms | 0.450 ms | 0.70x |
+| V2 merge/diff 1,000 | 13.761 ms | 1.692 ms | 0.12x |
+| 1,000 undo plus 1,000 redo | 6.056 ms | 4.877 ms | 0.81x |
+| packed clock-range snapshot delta | 0.002 ms | 0.002 ms | 1.22x |
+
+Undo/redo improved from 39.3 ms and 6.66x Yjs to 4.877 ms and 0.81x. The
+advanced command is now an executable gate, and the default release gate
+includes all 37 core and advanced scenarios instead of excluding XML and
+UndoManager. The first complete run exposed order-dependent C1 measurement in
+the packed map-history scenario; collecting warmup garbage before quiescence
+restored the same workload to 1.16x after its preceding 14 scenarios without
+relaxing any threshold.

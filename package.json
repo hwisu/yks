@@ -14,7 +14,7 @@
     "interop:check-clean": "node interop/check-generated-clean.mjs",
     "benchmark:performance": "node --expose-gc benchmarks/performance/yjs-parity.mjs",
     "benchmark:performance:check": "node --expose-gc benchmarks/performance/yjs-parity.mjs --assert-parity",
-    "benchmark:performance:advanced": "BENCH_SCENARIOS=advanced node --expose-gc benchmarks/performance/yjs-parity.mjs"
+    "benchmark:performance:advanced": "BENCH_SCENARIOS=advanced node --expose-gc benchmarks/performance/yjs-parity.mjs --assert-parity"
   },
   "devDependencies": {
     "yjs": "13.6.31"

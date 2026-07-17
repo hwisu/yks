@@ -225,6 +225,49 @@ internal class ClockRangeCursor(private val items: Iterable<StoreItem>) {
             if (!action(item, start, itemEnd)) return
         }
     }
+
+    fun forEachRangeWithClocks(
+        boundariesForClient: (Long) -> LongArray,
+        action: (item: StoreItem, startClock: Long, endClock: Long) -> Boolean,
+    ) {
+        var firstClient = -1L
+        var firstClientBoundaries: ClientClockBoundaries? = null
+        var boundariesByClient: MutableMap<Long, ClientClockBoundaries>? = null
+        val emptyBoundaryCursor = ClientClockBoundaries(LongArray(0))
+        items.forEach { item ->
+            val itemStart = item.id.clock
+            val itemEnd = item.clockEnd()
+            val boundaryCursor = if (item.isGc) {
+                emptyBoundaryCursor
+            } else if (item.id.client == firstClient) {
+                checkNotNull(firstClientBoundaries)
+            } else if (firstClientBoundaries == null) {
+                ClientClockBoundaries(boundariesForClient(item.id.client)).also {
+                    firstClient = item.id.client
+                    firstClientBoundaries = it
+                }
+            } else {
+                val cursors = boundariesByClient ?: mutableMapOf(
+                    firstClient to checkNotNull(firstClientBoundaries),
+                ).also { boundariesByClient = it }
+                cursors.getOrPut(item.id.client) {
+                    ClientClockBoundaries(boundariesForClient(item.id.client))
+                }
+            }
+            var start = itemStart
+            var boundaryIndex = boundaryCursor.firstIndexAfter(itemStart)
+            while (
+                boundaryIndex < boundaryCursor.clocks.size &&
+                boundaryCursor.clocks[boundaryIndex] < itemEnd
+            ) {
+                val end = boundaryCursor.clocks[boundaryIndex++]
+                if (!action(item, start, end)) return
+                start = end
+            }
+            boundaryCursor.commit(itemStart, boundaryIndex)
+            if (!action(item, start, itemEnd)) return
+        }
+    }
 }
 
 private class ClientClockBoundaries(
