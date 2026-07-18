@@ -2035,8 +2035,8 @@ public open class YText internal constructor(
             sequence = sequence,
             currentAttributes = linkedMapOf(),
         )
-        while (cursor.right != null && remaining > 0L) {
-            val right = cursor.right!!
+        while (remaining > 0L) {
+            val right = cursor.right ?: break
             if (!right.deleted) {
                 val marker = right.nativeTextFormat()
                 if (marker != null) {

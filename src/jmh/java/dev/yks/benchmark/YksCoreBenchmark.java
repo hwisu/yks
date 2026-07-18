@@ -97,6 +97,24 @@ public class YksCoreBenchmark {
     }
 
     @State(Scope.Thread)
+    public static class SharedRootLookupState {
+        private Map<String, dev.yks.AbstractYType> share;
+        private String[] names;
+
+        @Setup(Level.Trial)
+        public void prepareDocument() {
+            YDoc document = new YDoc();
+            names = new String[10_000];
+            for (int index = 0; index < names.length; index++) {
+                String name = "root-" + index;
+                names[index] = name;
+                document.getText(name);
+            }
+            share = document.getShare();
+        }
+    }
+
+    @State(Scope.Thread)
     public static class NestedDeleteState {
         private byte[] fixture;
         private YDoc document;
@@ -524,6 +542,15 @@ public class YksCoreBenchmark {
             text.delete(0, 1);
         }
         return doc.rootNames().size() + text.getLength();
+    }
+
+    @Benchmark
+    public int lookupTenThousandSharedRoots(SharedRootLookupState state) {
+        int found = 0;
+        for (String name : state.names) {
+            if (state.share.containsKey(name)) found++;
+        }
+        return found;
     }
 
     @Benchmark

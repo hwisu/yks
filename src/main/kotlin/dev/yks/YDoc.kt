@@ -208,12 +208,18 @@ public class YDoc(
     private val shareView: Map<String, AbstractYType> = object : AbstractMap<String, AbstractYType>() {
         override val entries: Set<Map.Entry<String, AbstractYType>>
             get() = rootNames().mapTo(linkedSetOf()) { name ->
-                java.util.AbstractMap.SimpleImmutableEntry(name, sharedRootEntry(name)!!)
+                java.util.AbstractMap.SimpleImmutableEntry(
+                    name,
+                    checkNotNull(sharedRootEntry(name)) { "shared root '$name' disappeared while enumerating it" },
+                )
             }
 
         override fun get(key: String): AbstractYType? = sharedRootEntry(key)
 
-        override fun containsKey(key: String): Boolean = key in rootNames()
+        override fun containsKey(key: String): Boolean {
+            ensureThreadAccess()
+            return hasSharedRoot(key)
+        }
     }
     private val nestedTypes = linkedMapOf<String, AbstractYType>()
     private val referencedNestedNames = linkedSetOf<String>()
@@ -674,17 +680,17 @@ public class YDoc(
         var blockError: Throwable? = null
         var blockCompleted = false
         var transactionAccepted = false
-        var result: T? = null
         try {
             if (emitBeforeAll && hasBeforeAllTransactionListeners()) {
                 emitBeforeAllTransactions()
             }
             emitBeforeTransaction(transaction)
-            result = block()
+            val result = block()
             blockCompleted = true
             if (requireAtomicStandard) validateStandardTransaction(transaction)
             transactionAccepted = true
             onAccepted?.invoke(transaction)
+            return result
         } catch (error: Throwable) {
             blockError = error
             if (rollbackSnapshot != null) {
@@ -729,13 +735,12 @@ public class YDoc(
                 }
             }
         }
-        @Suppress("UNCHECKED_CAST")
-        return result as T
     }
 
     /**
      * Captures the minimal mutation result needed by UndoManager without installing a temporary
-     * public transaction observer. The caller must not already be inside a document transaction.
+     * public transaction observer. A nested call temporarily enables item capture on the active
+     * transaction and restores its previous capture mode before returning.
      */
     internal fun transactCapturingMutation(
         origin: Any?,
@@ -744,19 +749,24 @@ public class YDoc(
         currentTransaction?.let { transaction ->
             val addedStart = transaction.addedItems.size
             val deletedStart = transaction.deletedItems.size
+            val previousCaptureItems = transaction.captureItems
             transaction.captureItems = true
-            block()
-            val added = transaction.addedItems.subList(addedStart, transaction.addedItems.size)
-            val deleted = transaction.deletedItems.subList(deletedStart, transaction.deletedItems.size)
-            val changedParentTypes = (added.asSequence() + deleted.asSequence())
-                .map(StoreItem::parent)
-                .distinct()
-                .mapNotNull(::typeForParent)
-                .toCollection(linkedSetOf())
-            return@withDocumentAccess YTransactionMutationSummary(
-                deletedItems = deleted.map { item -> item.copy(deleted = false) },
-                changedParentTypes = changedParentTypes,
-            )
+            try {
+                block()
+                val added = transaction.addedItems.subList(addedStart, transaction.addedItems.size)
+                val deleted = transaction.deletedItems.subList(deletedStart, transaction.deletedItems.size)
+                val changedParentTypes = (added.asSequence() + deleted.asSequence())
+                    .map(StoreItem::parent)
+                    .distinct()
+                    .mapNotNull(::typeForParent)
+                    .toCollection(linkedSetOf())
+                return@withDocumentAccess YTransactionMutationSummary(
+                    deletedItems = deleted.map { item -> item.copy(deleted = false) },
+                    changedParentTypes = changedParentTypes,
+                )
+            } finally {
+                transaction.captureItems = previousCaptureItems
+            }
         }
         var summary: YTransactionMutationSummary? = null
         transactWithinAccess(
@@ -1461,10 +1471,12 @@ public class YDoc(
 
     public fun rootNames(): Set<String> {
         ensureThreadAccess()
-        return (rootTypes.keys + unopenedRootEntries.keys + store.parentNames())
-            .filterNot(::isNestedName)
-            .filterNot { it.startsWith("__yjs_gc__:") }
-            .toSortedSet()
+        return sortedSetOf<String>().apply {
+            addAll(rootTypes.keys)
+            addAll(unopenedRootEntries.keys)
+            addAll(store.parentNames())
+            removeAll { name -> !isSharedRootName(name) }
+        }
     }
 
     /**
@@ -1485,9 +1497,16 @@ public class YDoc(
         return unopenedRoot(name)
     }
 
+    private fun hasSharedRoot(name: String): Boolean =
+        isSharedRootName(name) &&
+            (name in rootTypes || name in unopenedRootEntries || store.hasParent(name))
+
+    private fun isSharedRootName(name: String): Boolean =
+        !isNestedName(name) && !name.startsWith("__yjs_gc__:")
+
     private fun unopenedRoot(name: String): YUnopenedRoot? {
         unopenedRootEntries[name]?.let { return it }
-        if (isNestedName(name) || name.startsWith("__yjs_gc__:") || !store.hasParent(name)) return null
+        if (!isSharedRootName(name) || !store.hasParent(name)) return null
         return unopenedRootEntries.getOrPut(name) { YUnopenedRoot(this, name) }
     }
 
@@ -4178,13 +4197,18 @@ public class YDoc(
         return toInt()
     }
 
-    private fun <T : AbstractYType> getOrCreate(name: String, kind: RootKind, factory: () -> T): T {
+    private inline fun <reified T : AbstractYType> getOrCreate(
+        name: String,
+        kind: RootKind,
+        factory: () -> T,
+    ): T {
         ensureThreadAccess()
         val existing = rootTypes[name]
         if (existing != null) {
             require(existing.kind == kind) { "root type '$name' already exists as ${existing.kind}" }
-            @Suppress("UNCHECKED_CAST")
-            return existing as T
+            return checkNotNull(existing as? T) {
+                "root type '$name' has kind $kind but unexpected runtime type ${existing::class.qualifiedName}"
+            }
         }
         require(!isNestedName(name)) { "nested type '$name' cannot be opened as a root type" }
         return factory().also { type ->
@@ -4759,7 +4783,9 @@ public class YDoc(
 
             sorted.forEach { pair ->
                 val position = originalPositions[pair.first.id]
-                val contiguous = position != null && previousPosition != null && position == previousPosition!! + 1
+                val contiguous = previousPosition?.let { previous ->
+                    position != null && position == previous + 1
+                } ?: false
                 if (block.isNotEmpty() && !contiguous) {
                     flushBlock()
                 }

@@ -29,18 +29,61 @@ private object BenchmarkSink {
     var value: Long = 0
 }
 
+private class BenchmarkScenario(
+    val warmupBatch: (Int) -> Unit,
+    val timedBatch: (Int) -> Long,
+)
+
+/**
+ * Builds a scenario-specific repeat loop. Keeping the operation inside the generated batch
+ * function prevents the shared harness call site from becoming megamorphic in whole-suite runs.
+ */
+private inline infix fun String.measures(
+    crossinline operation: () -> Long,
+): Pair<String, BenchmarkScenario> = this to BenchmarkScenario(
+    warmupBatch = { repeatCount ->
+        repeat(repeatCount) { BenchmarkSink.value = operation() }
+    },
+    timedBatch = { repeatCount ->
+        val started = System.nanoTime()
+        repeat(repeatCount) { BenchmarkSink.value = operation() }
+        System.nanoTime() - started
+    },
+)
+
+/**
+ * Measures only the operation while preparing a fresh fixture before each repetition.
+ */
+private inline fun preparedScenario(
+    crossinline prepare: () -> Unit,
+    crossinline operation: () -> Long,
+): BenchmarkScenario = BenchmarkScenario(
+    warmupBatch = { repeatCount ->
+        repeat(repeatCount) {
+            prepare()
+            BenchmarkSink.value = operation()
+        }
+    },
+    timedBatch = { repeatCount ->
+        var elapsedNanos = 0L
+        repeat(repeatCount) {
+            prepare()
+            val started = System.nanoTime()
+            BenchmarkSink.value = operation()
+            elapsedNanos += System.nanoTime() - started
+        }
+        elapsedNanos
+    },
+)
+
 private fun benchmark(
     warmupIterations: Int,
     sampleIterations: Int,
     repeatCount: Int,
-    prepare: (() -> Unit)?,
-    operation: () -> Long,
+    scenario: BenchmarkScenario,
 ): BenchmarkResult {
     repeat(warmupIterations) {
-        repeat(repeatCount) {
-            prepare?.invoke()
-            BenchmarkSink.value = operation()
-        }
+        scenario.warmupBatch(repeatCount)
     }
     // Whole-suite runs can leave both warmup garbage and C1/C2 compilation queued behind a
     // completed workload. Collect the warmup fixtures first, then give the tiered compiler a
@@ -49,22 +92,7 @@ private fun benchmark(
     Thread.sleep(500)
     val samples = DoubleArray(sampleIterations) {
         System.gc()
-        if (prepare == null) {
-            val started = System.nanoTime()
-            repeat(repeatCount) {
-                BenchmarkSink.value = operation()
-            }
-            (System.nanoTime() - started) / 1_000_000.0
-        } else {
-            var elapsedNanos = 0L
-            repeat(repeatCount) {
-                prepare()
-                val started = System.nanoTime()
-                BenchmarkSink.value = operation()
-                elapsedNanos += System.nanoTime() - started
-            }
-            elapsedNanos / 1_000_000.0
-        }
+        scenario.timedBatch(repeatCount) / 1_000_000.0
     }.sortedArray()
     val batchMedianMs = samples[samples.size / 2]
     val batchP95Ms = samples[((samples.size - 1) * 0.95).toInt()]
@@ -220,26 +248,26 @@ fun main(args: Array<String>) {
         createRelativePositionFromTypeIndex(relativePositionText, index * 5, if (index % 2 == 0) -1 else 0)
     }
 
-    val scenarios = linkedMapOf<String, () -> Long>(
-        "apply_5000_structs" to {
+    val scenarios = linkedMapOf(
+        "apply_5000_structs" measures {
             val doc = YDoc(clientId = 20)
             doc.applyUpdate(fixture)
             (doc.getText("left").length + doc.getText("right").length).toLong()
         },
-        "apply_5000_structs_open_roots" to {
+        "apply_5000_structs_open_roots" measures {
             val doc = YDoc(clientId = 44)
             doc.getText("left").toString()
             doc.getText("right").toString()
             doc.applyUpdate(fixture)
             (doc.getText("left").length + doc.getText("right").length).toLong()
         },
-        "append_5000" to {
+        "append_5000" measures {
             val doc = YDoc(clientId = 21)
             val text = doc.getText("body")
             repeat(5_000) { text.insert(text.length, "x") }
             text.length.toLong()
         },
-        "middle_edit_1000" to {
+        "middle_edit_1000" measures {
             val doc = YDoc(clientId = 22)
             val text = doc.getText("body")
             text.insert(0, "x".repeat(5_000))
@@ -250,7 +278,7 @@ fun main(args: Array<String>) {
             }
             text.length.toLong()
         },
-        "middle_edit_1000_no_gc" to {
+        "middle_edit_1000_no_gc" measures {
             val doc = YDoc(clientId = 23, gc = false)
             val text = doc.getText("body")
             text.insert(0, "x".repeat(5_000))
@@ -261,7 +289,7 @@ fun main(args: Array<String>) {
             }
             text.length.toLong()
         },
-        "middle_edit_1000_batched" to {
+        "middle_edit_1000_batched" measures {
             val doc = YDoc(clientId = 24)
             val text = doc.getText("body")
             text.insert(0, "x".repeat(5_000))
@@ -274,61 +302,63 @@ fun main(args: Array<String>) {
             }
             text.length.toLong()
         },
-        "length_read_200000" to {
+        "length_read_200000" measures {
             var sum = 0L
             repeat(200_000) { sum += lengthText.length }
             sum
         },
-        "string_read_50000" to {
+        "string_read_50000" measures {
             var sum = 0L
             repeat(50_000) { sum += stringText.toString().length }
             sum
         },
-        "encode_5000_structs" to {
+        "encode_5000_structs" measures {
             encodeDoc.encodeStateAsUpdate().size.toLong()
         },
-        "standard_empty_tx_5000" to {
+        "standard_empty_tx_5000" measures {
             repeat(1_000) { standardTransactionDoc.transact { Unit } }
             standardTransactionDoc.getText("left").length.toLong()
         },
-        "formatted_apply_5004" to {
+        "formatted_apply_5004" measures {
             val doc = YDoc(clientId = 30)
             doc.applyUpdate(formattedFixture)
             (doc.getText("left").length + doc.getText("right").length).toLong()
         },
-        "nested_delete_3000" to {
+        "nested_delete_3000" to preparedScenario(
+            prepare = scenarioPreparations.getValue("nested_delete_3000"),
+        ) {
             val doc = checkNotNull(nestedDeleteDoc)
             val root = doc.getArray("root")
             root.delete(0, root.length)
             root.length.toLong()
         },
-        "nested_apply_3000" to {
+        "nested_apply_3000" measures {
             val doc = YDoc(clientId = 37, gc = false)
             doc.applyUpdate(nestedFixture)
             doc.getArray("root").length.toLong()
         },
-        "map_apply_5000" to {
+        "map_apply_5000" measures {
             val doc = YDoc(clientId = 32)
             doc.applyUpdate(mapFixture)
             doc.getMap("map").size.toLong()
         },
-        "map_history_apply_5000" to {
+        "map_history_apply_5000" measures {
             val doc = YDoc(clientId = 35, gc = false)
             doc.applyUpdate(mapHistoryFixture)
             (doc.getMap("map").get("key") as Number).toLong()
         },
-        "array_apply_5000" to {
+        "array_apply_5000" measures {
             val doc = YDoc(clientId = 36, gc = false)
             doc.applyUpdate(arrayFixture)
             (doc.getArray("array").get(2_500) as Number).toLong()
         },
-        "array_insert_5000" to {
+        "array_insert_5000" measures {
             val doc = YDoc(clientId = 40, gc = false)
             val array = doc.getArray("array")
             array.insert(0, List(5_000) { index -> index })
             (array.get(2_500) as Number).toLong()
         },
-        "map_history_set_5000" to {
+        "map_history_set_5000" measures {
             val doc = YDoc(clientId = 41, gc = false)
             val map = doc.getMap("map")
             doc.transact {
@@ -336,41 +366,41 @@ fun main(args: Array<String>) {
             }
             (map.get("key") as Number).toLong()
         },
-        "fragmented_apply_5000" to {
+        "fragmented_apply_5000" measures {
             val doc = YDoc(clientId = 38, gc = false)
             doc.applyUpdate(fragmentedFixture)
             doc.getText("body").length.toLong()
         },
-        "fragmented_apply_5000_open_root" to {
+        "fragmented_apply_5000_open_root" measures {
             val doc = YDoc(clientId = 45, gc = false)
             doc.getText("body").toString()
             doc.applyUpdate(fragmentedFixture)
             doc.getText("body").length.toLong()
         },
-        "concurrent_insert_apply_1000" to {
+        "concurrent_insert_apply_1000" measures {
             val doc = YDoc(clientId = 39, gc = false)
             doc.applyUpdate(concurrentFixture)
             doc.getText("body").length.toLong()
         },
-        "concurrent_insert_apply_1000_open_root" to {
+        "concurrent_insert_apply_1000_open_root" measures {
             val doc = YDoc(clientId = 46, gc = false)
             doc.getText("body").toString()
             doc.applyUpdate(concurrentFixture)
             doc.getText("body").length.toLong()
         },
-        "incremental_apply_1000" to {
+        "incremental_apply_1000" measures {
             val doc = YDoc(clientId = 47, gc = false)
             incrementalFixtures.forEach(doc::applyUpdate)
             doc.getText("body").length.toLong()
         },
-        "roots_create_read_10000" to {
+        "roots_create_read_10000" measures {
             val doc = YDoc(clientId = 33)
             repeat(10_000) { index -> doc.getText("root-$index") }
             var sum = 0L
             repeat(10_000) { index -> sum += doc.getText("root-$index").length }
             doc.rootNames().size.toLong() + sum
         },
-        "edit_1000_with_10000_roots" to {
+        "edit_1000_with_10000_roots" measures {
             val doc = YDoc(clientId = 43)
             repeat(10_000) { index -> doc.getText("root-$index") }
             val text = doc.getText("root-0")
@@ -380,7 +410,7 @@ fun main(args: Array<String>) {
             }
             doc.rootNames().size.toLong() + text.length
         },
-        "array_index_read_100000" to {
+        "array_index_read_100000" measures {
             var sum = 0L
             repeat(100_000) {
                 sum += arrayRead.length
@@ -388,7 +418,9 @@ fun main(args: Array<String>) {
             }
             sum
         },
-        "observed_fragmented_edit_500" to {
+        "observed_fragmented_edit_500" to preparedScenario(
+            prepare = scenarioPreparations.getValue("observed_fragmented_edit_500"),
+        ) {
             val state = checkNotNull(observedFragmentedState)
             val text = state.text
             text.doc.transact {
@@ -400,37 +432,37 @@ fun main(args: Array<String>) {
             }
             state.observed() + text.length
         },
-        "observed_map_edit_1_on_5000" to {
+        "observed_map_edit_1_on_5000" measures {
             val key = "key-${observedMapIndex % 5_000}"
             observedMapIndex++
             observedMap.set(key, -observedMapIndex)
             observedMapEvents + (observedMap.get(key) as Number).toLong()
         },
-        "clock_range_snapshot_delta" to {
+        "clock_range_snapshot_delta" measures {
             clockRangeText.toDelta(clockRangeAfter, clockRangeBefore).ops.size.toLong()
         },
-        "alternating_delete_snapshot_delta_1000" to {
+        "alternating_delete_snapshot_delta_1000" measures {
             alternatingSnapshotText.toDelta(alternatingSnapshotAfter, alternatingSnapshotBefore).ops.size.toLong()
         },
-        "local_format_first_char_on_50000" to {
+        "local_format_first_char_on_50000" measures {
             localFormatValue++
             localFormatText.format(0, 1, mapOf("audit" to localFormatValue))
             localFormatText.length.toLong()
         },
-        "unrelated_observer_edit_on_50000" to {
+        "unrelated_observer_edit_on_50000" measures {
             val middle = unrelatedTargetText.length / 2
             unrelatedTargetText.insert(middle, "y")
             unrelatedTargetText.delete(middle, 1)
             unrelatedObserverEvents + unrelatedTargetText.length
         },
-        "deep_first_child_edit_10_on_10000" to {
+        "deep_first_child_edit_10_on_10000" measures {
             repeat(10) {
                 wideDeepValue++
                 wideDeepChildren[0].set("value", wideDeepValue)
             }
             wideDeepEvents + wideDeepValue
         },
-        "xml_build_render_500" to {
+        "xml_build_render_500" measures {
             val doc = YDoc(clientId = 50, gc = false)
             val fragment = doc.getXmlFragment("xml")
             doc.transact {
@@ -445,7 +477,7 @@ fun main(args: Array<String>) {
             }
             fragment.toString().length.toLong()
         },
-        "relative_position_resolve_10000" to {
+        "relative_position_resolve_10000" measures {
             var sum = 0L
             repeat(10_000) { index ->
                 val absolute = checkNotNull(
@@ -458,13 +490,15 @@ fun main(args: Array<String>) {
             }
             sum
         },
-        "v2_merge_diff_1000" to {
+        "v2_merge_diff_1000" measures {
             val merged = mergeUpdatesV2(incrementalV2Fixtures)
             val stateVector = encodeStateVectorFromUpdateV2(merged)
             val diff = diffUpdateV2(merged, stateVector)
             (merged.size + stateVector.size + diff.size).toLong()
         },
-        "undo_redo_1000" to {
+        "undo_redo_1000" to preparedScenario(
+            prepare = scenarioPreparations.getValue("undo_redo_1000"),
+        ) {
             val state = checkNotNull(undoRedoState)
             repeat(1_000) { checkNotNull(state.manager.undo()) }
             repeat(1_000) { checkNotNull(state.manager.redo()) }
@@ -474,15 +508,14 @@ fun main(args: Array<String>) {
 
     val results = scenarios
         .filterKeys { name -> selectedScenarios == null || name in selectedScenarios }
-        .mapValues { (name, operation) ->
+        .mapValues { (name, scenario) ->
             benchmark(
                 warmupIterations,
                 sampleIterations,
                 requireNotNull(repeatCounts[name]) {
                     "missing noise-amplifying repeat count for performance scenario $name"
                 },
-                scenarioPreparations[name],
-                operation,
+                scenario,
             )
         }
     val encodedResults = results.entries.joinToString(",") { (name, result) ->

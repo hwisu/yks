@@ -202,6 +202,8 @@ class PublicApiParityTest {
         target.applyUpdate(source.encodeStateAsUpdateLossless())
 
         assertEquals(setOf("body", "items", "meta", "xml"), target.rootNames())
+        assertTrue("items" in share)
+        assertFalse("missing" in share)
         assertEquals(target.rootNames(), share.keys)
         assertEquals(emptyMap(), target.toJSON())
         val unopenedItems = assertIs<YUnopenedRoot>(share["items"])
