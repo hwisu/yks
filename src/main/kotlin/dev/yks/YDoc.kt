@@ -214,7 +214,10 @@ public class YDoc(
                 )
             }
 
-        override fun get(key: String): AbstractYType? = sharedRootEntry(key)
+        override fun get(key: String): AbstractYType? {
+            ensureThreadAccess()
+            return sharedRootEntry(key)
+        }
 
         override fun containsKey(key: String): Boolean {
             ensureThreadAccess()

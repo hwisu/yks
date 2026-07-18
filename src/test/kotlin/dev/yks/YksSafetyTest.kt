@@ -142,6 +142,27 @@ class YksSafetyTest {
     }
 
     @Test
+    fun retainedShareViewCannotBypassDocumentThreadConfinement() {
+        val source = YDoc(clientId = 1)
+        source.getText("body").insert(0, "remote")
+        val doc = YDoc(clientId = 2)
+        doc.applyUpdate(source.encodeStateAsUpdate())
+        val share = doc.share
+        val failure = AtomicReference<Throwable?>()
+        val worker = Thread(
+            { failure.set(runCatching { share["body"] }.exceptionOrNull()) },
+            "yks-share-foreign-thread",
+        )
+
+        worker.start()
+        worker.join()
+
+        val error = assertIs<YksThreadConfinementException>(failure.get())
+        assertEquals(Thread.currentThread().name, error.ownerThreadName)
+        assertEquals(worker.name, error.currentThreadName)
+    }
+
+    @Test
     fun uncheckedPolicyAllowsCallerSerializedThreadHandoff() {
         val doc = YDoc(
             YDocOptions(clientId = 1),
