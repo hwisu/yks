@@ -34,5 +34,7 @@ jobs:
       - run: npm run interop:generate
       - run: npm run test:interop
       - run: ./gradlew check consumerSmokeTest --no-daemon
+      - run: npm run test:security
+      - run: npm audit --audit-level=high
       - run: npm run interop:check-clean
       - run: git diff --exit-code
