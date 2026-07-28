@@ -1,6 +1,6 @@
 # YKS Yjs interoperability handoff
 
-마지막 업데이트: 2026-07-17 KST
+마지막 업데이트: 2026-07-28 KST
 
 ## 저장소 상태
 
@@ -14,6 +14,7 @@
 - Yrs `0.27.2`를 독립 Rust oracle로 고정하고 공통 Yjs wire/CRDT 영역의 양방향 drift를 재검증함
 - 2026-07-16 감사에서 struct-store 조회/재계산과 ID range 연산의 길이 비례 비용을 제거하고 전체 oracle을 재검증함
 - `mergeUpdates`의 client별 clock-range 병합을 정렬 인덱스로 전환해 update 수·struct 수에 따른 반복 전체 탐색을 제거함
+- `v0.2.2` release gate를 fresh Gradle home에서 재검증하고 root/consumer dependency verification metadata를 완결함
 - JavaScript API·mutable 내부 객체 모델·browser DOM까지 동일한 완전 복제는 아니며, 차이는 `YJS_COMPATIBILITY.md`에 명시함
 - 모든 개선 커밋은 구현·회귀 테스트와 이 문서를 함께 갱신함
 
@@ -60,6 +61,15 @@ a19f4ac feat: decode and integrate Yjs V1 updates
 ```
 
 ## 완료된 작업
+
+### 2026-07-28 v0.2.2 release dependency verification
+
+- GitHub Actions 실패를 fresh Gradle home에서 재현해 `kotlinx-coroutines-bom:1.8.0` POM checksum 누락으로 한정함
+- root와 독립 `consumer-smoke` build의 verification metadata에 동일한 BOM checksum을 추가함
+- root build에서 이어서 요구되는 `junit-bom:5.13.4` POM checksum도 Gradle이 생성한 값으로 고정함
+- release artifact는 manifest에 현재 commit SHA를 포함해 같은 commit에서 checksum을 고정할 수 없으므로 consumer에서 정확한 `dev.yks:yks:0.2.2` 좌표만 self-produced artifact로 신뢰함
+- CI와 동일한 Yjs/Yrs oracle, Kotlin `check`, remote-style consumer smoke, runtime OSV, npm audit, generated fixture cleanliness를 통과함
+- `v0.2.2` tag가 immutable GitHub Packages publication과 clean remote consumer 검증을 수행함
 
 ### 2026-07-17 Hocuspocus production readiness
 

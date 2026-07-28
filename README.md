@@ -13,7 +13,7 @@ audited boundary.
 
 ## Install
 
-Release `0.2.1` is published as `dev.yks:yks:0.2.1` in the repository's GitHub
+Release `0.2.2` is published as `dev.yks:yks:0.2.2` in the repository's GitHub
 Packages Maven registry. GitHub requires authentication when downloading Maven
 packages, including packages attached to public repositories.
 
@@ -314,7 +314,7 @@ baseline make accidental public or binary API drift a build failure.
 Release JARs disable file timestamps, use reproducible entry order, embed the
 exact `YKS-Revision`, and are built twice and byte-compared before publication.
 
-Pushing a tag such as `v0.2.1` runs the same gates, publishes that immutable
+Pushing a tag such as `v0.2.2` runs the same gates, publishes that immutable
 version to GitHub Packages, and verifies it again from a clean remote consumer.
 
 ## License
