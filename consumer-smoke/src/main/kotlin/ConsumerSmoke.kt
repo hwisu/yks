@@ -1,4 +1,5 @@
 import dev.yks.YDoc
+import dev.yks.YMap
 import dev.yks.applyUpdate
 import dev.yks.encodeStateAsUpdate
 import java.io.File
@@ -7,12 +8,28 @@ import java.util.zip.ZipFile
 fun main() {
     val source = YDoc(clientId = 1, gc = false)
     source.getText("body").insert(0, "hello from a standalone consumer")
+    val question = source.createMap()
+    source.getMap("questions").set("42", question)
+    question.set("id", 42)
+    question.set("assignUser", listOf("user-1", "사용자-😀"))
+    val paragraph = source.createXmlElement("paragraph")
+    source.getXmlFragment("42").push(paragraph)
+    paragraph.setAttr("node_ids", listOf("n4"))
+    val answer = source.createXmlText()
+    paragraph.push(answer)
+    answer.insert(0, "저장된 답변 😀")
 
     val target = YDoc(clientId = 2, gc = false)
     applyUpdate(target, encodeStateAsUpdate(source))
 
     check(target.getText("body").toString() == "hello from a standalone consumer") {
         "Published YKS artifact failed a cross-document update roundtrip."
+    }
+    check((target.getMap("questions").get("42") as YMap).get("assignUser") == listOf("user-1", "사용자-😀")) {
+        "Published YKS artifact failed a nested application-map roundtrip."
+    }
+    check("저장된 답변 😀" in target.getXmlFragment("42").toString()) {
+        "Published YKS artifact failed a Tiptap-shaped XML roundtrip."
     }
 
     val artifact = File(YDoc::class.java.protectionDomain.codeSource.location.toURI())

@@ -42,8 +42,12 @@ verifies:
   UndoManager seeds, and 1,000 malformed V1/V2 seeds;
 - Kotlin-produced updates applied by Yjs, and Yjs-produced updates applied by
   Kotlin;
+- a deterministic application-shaped fixture containing a nested question map,
+  JSON AnswerDoc metadata, Korean/non-BMP text, and Tiptap-shaped XML with
+  boolean, numeric, and array attributes in both directions;
 - publication to a Maven repository followed by a clean standalone consumer
-  build and cross-document update round trip.
+  build and cross-document update round trip with Kotlin 2.2.20 and Norric's
+  Kotlin 2.3.21 baseline.
 
 The independent Yrs oracle checks both directions: Yrs-produced V1/V2 updates
 are applied by Kotlin, and Kotlin-produced updates are applied by Yrs. Its
@@ -143,3 +147,23 @@ applied to a document configured with a larger budget. Malformed
 update/state-vector payloads use the stable
 `YksDecodingException` boundary, while limit and thread violations have their
 own typed exceptions.
+
+## Evaluated JVM alternatives
+
+On 2026-07-31, `y-crdt/ykt` and
+`edpaget/y-crdt-jni` at commit
+`4bb731294b773eb12360a8bc91c0beec1e1da7de` were reassessed as possible
+replacements:
+
+- `y-crdt/ykt` is explicitly inactive and has no published release.
+- `net.carcdr:ycrdt-jni:0.3.0` is a Java/JNI binding over Rust Yrs, not a
+  pure-Kotlin implementation. It remains useful as an independent reference
+  and oracle, but would add native ABI, packaging, and upstream-maintenance
+  dependencies to YKS consumers.
+- Its relevant regression themes—non-BMP strings, typed XML attributes,
+  observer failure isolation, subscription cleanup, and document concurrency—
+  are already covered by YKS's genuine Yjs fixtures, typed XML/AnswerDoc
+  round trips, callback snapshots, and fail-fast thread-confinement policies.
+
+Neither project is a YKS build or runtime dependency. No source was copied from
+them during this assessment.

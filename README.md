@@ -55,14 +55,15 @@ Then add the dependency:
 
 ```kotlin
 dependencies {
-    implementation("dev.yks:yks:0.2.1")
+    implementation("dev.yks:yks:0.2.2")
 }
 ```
 
 In another GitHub Actions repository, expose its `GITHUB_TOKEN` to Gradle and
 grant that repository access under the package's **Manage Actions access**
 setting; see [package access control](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages).
-Consumers need JDK 21 and a Kotlin 2.2-compatible toolchain.
+Consumers need JDK 21. CI compiles standalone consumers with Kotlin 2.2.20 and
+Norric's Kotlin 2.3.21 baseline.
 
 ## Quick start
 
@@ -266,14 +267,16 @@ npm ci
 npm run test:interop
 npm run benchmark:performance:check
 npm run benchmark:performance:advanced
-./gradlew check consumerSmokeTest
+./gradlew check consumerSmokeTest consumerKotlinCompatibilityTest
 ./gradlew jmh
 ./scripts/verify-reproducible-artifacts.sh
 ```
 
 `check` runs both the normal Kotlin tests and the Kotlin/Yjs interoperability
 tests. `consumerSmokeTest` publishes the current version to Maven Local, then
-builds and runs a standalone project against the produced artifact. To
+builds and runs a standalone Kotlin 2.2.20 project against the produced
+artifact. `consumerKotlinCompatibilityTest` repeats that published-artifact
+check with Kotlin 2.3.21. To
 regenerate committed upstream fixtures and verify that generation is clean:
 
 ```sh

@@ -91,6 +91,29 @@ class YjsV1InteropTest {
     }
 
     @Test
+    fun appliesAnswerDocumentProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 2, gc = false)
+
+        applyUpdate(doc, fixture("answer-document-v1"))
+
+        val question = doc.getMap("questions").get("42") as YMap
+        assertEquals(42L, question.get("id"))
+        assertEquals("IN_PROGRESS", question.get("status"))
+        assertEquals(listOf("user-1", "사용자-😀"), question.get("assignUser"))
+        val paragraph = doc.getXmlFragment("42").getType(0) as YXmlElementType
+        assertEquals("paragraph", paragraph.nodeName)
+        assertEquals(listOf("n4"), paragraph.getAttr("node_ids"))
+        assertEquals(
+            YTextDelta().insert("저장된 답변 😀"),
+            (paragraph.getType(0) as YXmlTextType).toDelta(),
+        )
+        val selection = paragraph.getType(1) as YXmlElementType
+        assertEquals("선택-😀", selection.getAttr("node_id"))
+        assertEquals(true, selection.getAttr("selected"))
+        assertEquals(1.5, selection.getAttr("score"))
+    }
+
+    @Test
     fun appliesSubdocumentUpdateV2ProducedByUpstreamYjs() {
         val doc = YDoc(clientId = 2, gc = false)
         applyUpdateV2(doc, fixture("subdoc-array-v2"))
@@ -1112,6 +1135,47 @@ class YjsV1InteropTest {
         text.insert(0, "child")
 
         assertUpstreamApplies(doc, "nested-text")
+    }
+
+    @Test
+    fun upstreamYjsAppliesAnswerDocumentProducedByKotlin() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val question = doc.createMap()
+        doc.getMap("questions").set("42", question)
+        question.set("id", 42)
+        question.set("status", "IN_PROGRESS")
+        question.set("lastAppliedSourceId", null)
+        question.set("assignUser", listOf("user-1", "사용자-😀"))
+        question.set(
+            "answer",
+            linkedMapOf(
+                "type" to "doc",
+                "attrs" to linkedMapOf("answer_node_ids" to listOf("n4", "선택-😀")),
+                "content" to listOf(
+                    linkedMapOf(
+                        "type" to "paragraph",
+                        "attrs" to linkedMapOf("index" to 0, "node_ids" to listOf("n4")),
+                        "content" to listOf(linkedMapOf("type" to "text", "text" to "저장된 답변 😀")),
+                    ),
+                ),
+            ),
+        )
+        question.set("lastMutationId", "mutation-1")
+
+        val paragraph = doc.createXmlElement("paragraph")
+        doc.getXmlFragment("42").push(paragraph)
+        paragraph.setAttr("index", 0)
+        paragraph.setAttr("node_ids", listOf("n4"))
+        val text = doc.createXmlText()
+        paragraph.push(text)
+        text.insert(0, "저장된 답변 😀")
+        val selection = doc.createXmlElement("selectionOption")
+        paragraph.push(selection)
+        selection.setAttr("node_id", "선택-😀")
+        selection.setAttr("selected", true)
+        selection.setAttr("score", 1.5)
+
+        assertUpstreamApplies(doc, "answer-document")
     }
 
     @Test

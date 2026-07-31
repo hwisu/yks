@@ -339,6 +339,10 @@ duplicateSubdocs.getArray('subs').insert(0, [
   new Y.Doc({ guid: 'same-guid' }),
 ])
 writeFixture('subdoc-duplicate-guid-v1', Y.encodeStateAsUpdate(duplicateSubdocs))
+writeFixture(
+  'answer-document-v1',
+  Y.encodeStateAsUpdate(createScenarioDocument('answer-document')),
+)
 
 for (const scenario of [
   'formatted-text',

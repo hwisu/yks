@@ -76,13 +76,32 @@ tasks.named("check") {
     dependsOn("interopTest")
 }
 
-tasks.register<GradleBuild>("consumerSmokeTest") {
-    description = "Publishes YKS to Maven Local and runs the standalone consumer smoke app."
+val consumerSmokeTest = tasks.register<GradleBuild>("consumerSmokeTest") {
+    description = "Publishes YKS to Maven Local and runs the baseline standalone consumer."
     group = LifecycleBasePlugin.VERIFICATION_GROUP
     dependsOn("publishToMavenLocal")
     dir = file("consumer-smoke")
     tasks = listOf("clean", "run")
-    startParameter.projectProperties = mapOf("yksVersion" to project.version.toString())
+    startParameter.projectProperties = mapOf(
+        "consumerKotlinVersion" to "2.2.20",
+        "yksVersion" to project.version.toString(),
+    )
+}
+
+val consumerKotlinCompatibilityTest = tasks.register<Exec>("consumerKotlinCompatibilityTest") {
+    description = "Consumes the published YKS artifact with Norric's Kotlin compiler baseline."
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    dependsOn("publishToMavenLocal")
+    mustRunAfter(consumerSmokeTest)
+    workingDir = file("consumer-smoke")
+    commandLine(
+        rootProject.file("gradlew").absolutePath,
+        "clean",
+        "run",
+        "--no-daemon",
+        "-PconsumerKotlinVersion=2.3.21",
+        "-PyksVersion=${project.version}",
+    )
 }
 
 publishing {

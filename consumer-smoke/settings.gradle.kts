@@ -1,4 +1,8 @@
 pluginManagement {
+    plugins {
+        id("org.jetbrains.kotlin.jvm") version providers.gradleProperty("consumerKotlinVersion")
+            .getOrElse("2.2.20")
+    }
     repositories {
         gradlePluginPortal()
         mavenCentral()

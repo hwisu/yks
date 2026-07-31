@@ -23,6 +23,7 @@ export const scenarioNames = [
   'subdoc-delete',
   'concurrent-array',
   'concurrent-format',
+  'answer-document',
 ]
 
 export const createScenarioDocument = name => {
@@ -194,6 +195,41 @@ export const createScenarioDocument = name => {
       doc.getText('body')
       break
     }
+    case 'answer-document': {
+      const question = new Y.Map()
+      question.set('id', 42)
+      question.set('status', 'IN_PROGRESS')
+      question.set('lastAppliedSourceId', null)
+      question.set('assignUser', ['user-1', '사용자-😀'])
+      question.set('answer', {
+        type: 'doc',
+        attrs: { answer_node_ids: ['n4', '선택-😀'] },
+        content: [
+          {
+            type: 'paragraph',
+            attrs: { index: 0, node_ids: ['n4'] },
+            content: [{ type: 'text', text: '저장된 답변 😀' }],
+          },
+        ],
+      })
+      question.set('lastMutationId', 'mutation-1')
+      doc.getMap('questions').set('42', question)
+
+      const paragraph = new Y.XmlElement('paragraph')
+      paragraph.setAttribute('index', 0)
+      paragraph.setAttribute('node_ids', ['n4'])
+      const text = new Y.XmlText()
+      text.insert(0, '저장된 답변 😀')
+      paragraph.insert(0, [text])
+
+      const selection = new Y.XmlElement('selectionOption')
+      selection.setAttribute('node_id', '선택-😀')
+      selection.setAttribute('selected', true)
+      selection.setAttribute('score', 1.5)
+      paragraph.insert(1, [selection])
+      doc.getXmlFragment('42').insert(0, [paragraph])
+      break
+    }
     default:
       throw new Error(`unknown interoperability scenario: ${name}`)
   }
@@ -240,6 +276,9 @@ export const materializeScenario = (doc, name) => {
       return doc.getArray('letters')
     case 'concurrent-format':
       return doc.getText('body')
+    case 'answer-document':
+      doc.getMap('questions')
+      return doc.getXmlFragment('42')
     default:
       throw new Error(`unknown interoperability scenario: ${name}`)
   }

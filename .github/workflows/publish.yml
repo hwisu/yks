@@ -72,7 +72,7 @@ jobs:
       - name: Verify Kotlin, interoperability, and published consumer
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.value }}
-        run: ./gradlew clean check consumerSmokeTest --no-daemon "-PreleaseVersion=$RELEASE_VERSION" "-PbuildRevision=$GITHUB_SHA"
+        run: ./gradlew clean check consumerSmokeTest consumerKotlinCompatibilityTest --no-daemon "-PreleaseVersion=$RELEASE_VERSION" "-PbuildRevision=$GITHUB_SHA"
 
       - run: npm run test:security
       - run: npm audit --audit-level=high
