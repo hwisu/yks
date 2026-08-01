@@ -1453,7 +1453,8 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
             candidate.resolvedKind = if (parentSub != null) {
                 ownerKind?.takeIf { it == RootKind.XmlHook } ?: RootKind.Map
             } else {
-                candidate.content.definitiveSequenceKindOrNull()
+                ownerKind?.takeIf { it == RootKind.XmlText }
+                    ?: candidate.content.definitiveSequenceKindOrNull()
                     ?: ownerKind
                     ?: candidate.content.inferRootKind(parentSub)
             }
@@ -1639,7 +1640,8 @@ private fun List<DecodedWireItem>.toDenseStoreItems(firstClock: Long): List<Stor
         val kind = if (parentSub != null) {
             ownerKind?.takeIf { it == RootKind.XmlHook } ?: RootKind.Map
         } else {
-            item.content.definitiveSequenceKindOrNull()
+            ownerKind?.takeIf { it == RootKind.XmlText }
+                ?: item.content.definitiveSequenceKindOrNull()
                 ?: ownerKind
                 ?: item.content.inferRootKind(parentSub)
         }
