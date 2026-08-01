@@ -1164,13 +1164,29 @@ private fun TreeMap<Long, StoreItem>.insertRange(item: StoreItem) {
 
 /** Duplicate standard/private representations must not make a lossless merge input-order dependent. */
 private fun StoreItem.mergeDuplicateMetadata(other: StoreItem): StoreItem {
-    require(origin == other.origin && rightOrigin == other.rightOrigin && parentSub == other.parentSub) {
+    require(origin == other.origin && rightOrigin == other.rightOrigin) {
         "conflicting structural metadata for duplicate update item $id"
+    }
+    val resolved = when {
+        unresolvedParent == null && other.unresolvedParent != null -> this
+        other.unresolvedParent == null && unresolvedParent != null -> other
+        else -> null
+    }
+    if (resolved != null) {
+        val unresolved = if (resolved === this) other else this
+        return resolved.copy(
+            content = resolved.content.mergeUnresolvedDuplicate(unresolved.content),
+            deleted = deleted || other.deleted,
+            requiresClockContinuity = requiresClockContinuity && other.requiresClockContinuity,
+            isGc = isGc || other.isGc,
+            countable = countable || other.countable,
+        )
+    }
+    require(parentSub == other.parentSub) {
+        "conflicting parent-sub metadata for duplicate update item $id"
     }
     val mergedUnresolvedParent = when {
         unresolvedParent == other.unresolvedParent -> unresolvedParent
-        unresolvedParent == null -> other.unresolvedParent
-        other.unresolvedParent == null -> unresolvedParent
         else -> error("conflicting unresolved parents for duplicate update item $id")
     }
     val mergedParent = when {
@@ -1191,8 +1207,33 @@ private fun StoreItem.mergeDuplicateMetadata(other: StoreItem): StoreItem {
     )
 }
 
+private fun ItemContent.mergeUnresolvedDuplicate(other: ItemContent): ItemContent = when {
+    this == other -> this
+    this is ItemContent.MapEntry && other is ItemContent.Value && value == other.value -> this
+    this is ItemContent.Value && other is ItemContent.MapEntry && value == other.value -> other
+    this is ItemContent.MapEntries && other is ItemContent.ArrayValues && values == other.values -> this
+    this is ItemContent.ArrayValues && other is ItemContent.MapEntries && values == other.values -> other
+    this is ItemContent.Text && other is ItemContent.Text && value == other.value -> copy(
+        attributes = chooseLosslessAttributes(attributes, other.attributes),
+        baseAttributes = chooseLosslessAttributes(baseAttributes, other.baseAttributes),
+    )
+    this is ItemContent.TextEmbed && other is ItemContent.TextEmbed && value == other.value -> copy(
+        attributes = chooseLosslessAttributes(attributes, other.attributes),
+        baseAttributes = chooseLosslessAttributes(baseAttributes, other.baseAttributes),
+    )
+    this is ItemContent.XmlType && other is ItemContent.XmlType && ref == other.ref && nodeName == other.nodeName -> copy(
+        attributes = chooseLosslessAttributes(attributes, other.attributes),
+        baseAttributes = chooseLosslessAttributes(baseAttributes, other.baseAttributes),
+    )
+    else -> mergePrivateMetadata(other)
+}
+
 private fun ItemContent.mergePrivateMetadata(other: ItemContent): ItemContent = when {
     this == other -> this
+    this is ItemContent.Deleted && other !is ItemContent.Deleted && length == other.clockLength -> other
+    other is ItemContent.Deleted && this !is ItemContent.Deleted && other.length == clockLength -> this
+    this is ItemContent.Deleted && other is ItemContent.Deleted && length == other.length ->
+        if (kind.ordinal <= other.kind.ordinal) this else other
     this is ItemContent.Text && other is ItemContent.Text && value == other.value && kind == other.kind -> copy(
         attributes = chooseLosslessAttributes(attributes, other.attributes),
         baseAttributes = chooseLosslessAttributes(baseAttributes, other.baseAttributes),
