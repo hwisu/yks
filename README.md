@@ -13,7 +13,7 @@ audited boundary.
 
 ## Install
 
-Release `0.2.6` is published as `dev.yks:yks:0.2.6` in the repository's GitHub
+Release `0.2.7` is published as `dev.yks:yks:0.2.7` in the repository's GitHub
 Packages Maven registry. GitHub requires authentication when downloading Maven
 packages, including packages attached to public repositories.
 
@@ -55,7 +55,7 @@ Then add the dependency:
 
 ```kotlin
 dependencies {
-    implementation("dev.yks:yks:0.2.6")
+    implementation("dev.yks:yks:0.2.7")
 }
 ```
 
@@ -317,7 +317,7 @@ baseline make accidental public or binary API drift a build failure.
 Release JARs disable file timestamps, use reproducible entry order, embed the
 exact `YKS-Revision`, and are built twice and byte-compared before publication.
 
-Pushing a tag such as `v0.2.6` runs the same gates, publishes that immutable
+Pushing a tag such as `v0.2.7` runs the same gates, publishes that immutable
 version to GitHub Packages, and verifies it again from a clean remote consumer.
 
 ## License
