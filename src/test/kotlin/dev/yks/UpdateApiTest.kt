@@ -718,8 +718,8 @@ class UpdateApiTest {
 
         assertEquals(
             YTextDelta().insertEmbed(
-                mapOf("count" to 0L, "url" to "0000000"),
-                mapOf("0" to "0000", "1" to false),
+                emptyMap<String, Any?>(),
+                mapOf("0" to mapOf("i" to 0L), "1" to mapOf("i" to 1L)),
             ),
             obfuscated.getText("body").toDelta(),
         )
