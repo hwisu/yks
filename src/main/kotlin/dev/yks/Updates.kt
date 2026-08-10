@@ -974,7 +974,7 @@ private fun List<StoreItem>.intersectClockRanges(
 public fun mergeUpdates(updates: List<ByteArray>): ByteArray {
     updates.forEach { update -> requireStandardYjsUpdateInput(update, "V1") }
     if (updates.size == 1) return UpdateCodec.encode(UpdateCodec.decode(updates.single()))
-    return mergeDecodedUpdates(updates.map(UpdateCodec::decode), UpdateCodec::encode)
+    return UpdateCodec.mergeStandardV1(updates)
 }
 
 public fun mergeUpdatesLossless(updates: List<ByteArray>): ByteArray {

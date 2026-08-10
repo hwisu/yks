@@ -102,6 +102,53 @@ class XmlAnswerDocStandardInteropTest {
         }
     }
 
+    @Test
+    fun `merges repeated upstream text edits with a large full snapshot`() {
+        val source = YDoc(clientId = 1)
+        source.getMap("questions").set(
+            "42",
+            YMap(linkedMapOf("id" to 42, "status" to "IN_PROGRESS")),
+        )
+        source.getXmlFragment("42").pushTypes(listOf(paragraph("초기 답변 😀", "node-seed")))
+        repeat(120) { index ->
+            val questionId = 1_000 + index
+            source.getMap("questions").set(
+                questionId.toString(),
+                YMap(linkedMapOf("id" to questionId, "status" to "IN_PROGRESS")),
+            )
+            source.getXmlFragment(questionId.toString()).pushTypes(
+                listOf(paragraph("답변 $questionId", "node-$questionId")),
+            )
+        }
+
+        val seedFile = Files.createTempFile("yks-answerdoc-typing-seed-", ".bin")
+        try {
+            Files.write(seedFile, source.encodeStateAsUpdate())
+            val process = ProcessBuilder(
+                "node",
+                "--no-warnings",
+                "interop/yjs-v1/generate-answerdoc-merge-updates.mjs",
+                seedFile.toAbsolutePath().toString(),
+                "typing",
+            )
+                .directory(Path.of(System.getProperty("user.dir")).toFile())
+                .redirectError(ProcessBuilder.Redirect.INHERIT)
+                .start()
+            val lines = process.inputStream.bufferedReader().readLines()
+            assertTrue(process.waitFor() == 0, lines.joinToString("\n"))
+            val inputs = lines.filter(String::isNotBlank).map(Base64.getDecoder()::decode)
+
+            val merged = mergeUpdates(inputs)
+            val restored = createDocFromUpdate(merged)
+            assertEquals(
+                "<paragraph index=\"0\" node_ids=\"node-seed\">초기 답변 😀Ktor 수정</paragraph>",
+                restored.getXmlFragment("42").toString(),
+            )
+        } finally {
+            Files.deleteIfExists(seedFile)
+        }
+    }
+
     private fun paragraph(value: String, nodeId: String = "node-1") = YXmlElementType("paragraph").also { element ->
         element.setAttribute("index", 0)
         element.setAttribute("node_ids", listOf(nodeId))

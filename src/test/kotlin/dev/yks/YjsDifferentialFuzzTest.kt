@@ -76,7 +76,13 @@ class YjsDifferentialFuzzTest {
 
                 val xmlDoc = YDoc(clientId = 900_001, gc = false)
                 val xml = xmlDoc.getXmlFragment("xml")
-                decodeUpdates(columns[1]).forEach(xmlDoc::applyUpdate)
+                val xmlUpdates = decodeUpdates(columns[1])
+                val mergedXml = try {
+                    mergeUpdates(xmlUpdates)
+                } catch (cause: UnsupportedYjsStandardUpdateException) {
+                    throw AssertionError("XML merge rejected upstream updates at seed $seed", cause)
+                }
+                xmlDoc.applyUpdate(mergedXml)
                 assertEquals(decodeText(columns[2]), xml.toString(), "XML diverged at seed $seed")
                 assertEquals(null, xmlDoc.store.pendingStructs, "XML pending structs remained at seed $seed")
 

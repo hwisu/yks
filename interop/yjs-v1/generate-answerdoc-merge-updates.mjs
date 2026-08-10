@@ -32,12 +32,22 @@ Y.applyUpdate(client, seed);
 const incremental = [];
 client.on("update", (update) => incremental.push(update));
 const clientQuestion = client.getMap("questions").get("42");
-clientQuestion.set("status", "IN_REVIEW");
-clientQuestion.set("lastMutationActorId", "user-1");
-clientQuestion.set("lastMutationActorName", "Collab Owner");
-clientQuestion.set("lastMutationAt", "2026-08-02T00:00:00.000Z");
-clientQuestion.set("lastMutationId", "marker");
-replaceAnswer(client, "Ktor 동기화 𠮷", "node-updated");
+if (process.argv[3] === "typing") {
+  const paragraph = client.getXmlFragment("42").get(0);
+  const text = paragraph.get(0);
+  for (const value of "Ktor 수정") text.insert(text.length, value);
+  clientQuestion.set("lastMutationActorId", "user-1");
+  clientQuestion.set("lastMutationActorName", "Collab Owner");
+  clientQuestion.set("lastMutationAt", "2026-08-02T00:00:00.000Z");
+  clientQuestion.set("lastMutationId", "marker");
+} else {
+  clientQuestion.set("status", "IN_REVIEW");
+  clientQuestion.set("lastMutationActorId", "user-1");
+  clientQuestion.set("lastMutationActorName", "Collab Owner");
+  clientQuestion.set("lastMutationAt", "2026-08-02T00:00:00.000Z");
+  clientQuestion.set("lastMutationId", "marker");
+  replaceAnswer(client, "Ktor 동기화 𠮷", "node-updated");
+}
 
 const server = new Y.Doc();
 Y.applyUpdate(server, seed);

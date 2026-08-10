@@ -315,6 +315,37 @@ internal object UpdateCodec {
             MAX_DECODED_COLLECTION_SIZE,
         ),
     ): DocumentUpdate {
+        val decoded = decodeWireV1(decoder, metaFrom, metaTo, budget)
+        return DocumentUpdate(decoded.items.toStoreItems(), decoded.deleteSet)
+    }
+
+    /**
+     * Merge genuine V1 inputs without first projecting their wire inheritance into YKS'
+     * richer semantic item model. Upstream Yjs merges lazy wire structs for the same reason:
+     * an incremental XML/text item may inherit formatting and parent data from an earlier
+     * update even though their union remains a perfectly valid standard update.
+     */
+    fun mergeStandardV1(updates: List<ByteArray>): ByteArray = decodeBoundary("merged Yjs update V1") {
+        val decoded = updates.map { update ->
+            decodeWireV1(
+                decoder = BinaryDecoder(update),
+                budget = DecodedUpdateBudget(
+                    MAX_DECODED_COLLECTION_SIZE,
+                    MAX_DECODED_COLLECTION_SIZE,
+                ),
+            )
+        }
+        val deleteSet = DeleteSet.empty()
+        decoded.forEach { update -> deleteSet.addAll(update.deleteSet) }
+        encodeWireV1(mergeWireItems(decoded.flatMap(WireDocumentUpdate::items)), deleteSet)
+    }
+
+    private fun decodeWireV1(
+        decoder: BinaryDecoder,
+        metaFrom: MutableMap<Long, Long>? = null,
+        metaTo: MutableMap<Long, Long>? = null,
+        budget: DecodedUpdateBudget,
+    ): WireDocumentUpdate {
         val structs = mutableListOf<DecodedWireItem>()
         repeat(decoder.readVarUInt().toDecodedCount()) {
             val numberOfStructs = decoder.readVarUInt().toDecodedCount()
@@ -371,7 +402,92 @@ internal object UpdateCodec {
         }
         val deleteSet = readDeleteSet(decoder, budget.deleteRanges)
         check(!decoder.hasRemaining()) { "update has trailing bytes" }
-        return DocumentUpdate(structs.toStoreItems(), deleteSet)
+        return WireDocumentUpdate(structs, deleteSet)
+    }
+
+    private fun encodeWireV1(items: List<DecodedWireItem>, deleteSet: DeleteSet): ByteArray {
+        val encoder = BinaryEncoder()
+        val itemsByClient = items.groupBy { item -> item.id.client }
+        encoder.writeVarUInt(itemsByClient.size.toLong())
+        itemsByClient.toSortedMap(compareByDescending { it }).forEach { (client, clientItems) ->
+            val sorted = clientItems.sortedBy { item -> item.id.clock }
+            var nextClock = sorted.first().id.clock
+            var structCount = sorted.size
+            sorted.forEach { item ->
+                if (item.id.clock > nextClock) structCount++
+                nextClock = checkedClockAdd(item.id.clock, item.content.length, "merged wire item end")
+            }
+            encoder.writeVarUInt(structCount.toLong())
+            encoder.writeVarUInt(client)
+            encoder.writeVarUInt(sorted.first().id.clock)
+            nextClock = sorted.first().id.clock
+            sorted.forEach { item ->
+                if (item.id.clock > nextClock) {
+                    encoder.writeByte(structSkipRefNumber)
+                    encoder.writeVarUInt(item.id.clock - nextClock)
+                }
+                writeWireItem(encoder, item)
+                nextClock = checkedClockAdd(item.id.clock, item.content.length, "merged wire item end")
+            }
+        }
+        writeDeleteSet(encoder, deleteSet)
+        return encoder.toByteArray()
+    }
+
+    private fun writeWireItem(encoder: BinaryEncoder, item: DecodedWireItem) {
+        if (item.isGc) {
+            encoder.writeByte(structGCRefNumber)
+            encoder.writeVarUInt(item.content.length)
+            return
+        }
+        val info = item.content.refNumber() or
+            (if (item.origin != null) INFO_HAS_ORIGIN else 0) or
+            (if (item.rightOrigin != null) INFO_HAS_RIGHT_ORIGIN else 0) or
+            (if (item.parentSub != null) INFO_HAS_PARENT_SUB else 0)
+        encoder.writeByte(info)
+        item.origin?.let(encoder::writeId)
+        item.rightOrigin?.let(encoder::writeId)
+        if (item.origin == null && item.rightOrigin == null) {
+            when (val parent = item.parent) {
+                is ParentReference.Root -> {
+                    encoder.writeVarUInt(1)
+                    encoder.writeString(parent.name)
+                }
+                is ParentReference.Nested -> {
+                    encoder.writeVarUInt(0)
+                    encoder.writeId(parent.id)
+                }
+                is ParentReference.Inherit -> error("wire item without origins cannot inherit its parent")
+            }
+            item.parentSub?.let(encoder::writeString)
+        }
+        writeWireContent(encoder, item.content)
+    }
+
+    private fun writeWireContent(encoder: BinaryEncoder, content: WireContent) {
+        when (content) {
+            is WireContent.Deleted -> encoder.writeVarUInt(content.length)
+            is WireContent.Json -> {
+                encoder.writeVarUInt(content.values.size.toLong())
+                content.values.forEach { value -> encoder.writeString(toJsonLiteral(value)) }
+            }
+            is WireContent.Binary -> encoder.writeBytes(content.value)
+            is WireContent.StringContent -> encoder.writeString(content.value)
+            is WireContent.Embed -> encoder.writeString(toJsonLiteral(content.value))
+            is WireContent.Format -> {
+                encoder.writeString(content.key)
+                encoder.writeString(toJsonLiteral(content.value))
+            }
+            is WireContent.Type -> writeTypeContent(encoder, content.kind, content.nodeName)
+            is WireContent.AnyContent -> {
+                encoder.writeVarUInt(content.values.size.toLong())
+                content.values.forEach { value -> writeLib0Any(encoder, value) }
+            }
+            is WireContent.Doc -> {
+                encoder.writeString(content.guid)
+                writeLib0Any(encoder, content.options)
+            }
+        }
     }
 
     private fun recordMetaStart(meta: MutableMap<Long, Long>?, client: Long, clock: Long) {
@@ -1144,6 +1260,11 @@ private data class DecodedWireItem(
     var unresolvedParentResolutionMark: Int = 0
 }
 
+private data class WireDocumentUpdate(
+    val items: List<DecodedWireItem>,
+    val deleteSet: DeleteSet,
+)
+
 private sealed interface WireContent {
     val length: Long
 
@@ -1158,6 +1279,67 @@ private sealed interface WireContent {
     data class Doc(val guid: String, val options: Any?, val instanceId: String) : WireContent {
         override val length: Long = 1
     }
+}
+
+private fun WireContent.refNumber(): Int = when (this) {
+    is WireContent.Deleted -> contentDeletedRefNumber
+    is WireContent.Json -> contentJSONRefNumber
+    is WireContent.Binary -> contentBinaryRefNumber
+    is WireContent.StringContent -> contentStringRefNumber
+    is WireContent.Embed -> contentEmbedRefNumber
+    is WireContent.Format -> contentFormatRefNumber
+    is WireContent.Type -> contentTypeRefNumber
+    is WireContent.AnyContent -> contentAnyRefNumber
+    is WireContent.Doc -> contentDocRefNumber
+}
+
+/** Keep the first wire representation for duplicate clocks and retain uncovered tails. */
+private fun mergeWireItems(items: List<DecodedWireItem>): List<DecodedWireItem> = items
+    .groupBy { item -> item.id.client }
+    .toSortedMap(compareByDescending { client -> client })
+    .values
+    .flatMap { clientItems ->
+        val merged = mutableListOf<DecodedWireItem>()
+        clientItems.sortedBy { item -> item.id.clock }.forEach { incoming ->
+            val incomingEnd = checkedClockAdd(incoming.id.clock, incoming.content.length, "incoming wire item end")
+            val coveredUntil = merged.lastOrNull()?.let { item ->
+                checkedClockAdd(item.id.clock, item.content.length, "merged wire item end")
+            } ?: incoming.id.clock
+            when {
+                incomingEnd <= coveredUntil -> Unit
+                incoming.id.clock < coveredUntil -> merged.add(incoming.sliceFromClock(coveredUntil))
+                else -> merged.add(incoming)
+            }
+        }
+        merged
+    }
+
+private fun DecodedWireItem.sliceFromClock(startClock: Long): DecodedWireItem {
+    val endClock = checkedClockAdd(id.clock, content.length, "wire item end")
+    require(startClock in (id.clock + 1)..<endClock) { "wire slice must retain a non-empty tail" }
+    val offset = startClock - id.clock
+    if (isGc) {
+        return copy(
+            id = Id(id.client, startClock),
+            content = WireContent.Deleted(endClock - startClock),
+        )
+    }
+    val slicedOrigin = Id(id.client, startClock - 1)
+    return copy(
+        id = Id(id.client, startClock),
+        origin = slicedOrigin,
+        parent = ParentReference.Inherit(slicedOrigin),
+        parentSub = null,
+        content = content.sliceFrom(offset),
+    )
+}
+
+private fun WireContent.sliceFrom(offset: Long): WireContent = when (this) {
+    is WireContent.Deleted -> copy(length = length - offset)
+    is WireContent.StringContent -> copy(value = value.substring(offset.toNonNegativeInt("wire text slice")))
+    is WireContent.Json -> copy(values = values.drop(offset.toNonNegativeInt("wire JSON slice")))
+    is WireContent.AnyContent -> copy(values = values.drop(offset.toNonNegativeInt("wire any slice")))
+    else -> error("wire content ${this::class.simpleName} cannot be sliced")
 }
 
 private fun List<StoreItem>.withClockSkips(): List<EncodedStruct> {
