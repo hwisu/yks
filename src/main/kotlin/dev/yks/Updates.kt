@@ -621,14 +621,20 @@ private fun formatDecodedUpdate(decoded: DecodedUpdate): String {
     return "$structs\n$deletes"
 }
 
+private val identityUpdateStructTransformer: (DecodedUpdateStruct) -> DecodedUpdateStruct = { it }
+
 public fun convertUpdateFormat(
     update: ByteArray,
-    blockTransformer: (DecodedUpdateStruct) -> DecodedUpdateStruct = { it },
+    blockTransformer: (DecodedUpdateStruct) -> DecodedUpdateStruct = identityUpdateStructTransformer,
 ): ByteArray {
     requireStandardYjsUpdateInput(update, "V1")
+    if (blockTransformer === identityUpdateStructTransformer) return UpdateCodec.normalizeStandardV1(update)
     val decoded = UpdateCodec.decode(update)
-    val transformed = decoded.items.flatMap { item ->
-        blockTransformer(item.toDecodedStruct()).toStoreItems(original = item)
+    val decodedStructs = decoded.items.map(StoreItem::toDecodedStruct)
+    val transformedStructs = decodedStructs.map(blockTransformer)
+    if (transformedStructs == decodedStructs) return UpdateCodec.normalizeStandardV1(update)
+    val transformed = transformedStructs.zip(decoded.items).flatMap { (struct, item) ->
+        struct.toStoreItems(original = item)
     }
     return UpdateCodec.encode(DocumentUpdate(transformed, decoded.deleteSet.copy()))
 }
@@ -646,7 +652,7 @@ public fun convertUpdateFormatLossless(
 
 public fun convertUpdateFormatV1ToV2(update: ByteArray): ByteArray {
     requireStandardYjsUpdateInput(update, "V1")
-    return UpdateCodec.encodeV2(UpdateCodec.decode(update))
+    return UpdateCodec.convertStandardV1ToV2(update)
 }
 
 public fun convertUpdateFormatV1ToV2Lossless(update: ByteArray): ByteArray =
@@ -654,7 +660,7 @@ public fun convertUpdateFormatV1ToV2Lossless(update: ByteArray): ByteArray =
 
 public fun convertUpdateFormatV2ToV1(update: ByteArray): ByteArray {
     requireStandardYjsUpdateInput(update, "V2")
-    return UpdateCodec.encode(UpdateCodec.decodeV2(update))
+    return UpdateCodec.convertStandardV2ToV1(update)
 }
 
 public fun convertUpdateFormatV2ToV1Lossless(update: ByteArray): ByteArray =
@@ -669,12 +675,7 @@ public data class ObfuscatorOptions(
 
 public fun obfuscateUpdate(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray {
     requireStandardYjsUpdateInput(update, "V1")
-    val decoded = UpdateCodec.decode(update)
-    val obfuscator = UpdateObfuscator(options)
-    val obfuscatedItems = decoded.items.map { item ->
-        item.copy(content = obfuscator.obfuscate(item.content))
-    }
-    return UpdateCodec.encode(DocumentUpdate(obfuscatedItems, decoded.deleteSet.copy()))
+    return UpdateCodec.obfuscateStandardV1(update, options)
 }
 
 public fun obfuscateUpdateLossless(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray {
@@ -688,15 +689,7 @@ public fun obfuscateUpdateLossless(update: ByteArray, options: ObfuscatorOptions
 
 public fun obfuscateUpdateV2(update: ByteArray, options: ObfuscatorOptions = ObfuscatorOptions()): ByteArray {
     requireStandardYjsUpdateInput(update, "V2")
-    return UpdateCodec.decodeV2(update).let { decoded ->
-        val obfuscator = UpdateObfuscator(options)
-        UpdateCodec.encodeV2(
-            DocumentUpdate(
-                decoded.items.map { item -> item.copy(content = obfuscator.obfuscate(item.content)) },
-                decoded.deleteSet.copy(),
-            ),
-        )
-    }
+    return UpdateCodec.obfuscateStandardV2(update, options)
 }
 
 
@@ -896,6 +889,7 @@ public fun decodeContentMap(bytes: ByteArray): ContentMap {
 }
 
 public fun createContentIdsFromUpdate(update: ByteArray): ContentIds {
+    if (!update.hasLegacyMagic()) return UpdateCodec.contentIdsStandardV1(update)
     val decoded = UpdateCodec.decode(update)
     return createContentIds(
         inserts = createInsertIdSet(decoded.itemsWithDeleteState()),
@@ -908,6 +902,7 @@ private fun DocumentUpdate.itemsWithDeleteState(): List<StoreItem> = items.map {
 }
 
 public fun createContentIdsFromUpdateV2(update: ByteArray): ContentIds {
+    if (!update.hasLegacyMagic()) return UpdateCodec.contentIdsStandardV2(update)
     val decoded = UpdateCodec.decodeV2(update)
     return createContentIds(
         inserts = createInsertIdSet(decoded.itemsWithDeleteState()),
@@ -917,15 +912,7 @@ public fun createContentIdsFromUpdateV2(update: ByteArray): ContentIds {
 
 public fun intersectUpdateWithContentIds(update: ByteArray, contentIds: ContentIds): ByteArray {
     requireStandardYjsUpdateInput(update, "V1")
-    val decoded = UpdateCodec.decode(update)
-    val filteredItems = decoded.items.intersectClockRanges(contentIds.inserts, requiresClockContinuity = false)
-    val filteredDeletes = decoded.deleteSet.toIdSet()
-        .let { intersectSets(it, contentIds.deletes) }
-        .toDeleteSet()
-    if (filteredItems == decoded.items && filteredDeletes.structurallyEquals(decoded.deleteSet)) {
-        return UpdateCodec.encode(decoded)
-    }
-    return UpdateCodec.encode(DocumentUpdate(filteredItems, filteredDeletes))
+    return UpdateCodec.intersectStandardV1(update, contentIds)
 }
 
 public fun intersectUpdateWithContentIdsLossless(update: ByteArray, contentIds: ContentIds): ByteArray {
@@ -940,13 +927,7 @@ public fun intersectUpdateWithContentIdsLossless(update: ByteArray, contentIds: 
 
 public fun intersectUpdateWithContentIdsV2(update: ByteArray, contentIds: ContentIds): ByteArray {
     requireStandardYjsUpdateInput(update, "V2")
-    return UpdateCodec.decodeV2(update).let { decoded ->
-        val filteredItems = decoded.items.intersectClockRanges(contentIds.inserts)
-        val filteredDeletes = intersectSets(decoded.deleteSet.toIdSet(), contentIds.deletes).toDeleteSet()
-        if (filteredItems == decoded.items && filteredDeletes.structurallyEquals(decoded.deleteSet)) {
-            UpdateCodec.encodeV2(decoded)
-        } else UpdateCodec.encodeV2(DocumentUpdate(filteredItems, filteredDeletes))
-    }
+    return UpdateCodec.intersectStandardV2(update, contentIds)
 }
 
 public fun intersectUpdateWithContentIdsV2Lossless(update: ByteArray, contentIds: ContentIds): ByteArray =
@@ -973,7 +954,6 @@ private fun List<StoreItem>.intersectClockRanges(
 
 public fun mergeUpdates(updates: List<ByteArray>): ByteArray {
     updates.forEach { update -> requireStandardYjsUpdateInput(update, "V1") }
-    if (updates.size == 1) return UpdateCodec.encode(UpdateCodec.decode(updates.single()))
     return UpdateCodec.mergeStandardV1(updates)
 }
 
@@ -984,8 +964,7 @@ public fun mergeUpdatesLossless(updates: List<ByteArray>): ByteArray {
 
 public fun mergeUpdatesV2(updates: List<ByteArray>): ByteArray {
     updates.forEach { update -> requireStandardYjsUpdateInput(update, "V2") }
-    if (updates.size == 1) return UpdateCodec.encodeV2(UpdateCodec.decodeV2(updates.single()))
-    return mergeDecodedUpdates(updates.map(UpdateCodec::decodeV2), UpdateCodec::encodeV2)
+    return UpdateCodec.mergeStandardV2(updates)
 }
 
 public fun mergeUpdatesV2Lossless(updates: List<ByteArray>): ByteArray {
@@ -995,10 +974,7 @@ public fun mergeUpdatesV2Lossless(updates: List<ByteArray>): ByteArray {
 
 public fun diffUpdate(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
     requireStandardYjsUpdateInput(update, "V1")
-    val stateVector = decodeStateVector(encodedStateVector)
-    val decoded = UpdateCodec.decode(update)
-    val filtered = decoded.items.mapNotNull { item -> item.sliceFromClock(stateVector[item.id.client] ?: 0) }
-    return UpdateCodec.encode(DocumentUpdate(filtered, decoded.deleteSet))
+    return UpdateCodec.diffStandardV1(update, decodeStateVector(encodedStateVector))
 }
 
 public fun diffUpdateLossless(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
@@ -1010,10 +986,7 @@ public fun diffUpdateLossless(update: ByteArray, encodedStateVector: ByteArray):
 
 public fun diffUpdateV2(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
     requireStandardYjsUpdateInput(update, "V2")
-    val stateVector = decodeStateVector(encodedStateVector)
-    val decoded = UpdateCodec.decodeV2(update)
-    val filtered = decoded.items.mapNotNull { item -> item.sliceFromClock(stateVector[item.id.client] ?: 0) }
-    return UpdateCodec.encodeV2(DocumentUpdate(filtered, decoded.deleteSet))
+    return UpdateCodec.diffStandardV2(update, decodeStateVector(encodedStateVector))
 }
 
 public fun diffUpdateV2Lossless(update: ByteArray, encodedStateVector: ByteArray): ByteArray {
