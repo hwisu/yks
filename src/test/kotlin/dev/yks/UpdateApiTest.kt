@@ -80,6 +80,24 @@ class UpdateApiTest {
     }
 
     @Test
+    fun mergeUpdatesPreservesConsecutiveMapTransactionsFromOneClient() {
+        val source = YDoc(clientId = 7)
+        val updates = mutableListOf<ByteArray>()
+        source.observeUpdates { update, _ -> updates += update }
+
+        source.getMap("values").set("a", 1)
+        source.getMap("values").set("b", 2)
+        source.getMap("values").set("c", 3)
+
+        val target = YDoc(clientId = 8)
+        target.applyUpdate(mergeUpdates(updates))
+
+        assertEquals(1L, target.getMap("values").get("a"))
+        assertEquals(2L, target.getMap("values").get("b"))
+        assertEquals(3L, target.getMap("values").get("c"))
+    }
+
+    @Test
     fun mergeUpdatesHandlesLargeDuplicateClockSets() {
         val source = YDoc(clientId = 1, gc = false)
         val array = source.getArray("items")

@@ -1,6 +1,6 @@
 # Yjs compatibility
 
-YKS targets Yjs `13.6.31`. It is a Kotlin/JVM implementation of the Yjs
+YKS targets Yjs `13.6.32`. It is a Kotlin/JVM implementation of the Yjs
 document model and update protocol, not a byte-for-byte or object-model clone
 of the JavaScript package.
 
@@ -11,7 +11,7 @@ of the JavaScript package.
   positions, undo management, subdocuments, XML model operations, update
   transforms, and garbage collection are implemented and tested against
   upstream Yjs.
-- All 103 names exported by Yjs `13.6.31` have a Kotlin mapping or a documented
+- All 103 names exported by Yjs `13.6.32` have a Kotlin mapping or a documented
   JVM adaptation.
 - There is no known core wire-format or CRDT-convergence blocker in the tested
   surface.
@@ -109,7 +109,7 @@ private `YKS` envelope and must not be sent to JavaScript Yjs.
    - Yrs defaults text indexes to UTF-8 byte offsets, while Yjs and YKS use
      UTF-16 code units. Cross-runtime tests explicitly select Yrs UTF-16 mode.
    - Yrs-only weak links, query/runtime synchronization APIs, and extra encoded
-     subdocument options are not part of the Yjs `13.6.31` compatibility claim.
+     subdocument options are not part of the Yjs `13.6.32` compatibility claim.
    - Update encoders may choose different valid struct packing. Cross-runtime
      generated updates are compared by state-vector and document semantics;
      byte identity is required only when regenerating a fixture with the same

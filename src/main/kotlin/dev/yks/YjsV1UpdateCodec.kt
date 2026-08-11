@@ -1342,6 +1342,14 @@ private fun StoreItem.hasCompatibleV1ParentKind(
 ): Boolean {
     val nestedKind = parentKinds[parent]
     val profile = index.parentProfiles[parent]
+    // Yjs does not encode a constructor for a named top-level shared type. Historical
+    // documents can therefore contain structs written through different accessors under the
+    // same root name (for example an old Y.Array followed by a Y.XmlFragment). The receiving
+    // application decides which view to materialize. Nested types do have an explicit owner
+    // ContentType and must continue to match that owner's kind.
+    val untypedRoot = nestedKind == null &&
+        !parent.startsWith("__yks_nested__:") &&
+        !parent.startsWith("__yks_yjs_nested__:")
     return when (content) {
         is ItemContent.MapEntry -> when {
             content.value is YValue.SubdocRef && nestedKind != null &&
@@ -1358,13 +1366,13 @@ private fun StoreItem.hasCompatibleV1ParentKind(
                 ?: (profile?.allMapEntries == true)
         }
         is ItemContent.ArrayValues -> nestedKind?.let { kind -> kind == RootKind.Array }
-            ?: (profile?.allArraySequence == true)
+            ?: (untypedRoot || profile?.allArraySequence == true)
         is ItemContent.Value -> nestedKind?.let { kind -> kind == RootKind.Array }
-            ?: (profile?.allArraySequence == true)
+            ?: (untypedRoot || profile?.allArraySequence == true)
         is ItemContent.Text,
         is ItemContent.TextEmbed,
         is ItemContent.NativeTextFormat -> nestedKind?.let { kind -> kind == content.kind }
-            ?: (profile?.sequenceEmpty == true || profile?.textLikeKind == content.kind)
+            ?: (untypedRoot || profile?.sequenceEmpty == true || profile?.textLikeKind == content.kind)
         is ItemContent.XmlType -> {
             val xmlSequenceKinds = setOf(
                 RootKind.Array,
@@ -1377,7 +1385,11 @@ private fun StoreItem.hasCompatibleV1ParentKind(
             )
             content.kind in xmlSequenceKinds &&
                 (nestedKind?.let { kind -> kind == content.kind }
-                    ?: (profile?.sequenceEmpty == true || profile?.singleSequenceKind == content.kind))
+                    ?: (
+                        untypedRoot ||
+                            profile?.sequenceEmpty == true ||
+                            profile?.singleSequenceKind == content.kind
+                        ))
         }
         is ItemContent.Deleted -> true
         else -> false

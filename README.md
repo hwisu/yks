@@ -5,7 +5,7 @@ protocol. It provides shared arrays, maps, text, live XML, subdocuments,
 snapshots, relative positions, undo management, and update V1/V2 operations.
 
 The project targets JDK 21 and is published from SemVer tags to GitHub Packages.
-Interoperability is tested against Yjs `13.6.31` and independently against Yrs
+Interoperability is tested against Yjs `13.6.32` and independently against Yrs
 `0.27.2` in its Yjs-compatible UTF-16 mode. YKS targets the genuine Yjs V1/V2
 wire protocols and core CRDT behavior; it is not a line-for-line clone of either
 runtime's object model. See [Yjs compatibility](YJS_COMPATIBILITY.md) for the
@@ -13,7 +13,7 @@ audited boundary.
 
 ## Install
 
-Release `0.2.7` is published as `dev.yks:yks:0.2.7` in the repository's GitHub
+Release `0.2.8` is published as `dev.yks:yks:0.2.8` in the repository's GitHub
 Packages Maven registry. GitHub requires authentication when downloading Maven
 packages, including packages attached to public repositories.
 
@@ -55,7 +55,7 @@ Then add the dependency:
 
 ```kotlin
 dependencies {
-    implementation("dev.yks:yks:0.2.7")
+    implementation("dev.yks:yks:0.2.8")
 }
 ```
 
@@ -317,7 +317,7 @@ baseline make accidental public or binary API drift a build failure.
 Release JARs disable file timestamps, use reproducible entry order, embed the
 exact `YKS-Revision`, and are built twice and byte-compared before publication.
 
-Pushing a tag such as `v0.2.7` runs the same gates, publishes that immutable
+Pushing a tag such as `v0.2.8` runs the same gates, publishes that immutable
 version to GitHub Packages, and verifies it again from a clean remote consumer.
 
 ## License

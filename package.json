@@ -18,6 +18,6 @@
     "benchmark:performance:advanced": "BENCH_SCENARIOS=advanced node --expose-gc benchmarks/performance/yjs-parity.mjs --assert-parity"
   },
   "devDependencies": {
-    "yjs": "13.6.31"
+    "yjs": "13.6.32"
   }
 }
