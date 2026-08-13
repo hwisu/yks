@@ -168,7 +168,7 @@ class LegacyUpdateMetadataTest {
         val target = YDoc(clientId = 3)
 
         assertEquals(2, update[3].toInt())
-        applyUpdate(target, update)
+        applyUpdateLossless(target, update)
 
         assertEquals("<p></p>", target.getXmlFragment(rootName).toString())
         assertNull(target.store.pendingStructs)

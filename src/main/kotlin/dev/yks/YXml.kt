@@ -1,5 +1,26 @@
 package dev.yks
 
+import javax.xml.parsers.DocumentBuilderFactory
+import org.w3c.dom.Document
+import org.w3c.dom.Element
+import org.w3c.dom.Node
+
+/** JVM adaptation of the optional hook renderer accepted by Yjs XML `toDOM` methods. */
+public fun interface YXmlDomHook {
+    public fun createDom(hook: YXmlHook): Element
+}
+
+/** JVM adaptation of the internal DOM-binding association callback used by Yjs. */
+public fun interface YXmlDomBinding {
+    public fun _createAssociation(node: Node, type: AbstractYType)
+}
+
+/** Create an empty namespace-aware W3C document suitable for XML `toDOM` calls. */
+public fun createXmlDomDocument(): Document = DocumentBuilderFactory.newInstance()
+    .also { it.isNamespaceAware = true }
+    .newDocumentBuilder()
+    .newDocument()
+
 public sealed class YXmlNode {
     internal abstract fun toValue(): YXmlNodeValue
     public abstract fun clone(): YXmlNode
@@ -28,6 +49,9 @@ public class YXmlText(
     public fun toDeltaDeep(): String = text
 
     override fun toString(): String = renderXmlText(text, attributes)
+
+    public fun toDOM(document: Document = createXmlDomDocument()): Node =
+        document.createTextNode(toString())
 }
 
 /**
@@ -373,6 +397,12 @@ public class YXmlElementType internal constructor(
 
     public fun querySelectorAll(query: String): List<Any?> = xmlQuerySelectorAll(this, query)
 
+    public fun toDOM(
+        document: Document = createXmlDomDocument(),
+        hooks: Map<String, YXmlDomHook> = emptyMap(),
+        binding: YXmlDomBinding? = null,
+    ): Node = xmlToDom(this, document, hooks, binding)
+
     public fun insertAfter(ref: Any?, content: List<Any?>) {
         xmlInsertAfter(this, ref, content)
     }
@@ -546,6 +576,14 @@ public class YXmlTextType internal constructor(
         }
 
     override fun toString(): String = renderXmlTextDelta(toDelta())
+
+    public fun toDOM(
+        document: Document = createXmlDomDocument(),
+        @Suppress("UNUSED_PARAMETER") hooks: Map<String, YXmlDomHook> = emptyMap(),
+        binding: YXmlDomBinding? = null,
+    ): Node = document.createTextNode(toString()).also { node ->
+        binding?._createAssociation(node, this)
+    }
 }
 
 /**
@@ -577,6 +615,15 @@ public class YXmlHook internal constructor(
     }
 
     override fun toString(): String = "[object Object]"
+
+    public fun toDOM(
+        document: Document = createXmlDomDocument(),
+        hooks: Map<String, YXmlDomHook> = emptyMap(),
+        binding: YXmlDomBinding? = null,
+    ): Element = (hooks[hookName]?.createDom(this) ?: document.createElement(hookName)).also { element ->
+        element.setAttribute("data-yjs-hook", hookName)
+        binding?._createAssociation(element, this)
+    }
 }
 
 public class YXmlElement(public val nodeName: String) : YXmlNode(), Iterable<YXmlNode> {
@@ -805,6 +852,11 @@ public class YXmlElement(public val nodeName: String) : YXmlNode(), Iterable<YXm
     }
 
     override fun toString(): String = toString(forceTag = false)
+
+    public fun toDOM(
+        document: Document = createXmlDomDocument(),
+        hooks: Map<String, YXmlDomHook> = emptyMap(),
+    ): Node = xmlToDom(this, document, hooks, binding = null)
 
     public companion object {
         public fun from(nodeName: String, delta: List<YArrayDeltaOp>): YXmlElement {
@@ -1107,6 +1159,12 @@ public class YXmlFragment internal constructor(doc: YDoc, name: String) :
 
     public fun querySelectorAll(query: String): List<Any?> = xmlQuerySelectorAll(this, query)
 
+    public fun toDOM(
+        document: Document = createXmlDomDocument(),
+        hooks: Map<String, YXmlDomHook> = emptyMap(),
+        binding: YXmlDomBinding? = null,
+    ): Node = xmlToDom(this, document, hooks, binding)
+
     public fun insertAfter(ref: Any?, content: List<Any?>) {
         xmlInsertAfter(this, ref, content)
     }
@@ -1311,7 +1369,7 @@ internal fun readXmlNodeValue(decoder: BinaryDecoder): YXmlNodeValue = when (val
                 put(decoder.readString(), readYValue(decoder))
             }
         }.toSortedMap()
-        val children = List(decoder.readVarUInt().toDecodedCount()) { readXmlNodeValue(decoder) }
+        val children = buildDecodedList(decoder.readVarUInt().toDecodedCount()) { readXmlNodeValue(decoder) }
         YXmlNodeValue.Element(nodeName, attributes, children)
     }
     2 -> {
@@ -1343,23 +1401,28 @@ internal fun AbstractYType.xmlNodeNameOrEmpty(): String = when (this) {
 }
 
 internal fun ItemContent.isXmlSequenceChild(): Boolean =
-    this is ItemContent.XmlNode || this is ItemContent.XmlType
+    this is ItemContent.XmlNode ||
+        this is ItemContent.XmlType ||
+        (this is ItemContent.Text && kind in setOf(RootKind.XmlFragment, RootKind.XmlElement))
 
 internal fun ItemContent.toXmlEventJson(doc: YDoc): Any? = when (this) {
     is ItemContent.XmlNode -> value.toNode().toJson()
     is ItemContent.XmlType -> doc.typeFromXmlType(this).toJson()
+    is ItemContent.Text -> value
     else -> error("item content is not an XML child: ${this::class.simpleName}")
 }
 
 internal fun ItemContent.toXmlString(doc: YDoc): String = when (this) {
     is ItemContent.XmlNode -> value.toNode().toString()
     is ItemContent.XmlType -> doc.typeFromXmlType(this).toString()
+    is ItemContent.Text -> renderXmlText(value, textAttributesToPublic(attributes))
     else -> error("item content is not an XML child: ${this::class.simpleName}")
 }
 
 internal fun ItemContent.toXmlChild(doc: YDoc): Any? = when (this) {
     is ItemContent.XmlNode -> value.toNode()
     is ItemContent.XmlType -> doc.typeFromXmlType(this)
+    is ItemContent.Text -> YXmlText(value, textAttributesToPublic(attributes))
     else -> error("item content is not an XML child: ${this::class.simpleName}")
 }
 
@@ -1373,6 +1436,7 @@ internal fun ItemContent.toXmlNode(doc: YDoc): YXmlNode = when (this) {
         is YXmlFragment -> YXmlText(type.toString())
         else -> YXmlText("[object Object]")
     }
+    is ItemContent.Text -> YXmlText(value, textAttributesToPublic(attributes))
     else -> error("item content is not an XML fragment child: ${this::class.simpleName}")
 }
 
@@ -1447,6 +1511,36 @@ private fun xmlQuerySelectorAll(parent: YXmlSharedType, query: String): List<Any
             else -> false
         }
     }.toList()
+}
+
+private fun xmlToDom(
+    value: Any?,
+    document: Document,
+    hooks: Map<String, YXmlDomHook>,
+    binding: YXmlDomBinding?,
+): Node = when (value) {
+    is YXmlFragment -> document.createDocumentFragment().also { fragment ->
+        binding?._createAssociation(fragment, value)
+        value.toArray().forEach { child -> fragment.appendChild(xmlToDom(child, document, hooks, binding)) }
+    }
+    is YXmlElementType -> document.createElement(value.nodeName).also { element ->
+        value.getAttributes().forEach { (key, attributeValue) ->
+            if (attributeValue is String) element.setAttribute(key, attributeValue)
+        }
+        value.toArray().forEach { child -> element.appendChild(xmlToDom(child, document, hooks, binding)) }
+        binding?._createAssociation(element, value)
+    }
+    is YXmlHook -> value.toDOM(document, hooks, binding)
+    is YXmlTextType -> value.toDOM(document, hooks, binding)
+    is YXmlElement -> document.createElement(value.nodeName).also { element ->
+        value.getAttributes().forEach { (key, attributeValue) ->
+            if (attributeValue is String) element.setAttribute(key, attributeValue)
+        }
+        value.toArray().forEach { child -> element.appendChild(xmlToDom(child, document, hooks, binding)) }
+    }
+    is YXmlText -> value.toDOM(document)
+    is YXmlSnapshotText -> document.createTextNode(value.toString())
+    else -> error("unsupported XML DOM child: ${value?.let { it::class.qualifiedName } ?: "null"}")
 }
 
 private fun xmlInsertAfter(parent: YXmlSharedType, ref: Any?, content: List<Any?>) {

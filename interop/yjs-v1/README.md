@@ -1,7 +1,7 @@
 # Yjs V1/V2 interoperability harness
 
 This directory is the external compatibility oracle for the Kotlin update
-codec. It is pinned to Yjs `13.6.31` and uses fixed client IDs so committed
+codec. It is pinned to Yjs `13.6.32` and uses fixed client IDs so committed
 fixture bytes are deterministic.
 
 Install dependencies, regenerate fixtures, and run the JavaScript checks:
@@ -12,9 +12,8 @@ npm run interop:generate
 npm run test:interop
 ```
 
-The Node suite currently contains 92 tests. This number includes fixture
-semantics, upstream self-roundtrips, and verifier regression tests; it does not
-mean that all 92 tests execute Kotlin code.
+The Node suite includes fixture semantics, upstream self-roundtrips, and
+verifier regressions; Kotlin-facing cases run through `interopTest`.
 
 Run the Kotlin-facing compatibility gate, or the complete Gradle gate:
 
@@ -89,9 +88,10 @@ compares the final state with the upstream oracle.
 `generate-advanced-differential-fuzz.mjs` adds 100 deterministic upstream
 oracle seeds for live XML, subdocument replacement and lifecycle state,
 relative positions across edits, update V2 merge/diff/format conversion, and
-UndoManager undo/redo sequences. A separate 1,000-seed malformed V1/V2
-property test requires every failure to remain within the stable `YksException`
-public boundary and applies a per-test timeout.
+UndoManager undo/redo sequences. A separate corpus mutates 1,000 seeds in both
+V1 and V2 and compares upstream/local acceptance, resulting text, and state
+vectors. Another 200-seed corpus combines formatted text, embeds, complex
+nested types, direct/deep events, snapshots, and GC.
 
 ## Fixture policy
 
@@ -105,13 +105,14 @@ regenerates fixtures and fails if the working tree changes.
 Upstream-named writer APIs are standard-only. Unsupported Kotlin-only shapes
 throw `UnsupportedYjsStandardUpdateException`; the corresponding explicit
 `*Lossless` APIs may use a private YKS envelope instead of dropping data. The
-latest private version is `YKS\x04`; the writer selects `YKS\x02` through
-`YKS\x04` according to the metadata required, while the reader accepts
-`YKS\x01` through `YKS\x04`. JavaScript Yjs cannot apply those envelopes.
+latest private version is `YKS\x05`; the writer selects `YKS\x02` through
+`YKS\x05` according to the metadata required, while the reader accepts
+`YKS\x01` through `YKS\x05`. JavaScript Yjs cannot apply those envelopes.
 Current lossless-only cases include compact/static XML, root-fragment
 attributes, and nonstandard subdocument options such as `collectionId` or
-suggestion metadata. All apply and decode APIs accept both standard and private
-input.
+suggestion metadata. Standard apply/decode/metadata APIs reject private input;
+only explicitly named `*Lossless` APIs accept it. `applyUpdateV2` parses only
+the V2 envelope and does not silently retry V1.
 
 Root XML kind and a root element node name are absent from Yjs wire. An applied
 ambiguous root remains unopened until an explicit typed getter supplies that

@@ -1,169 +1,89 @@
 # Yjs compatibility
 
-YKS targets Yjs `13.6.32`. It is a Kotlin/JVM implementation of the Yjs
-document model and update protocol, not a byte-for-byte or object-model clone
-of the JavaScript package.
+YKS의 안정 기준은 Yjs `13.6.32`이다. `@y/y` `14.0.0-rc.24`는 정식 API
+호환 대상이 아니라 V1/V2 wire 회귀 대상으로 함께 검증한다. YKS는 JavaScript 객체의
+복제품이 아니라 Kotlin/JVM 문서 엔진이다.
 
-## Compatibility statement
+## 보장 범위
 
-- Genuine Yjs update V1 and V2 are the interoperability boundary.
-- The main shared types, transactions, observers, snapshots, relative
-  positions, undo management, subdocuments, XML model operations, update
-  transforms, and garbage collection are implemented and tested against
-  upstream Yjs.
-- All 103 names exported by Yjs `13.6.32` have a Kotlin mapping or a documented
-  JVM adaptation.
-- There is no known core wire-format or CRDT-convergence blocker in the tested
-  surface.
-- JavaScript callback shapes, mutable internal structs, and browser DOM APIs are
-  not reproduced exactly.
+- 표준 이름의 V1/V2 apply·decode·metadata·merge·diff·convert API는 실제 Yjs
+  envelope만 처리한다. `applyUpdateV2`는 V1으로 재시도하지 않는다.
+- `*Lossless` API만 compact XML, 추가 subdocument 옵션 등 Kotlin 전용 상태를
+  보존하기 위해 private `YKS` envelope를 사용할 수 있다. 이 바이트를 Yjs로 보내면
+  안 된다.
+- array, map, formatted text/embed, live XML, root `XmlText`/`XmlHook`, nested type,
+  subdocument, transaction/observer, snapshot, relative position, UndoManager, GC와 update
+  transform을 구현한다.
+- XML 타입은 JVM W3C DOM 기반 `toDOM`과 hook/binding association을 제공한다.
 
-The independent export audit classified the 103 upstream names as follows:
+Yjs V1 decoder가 V2 바이트를 빈 업데이트로 받아들이는 동작, V2의 예약 feature 값을
+무시하는 동작, lib0 V2 substream의 잘린 typed-array 동작과 zero-length
+`ContentString` Item도 upstream oracle과 동일하게 처리한다.
 
-| Classification | Count | Meaning |
-| --- | ---: | --- |
-| Direct equivalent on the normal path | 49 | No concrete behavior difference was found in the audited path. |
-| Kotlin/default-codec adaptation | 18 | The operation exists, with Kotlin signatures or the built-in encoder/decoder path. |
-| Non-identical public or internal contract | 32 | A mapping exists, but its object shape or secondary behavior is intentionally different. |
-| XML type with browser-only surface omitted | 4 | XML document behavior exists; browser DOM creation does not. |
-| **Total** | **103** | Every upstream export was classified exactly once. |
+## 공개 객체 표면
 
-## Tested guarantees
+`event.changes.added/deleted`는 `Set<Item>`이며 같은 transaction 안에서 안정적인 Item
+view를 돌려준다. compact 범위가 필요한 Kotlin 호출자는 `addedIds/deletedIds`를 쓸 수
+있다. Item view에는 `left/right`, 삭제 항목을 건너뛰는 `prev/next`, `lastId`, `redone`,
+`keep`, `parentType`이 있다. 활성 `Transaction`은 Yjs 형태의 `changed` map과 subdocument
+set을 노출한다.
 
-CI regenerates fixtures with upstream Yjs and the pinned Yrs `0.27.2` crate and
-verifies:
+Yjs 14 RC.24의 `AbstractRenderer`, `AttributionsRenderer`, `DiffRenderer`,
+`SnapshotRenderer`와 세 factory 이름을 매핑한다. RC.7 계열에서 쓰였던 attribution-manager
+별칭과 기존 `TwosetRenderer`도 호환 확장으로 유지한다.
 
-- update V1 and V2 encode, decode, apply, merge, diff, convert, obfuscate, and
-  state-vector operations;
-- arrays, maps, rich text, embeds, live XML, subdocuments, delete sets, GC,
-  snapshots, relative positions, typed/direct/deep events, and undo/redo;
-- out-of-order and concurrent delivery, including 500 deterministic
-  array/text/map seeds, 100 advanced XML/subdocument/relative-position/V2/
-  UndoManager seeds, and 1,000 malformed V1/V2 seeds;
-- Kotlin-produced updates applied by Yjs, and Yjs-produced updates applied by
-  Kotlin;
-- a deterministic application-shaped fixture containing a nested question map,
-  JSON AnswerDoc metadata, Korean/non-BMP text, and Tiptap-shaped XML with
-  boolean, numeric, and array attributes in both directions;
-- publication to a Maven repository followed by a clean standalone consumer
-  build and cross-document update round trip with Kotlin 2.2.20 and Norric's
-  Kotlin 2.3.21 baseline.
+Kotlin의 `Item`/`Transaction` view는 document store를 안전하게 조회하는 JVM adapter다.
+Yjs 내부 객체를 임의로 재연결하거나 decoder 결과를 transaction에 직접 integrate하는
+mutable 내부 메서드는 제공하지 않는다. `decodeUpdate*`의 `structs`는 변환에 쓰는 DTO이고
+`items`는 Yjs 형태의 read-only Item view다. 이 차이는 wire/CRDT 의미 차이가 아니다.
 
-The independent Yrs oracle checks both directions: Yrs-produced V1/V2 updates
-are applied by Kotlin, and Kotlin-produced updates are applied by Yrs. Its
-deterministic compatibility profile uses `OffsetKind::Utf16`, retained deleted
-content, and explicit client IDs. It covers non-BMP text edits and reverse
-delivery, nested and binary values, concurrent insertion permutations,
-JavaScript-safe 53-bit client IDs, and the out-of-order pending/Skip/delete
-regressions fixed through Yrs `0.27.2`.
+## Yjs 14 RC
 
-The upstream-named update APIs return genuine Yjs bytes or fail explicitly when
-a Kotlin-only state cannot be represented. APIs ending in `Lossless` may use a
-private `YKS` envelope and must not be sent to JavaScript Yjs.
+v14는 기존 여러 shared type을 하나의 `Type` API로 합친다. YKS는 기존 typed getter를
+유지하되 v14가 XML 요소 아래에 직접 기록하는 `ContentString`도 XML text child로
+materialize한다. 자동 매트릭스는 다음 네 경로를 V1과 V2 각각 검사한다.
 
-## Intentional differences
+1. Yjs 14 → Yjs 13
+2. Yjs 13 → Yjs 14
+3. Yjs 14 → Kotlin
+4. Kotlin → Yjs 14
 
-1. Kotlin names and callbacks
-   - `YArray` and `YMap` avoid collisions with Kotlin's `Array` and `Map`.
-   - `Transaction` maps to the active `YTransaction`; completed observer data is
-     exposed as `TransactionEvent` / `YTransactionEvent`.
-   - Typed and deep event-list callbacks are available through Kotlin-specific
-     observer helpers rather than JavaScript's exact callback types.
+text formatting/non-BMP 문자열, array, map attribute, nested XML element와 direct XML
+text를 결과 의미까지 비교하며 Yjs 14 → Kotlin → Yjs 14 재인코딩도 확인한다. RC API는
+변경될 수 있으므로 새 RC를 대상으로 주장하려면 alias pin과 매트릭스를 함께 갱신해야 한다.
 
-2. Internal object model
-   - `Item`, `GC`, `Skip`, `AbstractStruct`, and `Content*` expose the wire and
-     inspection information needed by YKS, but not Yjs's complete mutable linked
-     object graph or every internal method.
-   - `decodeUpdate*` returns Kotlin decoded-struct DTOs. `logType` and
-     `logUpdate*` return strings instead of writing to a JavaScript console.
-   - Optional custom V2 encoder/decoder constructor injection is represented by
-     the built-in codec path rather than JavaScript constructor parity.
-   - Legacy wire `ContentJSON` and modern `ContentAny` both normalize to YKS
-     value items. Their values are preserved, but the original constructor
-     distinction is unavailable for the rare case where it alone prevents an
-     upstream cleanup merge.
-   - Adjacent UTF-16 text is retained as packed `ContentString` storage and is
-     split only at edit, delete, snapshot, or update-selection boundaries. A
-     valid encoder may choose different packing without changing clock or CRDT
-     semantics.
-   - Packed deleted items merge conservatively when YKS-specific structural
-     metadata differs. This may retain more internal store structs than Yjs in
-     order to preserve relative-position and private-wire metadata.
+## 자원 한계와 malformed 입력
 
-3. JVM platform boundary
-   - Live XML selectors, insertion, attributes, snapshots, and serialization are
-     supported. Browser `toDOM` is not available on the JVM.
-   - YKS also provides compact/static XML values that are Kotlin extensions,
-     separate from live document-owned XML types.
+Yjs에는 transport 정책 제한이 없다. 따라서 기본 `YUpdateLimits`는 JVM 표현 한계인
+`Int.MAX_VALUE`까지 허용하며, 16 MiB/50,000 struct 같은 YKS 전용 기본 거절 기준은 없다.
+애플리케이션은 신뢰하지 않는 채널에 더 작은 document별 값을 명시할 수 있다.
 
-4. Wire-level ambiguity and extensions
-   - Yjs updates do not encode a root shared-type kind or a root `XmlElement`
-     node name. Remote ambiguous roots remain unopened until a typed getter
-     supplies that schema.
-   - Kotlin-only subdocument options and compact XML require explicit lossless
-     APIs. Standard APIs never silently place private bytes on a Yjs channel.
-   - Text callbacks and attribution are evaluated on logical UTF-16 clocks even
-     when the underlying `ContentString` remains packed.
+decoder는 wire count를 collection 용량으로 선할당하지 않는다. 잘린 대형 count는 실제
+첫 read에서 실패하므로 정상 대형 업데이트에 임의 상한을 두지 않으면서 OOM 유도도
+피한다. byte array/collection index는 JVM `Int`, clock은 non-negative `Long` 범위에서
+검증된다. malformed 공개 경계는 `YksDecodingException`, 명시적 정책 초과는
+`YksUpdateLimitException`이다.
 
-5. Yrs-specific runtime extensions
-   - Yrs defaults text indexes to UTF-8 byte offsets, while Yjs and YKS use
-     UTF-16 code units. Cross-runtime tests explicitly select Yrs UTF-16 mode.
-   - Yrs-only weak links, query/runtime synchronization APIs, and extra encoded
-     subdocument options are not part of the Yjs `13.6.32` compatibility claim.
-   - Update encoders may choose different valid struct packing. Cross-runtime
-     generated updates are compared by state-vector and document semantics;
-     byte identity is required only when regenerating a fixture with the same
-     pinned producer.
+## 검증
 
-Applications that communicate with JavaScript Yjs should stay on the standard
-V1/V2 APIs and use explicit typed getters for remotely created roots. Kotlin-only
-peers may additionally opt into the lossless and extension APIs.
+CI와 로컬 gate는 설치된 oracle 버전을 실행 전에 exact pin과 대조한다. 현재 검증에는
+다음이 포함된다.
 
-`YDoc` and attached shared types are thread-confined mutable objects, matching
-the Yjs execution model. The default `ENFORCED` policy lazily binds the document
-on its first CRDT operation and rejects other threads with
-`YksThreadConfinementException`. `EXTERNALLY_SERIALIZED` is the safe coroutine
-integration policy: sequential calls may resume on different JVM threads, while
-overlap in transactions, update application/encoding, snapshots, and destroy is
-rejected with `YksConcurrentAccessException`. It is fail-fast and does not add
-internal locking. `UNCHECKED` remains an explicit no-check escape hatch. JVM
-applications without external serialization should use encoded bytes or copied
-snapshots as hand-off values.
+- 500 seed concurrent array/text/map;
+- 100 seed XML/subdocument/relative-position/V2/UndoManager;
+- 200 seed formatted text/embed, complex nested type, direct/deep event, snapshot, GC;
+- V1과 V2 각각 1,000 malformed seed의 accept/reject, 결과 text, state vector 비교;
+- root `XmlText`/`XmlHook`, W3C DOM, standard/private 경계와 v14 양방향 matrix;
+- Yrs `0.27.2` UTF-16 mode 양방향 fixture와 publication consumer smoke test.
 
-Registering a standard V1/V2 update listener makes local transactions atomic at
-the standard-wire boundary. A Kotlin-only mutation that cannot produce a
-genuine Yjs update is rolled back before type, standard, or lossless observer
-delivery. `YStandardUpdatePolicy.REQUIRE_STANDARD` applies the same rule even
-without a listener and is the intended Hocuspocus/server mode. This policy does
-not change remote update semantics or permit private `YKS` envelopes on a
-standard channel.
+## 플랫폼·생태계 경계
 
-Yjs itself does not impose transport resource limits. YKS adds configurable
-`YUpdateLimits` at the document-application boundary as a secure JVM adaptation.
-Encoded byte, decoded struct, and delete-range limits are enforced before
-mutation, so a rejected V1/V2 update leaves document and pending-delete state
-unchanged. This means a valid but over-limit Yjs update must be chunked or
-applied to a document configured with a larger budget. Malformed
-update/state-vector payloads use the stable
-`YksDecodingException` boundary, while limit and thread violations have their
-own typed exceptions.
+Yjs wire에는 root shared-type kind와 root `XmlElement` 이름이 없다. 모호한 원격 root는
+typed getter가 schema를 줄 때 materialize하며 clone/snapshot은 로컬에서 아는 root
+metadata를 보존한다.
 
-## Evaluated JVM alternatives
-
-On 2026-07-31, `y-crdt/ykt` and
-`edpaget/y-crdt-jni` at commit
-`4bb731294b773eb12360a8bc91c0beec1e1da7de` were reassessed as possible
-replacements:
-
-- `y-crdt/ykt` is explicitly inactive and has no published release.
-- `net.carcdr:ycrdt-jni:0.3.0` is a Java/JNI binding over Rust Yrs, not a
-  pure-Kotlin implementation. It remains useful as an independent reference
-  and oracle, but would add native ABI, packaging, and upstream-maintenance
-  dependencies to YKS consumers.
-- Its relevant regression themes—non-BMP strings, typed XML attributes,
-  observer failure isolation, subscription cleanup, and document concurrency—
-  are already covered by YKS's genuine Yjs fixtures, typed XML/AnswerDoc
-  round trips, callback snapshots, and fail-fast thread-confinement policies.
-
-Neither project is a YKS build or runtime dependency. No source was copied from
-them during this assessment.
+Awareness, WebSocket/WebRTC provider, ProseMirror/Tiptap/CodeMirror binding은 Yjs core
+패키지 자체가 아니라 별도 JavaScript 생태계 모듈이다. YKS가 그 모듈을 JVM에서
+재구현한다고 주장하지 않는다. `YDoc`과 attached type은 기본적으로 thread-confined이며,
+서버/coroutine 환경은 `EXTERNALLY_SERIALIZED` 정책으로 중첩·동시 접근을 fail-fast하게
+검사할 수 있다.

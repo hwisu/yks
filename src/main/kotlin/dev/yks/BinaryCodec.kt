@@ -4,11 +4,14 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 
-internal const val MAX_DECODED_COLLECTION_SIZE: Int = 1_000_000
-internal const val MAX_DECODED_BINARY_SIZE: Int = 64 * 1024 * 1024
-internal const val MAX_DECODED_NESTING_DEPTH: Int = 256
-internal const val MAX_DECODED_VALUE_NODES: Int = 1_000_000
-internal const val MAX_DECODED_TOTAL_PAYLOAD_SIZE: Long = 128L * 1024 * 1024
+// These are representation limits, not policy limits. A standard Yjs update must not be
+// rejected merely because it crosses a YKS-specific safety threshold. Applications that accept
+// untrusted updates can opt in to smaller, document-level limits through YUpdateLimits.
+internal const val MAX_DECODED_COLLECTION_SIZE: Int = Int.MAX_VALUE
+internal const val MAX_DECODED_BINARY_SIZE: Int = Int.MAX_VALUE
+internal const val MAX_DECODED_NESTING_DEPTH: Int = Int.MAX_VALUE
+internal const val MAX_DECODED_VALUE_NODES: Int = Int.MAX_VALUE
+internal const val MAX_DECODED_TOTAL_PAYLOAD_SIZE: Long = Long.MAX_VALUE
 
 internal class DecodeBudget {
     private var depth = 0
@@ -49,6 +52,13 @@ internal fun Long.toDecodedCount(
 ): Int {
     check(this >= 0 && this <= maximum.toLong()) { "$label exceeds limit $maximum: $this" }
     return toInt()
+}
+
+/** Build a decoded collection without trusting an untrusted wire count as an allocation size. */
+internal inline fun <T> buildDecodedList(count: Int, read: (Int) -> T): MutableList<T> {
+    val values = ArrayList<T>()
+    repeat(count) { index -> values.add(read(index)) }
+    return values
 }
 
 internal fun checkedClockAdd(left: Long, right: Long, label: String = "clock"): Long {
@@ -168,17 +178,21 @@ public class BinaryEncoder {
     public fun toByteArray(): ByteArray = out.toByteArray()
 }
 
-public class BinaryDecoder(
+public class BinaryDecoder private constructor(
     private val bytes: ByteArray,
+    private val start: Int,
+    private val limit: Int,
 ) {
+    public constructor(bytes: ByteArray) : this(bytes, 0, bytes.size)
+
     internal val decodeBudget: DecodeBudget = DecodeBudget()
 
-    private var offset = 0
+    private var offset = start
 
-    public fun hasRemaining(): Boolean = offset < bytes.size
+    public fun hasRemaining(): Boolean = offset < limit
 
     public fun readByte(): Int {
-        check(offset < bytes.size) { "unexpected end of input" }
+        check(offset < limit) { "unexpected end of input" }
         return bytes[offset++].toInt() and 0xff
     }
 
@@ -223,9 +237,43 @@ public class BinaryDecoder(
         return sign * result to (sign < 0)
     }
 
-    public fun readString(): String {
-        val length = readVarUInt().toDecodedCount("string byte length", minOf(MAX_DECODED_BINARY_SIZE, bytes.size - offset))
+    /** lib0 coerces an out-of-view first varint byte from `undefined` to zero. */
+    internal fun readLib0VarIntWithSignOrZero(): Pair<Long, Boolean> {
+        var byte = readByteOrZero()
+        var result = (byte and 0x3f).toLong()
+        var multiplier = 64L
+        val sign = if ((byte and 0x40) != 0) -1 else 1
+        while ((byte and 0x80) != 0 && offset < limit) {
+            byte = readByte()
+            result += (byte and 0x7f) * multiplier
+            check(multiplier <= Long.MAX_VALUE / 128) { "varint is too large" }
+            multiplier *= 128
+        }
+        check((byte and 0x80) == 0) { "unexpected end of input" }
+        return sign * result to (sign < 0)
+    }
+
+    internal fun readByteOrZero(): Int =
+        if (offset < limit) bytes[offset++].toInt() and 0xff else 0.also { offset++ }
+
+    /**
+     * lib0's readUint8Array constructs a new typed-array view without checking the current view's
+     * end. It can therefore read a declared string from the shared backing buffer even when the
+     * substream itself ends immediately after the length prefix.
+     */
+    internal fun readLib0StringFromBacking(): String {
+        val length = readVarUInt().toDecodedCount(
+            "string byte length",
+            minOf(MAX_DECODED_BINARY_SIZE, bytes.size - offset),
+        )
         check(length <= bytes.size - offset) { "invalid string length: $length" }
+        decodeBudget.consumePayloadBytes(length)
+        return decodeUtf8(offset, length).also { offset += length }
+    }
+
+    public fun readString(): String {
+        val length = readVarUInt().toDecodedCount("string byte length", minOf(MAX_DECODED_BINARY_SIZE, limit - offset))
+        check(length <= limit - offset) { "invalid string length: $length" }
         decodeBudget.consumePayloadBytes(length)
         var ascii = true
         for (index in offset until offset + length) {
@@ -237,22 +285,26 @@ public class BinaryDecoder(
         val value = if (ascii) {
             String(bytes, offset, length, Charsets.US_ASCII)
         } else {
-            val decoder = Charsets.UTF_8.newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-            try {
-                decoder.decode(ByteBuffer.wrap(bytes, offset, length)).toString()
-            } catch (error: java.nio.charset.CharacterCodingException) {
-                throw IllegalStateException("invalid UTF-8 string", error)
-            }
+            decodeUtf8(offset, length)
         }
         offset += length
         return value
     }
 
+    private fun decodeUtf8(offset: Int, length: Int): String {
+        val decoder = Charsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        return try {
+            decoder.decode(ByteBuffer.wrap(bytes, offset, length)).toString()
+        } catch (error: java.nio.charset.CharacterCodingException) {
+            throw IllegalStateException("invalid UTF-8 string", error)
+        }
+    }
+
     public fun readBytes(): ByteArray {
-        val length = readVarUInt().toDecodedCount("byte array length", minOf(MAX_DECODED_BINARY_SIZE, bytes.size - offset))
-        check(length <= bytes.size - offset) { "invalid byte array length: $length" }
+        val length = readVarUInt().toDecodedCount("byte array length", minOf(MAX_DECODED_BINARY_SIZE, limit - offset))
+        check(length <= limit - offset) { "invalid byte array length: $length" }
         decodeBudget.consumePayloadBytes(length)
         val value = bytes.copyOfRange(offset, offset + length)
         offset += length
@@ -278,9 +330,21 @@ public class BinaryDecoder(
     }
 
     public fun readRemainingBytes(): ByteArray {
-        decodeBudget.consumePayloadBytes(bytes.size - offset)
-        val value = bytes.copyOfRange(offset, bytes.size)
-        offset = bytes.size
+        decodeBudget.consumePayloadBytes(limit - offset)
+        val value = bytes.copyOfRange(offset, limit)
+        offset = limit
         return value
     }
+
+    internal fun readDecoderView(): BinaryDecoder {
+        val length = readVarUInt().toDecodedCount("byte array length", minOf(MAX_DECODED_BINARY_SIZE, limit - offset))
+        check(length <= limit - offset) { "invalid byte array length: $length" }
+        decodeBudget.consumePayloadBytes(length)
+        val view = BinaryDecoder(bytes, offset, offset + length)
+        offset += length
+        return view
+    }
+
+    internal fun readRemainingDecoderView(): BinaryDecoder =
+        BinaryDecoder(bytes, offset, limit).also { offset = limit }
 }

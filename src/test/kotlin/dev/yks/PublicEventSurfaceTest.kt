@@ -9,6 +9,28 @@ import kotlin.test.assertTrue
 
 class PublicEventSurfaceTest {
     @Test
+    fun eventItemsAreStableLinkedViewsOfTheDocumentStore() {
+        val doc = YDoc(clientId = 1)
+        val array = doc.getArray("items")
+        lateinit var event: YArrayEvent
+        array.observeTyped { observed -> event = observed }
+
+        array.push(byteArrayOf(1), byteArrayOf(2))
+
+        val firstRead = event.changes.added.sortedBy { item -> item.id.clock }
+        val secondRead = event.changes.added.associateBy { item -> item.id }
+        assertEquals(2, firstRead.size)
+        assertSame(firstRead[0], secondRead[firstRead[0].id])
+        assertEquals(firstRead[1].id, firstRead[0].right?.id)
+        assertEquals(firstRead[1].id, firstRead[0].next?.id)
+        assertEquals(firstRead[0].id, firstRead[1].left?.id)
+        assertEquals(firstRead[0].id, firstRead[1].prev?.id)
+        assertSame(array, firstRead[0].parentType)
+        firstRead[0].keep = true
+        assertTrue(firstRead[0].keep)
+    }
+
+    @Test
     fun observeTypedAdaptsConcreteSharedTypeEventsWithoutChangingRawObservers() {
         val doc = YDoc(clientId = 1)
         val array = doc.getArray("array")
@@ -178,7 +200,8 @@ class PublicEventSurfaceTest {
         }
 
         val changes = events.single().changes
-        assertEquals(1L, changes.added.ranges().sumOf { (_, range) -> range.len })
+        assertEquals(1, changes.added.size)
+        assertEquals(Id(1, 0), changes.added.single().id)
         assertTrue(changes.deleted.isEmpty())
     }
 

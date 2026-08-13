@@ -1,6 +1,6 @@
 {
   "fixture": "hello-text-v1",
-  "yjsVersion": "13.6.31",
+  "yjsVersion": "13.6.32",
   "clientId": 1,
   "updateBase64": "AQEBAAQBBGJvZHkFaGVsbG8A",
   "text": "hello",

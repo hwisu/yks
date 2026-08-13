@@ -124,6 +124,37 @@ class RendererTest {
     }
 
     @Test
+    fun attributionsRendererMatchesYjs14RenderedContentSemantics() {
+        val author = createContentAttribute("author", "local")
+        val attributions = createContentMap(
+            inserts = createIdMap().also { map -> map.add(1, 1, 1, listOf(author)) },
+        )
+        val visible = createIdSet().also { ids -> ids.add(1, 0, 1) }
+        val renderer = createAttributionsRenderer(
+            attributions,
+            AttributionsRendererOptions(renderedContent = visible),
+        )
+        val alive = mutableListOf<AttributedContent>()
+        val deleted = mutableListOf<AttributedContent>()
+        val aliveItem = item(Id(1, 0), length = 3, deleted = false, content = ContentString("abc"))
+        val deletedItem = aliveItem.copy(deleted = true)
+
+        renderer.readContent(alive, 1, 0, deleted = false, ContentString("abc"), renderBehavior = 1)
+        renderer.readContent(deleted, 1, 0, deleted = true, ContentString("abc"), renderBehavior = 1)
+
+        assertEquals(listOf("a", "b"), alive.map { (it.content as ContentString).str })
+        assertEquals(listOf(null, listOf(author)), alive.map { it.attrs })
+        assertEquals(listOf(false, false), alive.map { it.deleted })
+        assertEquals(listOf("a", "b", "c"), deleted.map { (it.content as ContentString).str })
+        assertEquals(listOf(false, true, true), deleted.map { it.deleted })
+        assertEquals(listOf(true, true, false), deleted.map { it.render })
+        assertEquals(2L, renderer.contentLength(aliveItem))
+        assertEquals(2L, renderer.contentLength(deletedItem))
+        assertTrue(renderer.hasItem(aliveItem))
+        assertEquals(`$renderer`, renderer.`$type`)
+    }
+
+    @Test
     fun diffRendererTracksInsertedAndDeletedRangesAndCanAcceptAllChanges() {
         val prev = YDoc(clientId = 1, gc = false)
         val prevText = prev.getText("body")

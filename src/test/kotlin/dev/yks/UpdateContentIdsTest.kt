@@ -209,11 +209,11 @@ class UpdateContentIdsTest {
                 deletes = createIdSet(),
             ),
         )
-        val structs = decodeUpdate(chunk).structs
+        val structs = decodeUpdateLossless(chunk).structs
 
         assertEquals(listOf(Id(1, 5), Id(1, 6)), structs.map { it.id })
         assertEquals(listOf(1L, 1L), structs.map { it.length })
-        assertEquals(mapOf("k5" to 5L, "k6" to 6L), createDocFromUpdate(chunk).getMap("m").toMap())
+        assertEquals(mapOf("k5" to 5L, "k6" to 6L), createDocFromUpdateLossless(chunk).getMap("m").toMap())
 
         val splitChunk = intersectUpdateWithContentIdsLossless(
             update,
@@ -227,7 +227,7 @@ class UpdateContentIdsTest {
         )
         assertEquals(
             listOf(Id(1, 1), Id(1, 2), Id(1, 7)),
-            decodeUpdate(splitChunk).structs.map { it.id },
+            decodeUpdateLossless(splitChunk).structs.map { it.id },
         )
 
         val allSelected = createIdSet().also { selected ->

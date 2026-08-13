@@ -128,7 +128,7 @@ internal fun readLib0Any(decoder: BinaryDecoder): Any? {
             }
         }
         LIB0_ARRAY -> decoder.decodeBudget.nested {
-            List(decoder.readVarUInt().toDecodedCount()) { readLib0Any(decoder) }
+            buildDecodedList(decoder.readVarUInt().toDecodedCount()) { readLib0Any(decoder) }
         }
         LIB0_BINARY -> decoder.readBytes()
         else -> error("unknown lib0 any tag: $tag")

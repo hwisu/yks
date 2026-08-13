@@ -245,7 +245,7 @@ internal object LegacyUpdateCodec {
                 length = decoder.readVarUInt(),
                 attributes = readAttributes(decoder),
                 afterAttributes = readAttributes(decoder),
-                beforeAttributes = List(decoder.readVarUInt().toDecodedCount()) { readAttributes(decoder) },
+                beforeAttributes = buildDecodedList(decoder.readVarUInt().toDecodedCount()) { readAttributes(decoder) },
             )
             7 -> {
                 val kind = readRootKind(decoder)
@@ -278,7 +278,7 @@ internal object LegacyUpdateCodec {
                     length = decoder.readVarUInt(),
                     attributes = readAttributes(decoder),
                     afterAttributes = readAttributes(decoder),
-                    beforeAttributes = List(decoder.readVarUInt().toDecodedCount()) { readAttributes(decoder) },
+                    beforeAttributes = buildDecodedList(decoder.readVarUInt().toDecodedCount()) { readAttributes(decoder) },
                     kind = kind,
                 )
             }

@@ -147,17 +147,18 @@ class UpdateApiTest {
         assertTrue(privateUpdate.hasPrivateUpdateMagic())
         assertTrue(merged.hasPrivateUpdateMagic())
         assertFalse(merged === privateUpdate)
-        assertEquals("<p>private</p>", createDocFromUpdateV2(merged).getXmlFragment("xml").toString())
+        assertEquals("<p>private</p>", createDocFromUpdateV2Lossless(merged).getXmlFragment("xml").toString())
     }
 
     @Test
-    fun mergeUpdatesV2NormalizesEmptyAndDeleteOnlyV1Inputs() {
+    fun standardV2UtilitiesRejectV1WhileLosslessUtilitiesNormalizeIt() {
         val emptyV1 = encodeStateAsUpdate(YDoc(clientId = 1))
         val expectedEmptyV2 = encodeStateAsUpdateV2(YDoc(clientId = 2))
 
-        assertContentEquals(expectedEmptyV2, mergeUpdatesV2(listOf(emptyV1)))
+        assertFailsWith<YksDecodingException> { mergeUpdatesV2(listOf(emptyV1)) }
         assertContentEquals(expectedEmptyV2, mergeUpdatesV2Lossless(listOf(emptyV1)))
-        assertEquals(UpdateMeta(emptyMap(), emptyMap()), parseUpdateMetaV2(emptyV1))
+        assertFailsWith<YksDecodingException> { parseUpdateMetaV2(emptyV1) }
+        assertEquals(UpdateMeta(emptyMap(), emptyMap()), parseUpdateMetaV2Lossless(emptyV1))
 
         val source = YDoc(clientId = 3)
         val text = source.getText("body")
@@ -168,16 +169,15 @@ class UpdateApiTest {
         text.delete(0, 1)
         val deleteOnlyV1 = deleteUpdates.single()
 
-        val normalized = listOf(
-            mergeUpdatesV2(listOf(deleteOnlyV1)),
-            mergeUpdatesV2Lossless(listOf(deleteOnlyV1)),
-        )
+        assertFailsWith<YksDecodingException> { mergeUpdatesV2(listOf(deleteOnlyV1)) }
+        val normalized = listOf(mergeUpdatesV2Lossless(listOf(deleteOnlyV1)))
         normalized.forEach { update ->
             val target = createDocFromUpdate(baseline)
             applyUpdateV2(target, update)
             assertEquals("", target.getText("body").toString())
         }
-        assertEquals(UpdateMeta(emptyMap(), emptyMap()), parseUpdateMetaV2(deleteOnlyV1))
+        assertFailsWith<YksDecodingException> { parseUpdateMetaV2(deleteOnlyV1) }
+        assertEquals(UpdateMeta(emptyMap(), emptyMap()), parseUpdateMetaV2Lossless(deleteOnlyV1))
     }
 
     @Test
@@ -204,7 +204,7 @@ class UpdateApiTest {
             mergeUpdatesV2Lossless(listOf(losslessV2, strictV2)) to true,
         ).forEach { (update, isV2) ->
             assertTrue(update.hasPrivateUpdateMagic())
-            val restored = if (isV2) createDocFromUpdateV2(update) else createDocFromUpdate(update)
+            val restored = if (isV2) createDocFromUpdateV2Lossless(update) else createDocFromUpdateLossless(update)
             assertEquals(5L, restored.getMap("map").get("k5"))
         }
     }
@@ -341,9 +341,13 @@ class UpdateApiTest {
         val partialDiff = diffUpdate(partialClient.encodeStateAsUpdate(), partialState)
 
         val merged = mergeUpdates(listOf(fullClient.encodeStateAsUpdate(), partialDiff))
+        val mergedV2 = convertUpdateFormatV1ToV2(merged)
 
         assertEquals(mapOf(1L to 2L), decodeStateVector(encodeStateVectorFromUpdate(merged)))
-        assertEquals(decodeStateVector(encodeStateVectorFromUpdateV2(merged)), decodeStateVector(encodeStateVectorFromUpdate(merged)))
+        assertEquals(
+            decodeStateVector(encodeStateVectorFromUpdateV2(mergedV2)),
+            decodeStateVector(encodeStateVectorFromUpdate(merged)),
+        )
     }
 
     @Test
@@ -365,12 +369,12 @@ class UpdateApiTest {
         assertContentEquals(source.encodeStateAsUpdate(), fullEncoder.toByteArray())
         assertSame(diffEncoder, returnedDiff)
         assertContentEquals(
-            source.encodeStateAsUpdate(encodeStateVector(stateAfterFirst)),
+            source.encodeStateAsUpdateV2(encodeStateVector(stateAfterFirst)),
             diffEncoder.toByteArray(),
         )
         val genuineV2 = writeStateAsUpdateV2(UpdateEncoderV2(), source, stateAfterFirst).toByteArray()
         assertEquals(
-            decodeUpdate(diffEncoder.toByteArray()).structs.map { it.id },
+            decodeUpdateV2(diffEncoder.toByteArray()).structs.map { it.id },
             decodeUpdateV2(genuineV2).structs.map { it.id },
         )
     }
@@ -681,9 +685,9 @@ class UpdateApiTest {
         val update = source.encodeStateAsUpdateLossless()
 
         val obfuscated = obfuscateUpdateLossless(update)
-        val decoded = decodeUpdate(update)
-        val decodedObfuscated = decodeUpdate(obfuscated)
-        val obfuscatedDoc = createDocFromUpdate(obfuscated)
+        val decoded = decodeUpdateLossless(update)
+        val decodedObfuscated = decodeUpdateLossless(obfuscated)
+        val obfuscatedDoc = createDocFromUpdateLossless(obfuscated)
 
         assertEquals(
             decoded.structs.map { it.structuralFields() },
@@ -698,8 +702,8 @@ class UpdateApiTest {
         }.id
         assertTrue(decodedObfuscated.deleteSet.contains(deletedTextId))
         assertEquals(
-            decodeStateVector(encodeStateVectorFromUpdate(update)),
-            decodeStateVector(encodeStateVectorFromUpdate(obfuscated)),
+            decodeStateVector(encodeStateVectorFromUpdateLossless(update)),
+            decodeStateVector(encodeStateVectorFromUpdateLossless(obfuscated)),
         )
         assertNotEquals(source.toJson(), obfuscatedDoc.toJson())
         assertEquals("00000", obfuscatedDoc.getText("body").toString())
@@ -753,8 +757,8 @@ class UpdateApiTest {
             ),
         ))
 
-        val obfuscated = createDocFromUpdate(obfuscateUpdateLossless(source.encodeStateAsUpdateLossless()))
-        val preservedFormatting = createDocFromUpdate(
+        val obfuscated = createDocFromUpdateLossless(obfuscateUpdateLossless(source.encodeStateAsUpdateLossless()))
+        val preservedFormatting = createDocFromUpdateLossless(
             obfuscateUpdateLossless(
                 source.encodeStateAsUpdateLossless(),
                 ObfuscatorOptions(formatting = false),
@@ -788,7 +792,7 @@ class UpdateApiTest {
         source.getXmlFragment("xml").push(YXmlElement("paragraph").also { it.push(YXmlText("hidden")) })
         source.getXmlFragment("live-xml").push(liveElement)
 
-        val obfuscated = createDocFromUpdate(
+        val obfuscated = createDocFromUpdateLossless(
             obfuscateUpdateLossless(
                 source.encodeStateAsUpdateLossless(),
                 ObfuscatorOptions(formatting = false, subdocs = false, name = false),
@@ -915,8 +919,52 @@ class UpdateApiTest {
         val losslessV2 = encodeStateAsUpdateV2Lossless(source)
         assertTrue(losslessV1.hasPrivateUpdateMagic())
         assertTrue(losslessV2.hasPrivateUpdateMagic())
-        assertEquals("<p></p>", createDocFromUpdate(losslessV1).getXmlFragment("xml").toString())
-        assertEquals("<p></p>", createDocFromUpdateV2(losslessV2).getXmlFragment("xml").toString())
+        assertFailsWith<YksDecodingException> { createDocFromUpdate(losslessV1) }
+        assertFailsWith<YksDecodingException> { createDocFromUpdateV2(losslessV2) }
+        assertEquals("<p></p>", createDocFromUpdateLossless(losslessV1).getXmlFragment("xml").toString())
+        assertEquals("<p></p>", createDocFromUpdateV2Lossless(losslessV2).getXmlFragment("xml").toString())
+    }
+
+    @Test
+    fun standardApplyEntryPointsMatchUpstreamFormatBoundaries() {
+        val source = YDoc(clientId = 1)
+        source.getText("body").insert(0, "x")
+        val v1 = source.encodeStateAsUpdate()
+        val v2 = source.encodeStateAsUpdateV2()
+
+        val v2ThroughV1 = YDoc(clientId = 2)
+        v2ThroughV1.applyUpdate(v2)
+        assertEquals("", v2ThroughV1.getText("body").toString())
+        assertFailsWith<YksDecodingException> { YDoc(clientId = 3).applyUpdateV2(v1) }
+
+        val privateSource = YDoc(clientId = 4)
+        privateSource.getXmlFragment("xml").push(YXmlElement("p"))
+        val privateUpdate = privateSource.encodeStateAsUpdateLossless()
+        val privateUpdateV2 = privateSource.encodeStateAsUpdateV2Lossless()
+        assertFailsWith<YksDecodingException> { YDoc(clientId = 5).applyUpdate(privateUpdate) }
+        assertFailsWith<YksDecodingException> { decodeUpdate(privateUpdate) }
+        assertFailsWith<YksDecodingException> { parseUpdateMeta(privateUpdate) }
+        assertFailsWith<YksDecodingException> { createContentIdsFromUpdate(privateUpdate) }
+        assertFailsWith<YksDecodingException> { createContentIdsFromUpdateV2(privateUpdateV2) }
+        assertFailsWith<YksDecodingException> { encodeStateVectorFromUpdate(privateUpdate) }
+        assertFailsWith<YksDecodingException> { encodeStateVectorFromUpdateV2(privateUpdateV2) }
+        assertFailsWith<YksDecodingException> { LazyStructReader(privateUpdate) }
+        assertFailsWith<YksDecodingException> { LazyStructReader(BinaryDecoder(privateUpdate)) }
+
+        val restored = YDoc(clientId = 6)
+        restored.applyUpdateLossless(privateUpdate)
+        assertEquals("<p></p>", restored.getXmlFragment("xml").toString())
+        val expectedContentIds = createContentIdsFromDoc(privateSource)
+        val actualV1ContentIds = createContentIdsFromUpdateLossless(privateUpdate)
+        val actualV2ContentIds = createContentIdsFromUpdateV2Lossless(privateUpdateV2)
+        assertTrue(equalIdSets(expectedContentIds.inserts, actualV1ContentIds.inserts))
+        assertTrue(equalIdSets(expectedContentIds.deletes, actualV1ContentIds.deletes))
+        assertTrue(equalIdSets(expectedContentIds.inserts, actualV2ContentIds.inserts))
+        assertTrue(equalIdSets(expectedContentIds.deletes, actualV2ContentIds.deletes))
+        assertContentEquals(privateSource.encodeStateVector(), encodeStateVectorFromUpdateLossless(privateUpdate))
+        assertContentEquals(privateSource.encodeStateVector(), encodeStateVectorFromUpdateV2Lossless(privateUpdateV2))
+        assertTrue(createLazyStructReaderLossless(privateUpdate).curr != null)
+        assertTrue(createLazyStructReaderV2Lossless(privateUpdateV2).curr != null)
     }
 
     @Test
@@ -932,7 +980,7 @@ class UpdateApiTest {
         assertTrue(update.hasPrivateUpdateMagic())
         assertEquals(4, update[3].toInt())
 
-        val restored = createDocFromUpdate(update)
+        val restored = createDocFromUpdateLossless(update)
         val restoredDelta = restored.getText("body").toDelta()
         val restoredOp = restoredDelta.ops.single()
         val restoredChild = restoredOp.insert as YMap
@@ -976,8 +1024,8 @@ class UpdateApiTest {
         assertContentEquals(losslessV1ByRange, losslessV1ByIdSet)
         assertContentEquals(losslessV2ByRange, losslessV2ByIdSet)
 
-        val restoredV1 = createDocFromUpdate(losslessV1ByRange)
-        val restoredV2 = createDocFromUpdateV2(losslessV2ByIdSet)
+        val restoredV1 = createDocFromUpdateLossless(losslessV1ByRange)
+        val restoredV2 = createDocFromUpdateV2Lossless(losslessV2ByIdSet)
         assertEquals(mapOf("bold" to true), restoredV1.getText("body").toDelta().ops.single().attributes)
         assertEquals(mapOf("bold" to true), restoredV2.getText("body").toDelta().ops.single().attributes)
     }
@@ -1015,12 +1063,12 @@ class UpdateApiTest {
         verify(
             writeStructsLossless(source, 1, childRange),
             writeStructsLossless(source, 1, ownerRange),
-            ::applyUpdate,
+            ::applyUpdateLossless,
         )
         verify(
             writeStructsV2Lossless(source, 1, childRange),
             writeStructsV2Lossless(source, 1, ownerRange),
-            ::applyUpdateV2,
+            ::applyUpdateV2Lossless,
         )
     }
 
@@ -1074,7 +1122,7 @@ class UpdateApiTest {
 
         selections.forEach { (update, expectedAttributes) ->
             assertTrue(update.hasPrivateUpdateMagic())
-            val restored = createDocFromUpdateV2(update)
+            val restored = createDocFromUpdateV2Lossless(update)
             assertEquals(expectedAttributes, restored.getText("body").toDelta().ops.single().attributes)
         }
     }
@@ -1109,7 +1157,7 @@ class UpdateApiTest {
         assertTrue(selectedV2.hasPrivateUpdateMagic())
         assertEquals(
             mapOf("bold" to true),
-            createDocFromUpdate(selectedV1).getText("body").toDelta().ops.single().attributes,
+            createDocFromUpdateLossless(selectedV1).getText("body").toDelta().ops.single().attributes,
         )
     }
 
@@ -1129,7 +1177,7 @@ class UpdateApiTest {
         assertFailsWith<UnsupportedYjsStandardUpdateException> { convertUpdateFormat(privateUpdate) }
         assertFailsWith<UnsupportedYjsStandardUpdateException> { convertUpdateFormatV1ToV2(privateUpdate) }
         assertFailsWith<UnsupportedYjsStandardUpdateException> {
-            intersectUpdateWithContentIds(privateUpdate, createContentIdsFromUpdate(privateUpdate))
+            intersectUpdateWithContentIds(privateUpdate, createContentIdsFromUpdateLossless(privateUpdate))
         }
         assertTrue(representablePrivate.hasPrivateUpdateMagic())
         assertFailsWith<UnsupportedYjsStandardUpdateException> { mergeUpdates(listOf(representablePrivate)) }
@@ -1140,7 +1188,7 @@ class UpdateApiTest {
         assertFailsWith<UnsupportedYjsStandardUpdateException> {
             intersectUpdateWithContentIds(
                 representablePrivate,
-                createContentIdsFromUpdate(representablePrivate),
+                createContentIdsFromUpdateLossless(representablePrivate),
             )
         }
         assertFailsWith<UnsupportedYjsStandardUpdateException> { mergeUpdatesV2(listOf(representablePrivate)) }
@@ -1150,7 +1198,7 @@ class UpdateApiTest {
         assertFailsWith<UnsupportedYjsStandardUpdateException> {
             intersectUpdateWithContentIdsV2(
                 representablePrivate,
-                createContentIdsFromUpdateV2(representablePrivate),
+                createContentIdsFromUpdateV2Lossless(representablePrivate),
             )
         }
 
@@ -1161,7 +1209,7 @@ class UpdateApiTest {
         assertTrue(
             intersectUpdateWithContentIdsLossless(
                 privateUpdate,
-                createContentIdsFromUpdate(privateUpdate),
+                createContentIdsFromUpdateLossless(privateUpdate),
             ).hasPrivateUpdateMagic(),
         )
     }

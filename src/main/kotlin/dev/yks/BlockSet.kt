@@ -96,7 +96,7 @@ public fun readBlockSet(decoder: UpdateDecoderV1): BlockSet {
     val clients = linkedMapOf<Long, BlockRange>()
     repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
         val client = decoder.readClient()
-        val refs = MutableList(decoder.restDecoder.readVarUInt().toDecodedCount()) {
+        val refs = buildDecodedList(decoder.restDecoder.readVarUInt().toDecodedCount()) {
             readBlockSetStruct(decoder)
         }
         clients[client] = BlockRange(refs)
@@ -108,7 +108,7 @@ public fun readBlockSet(decoder: UpdateDecoderV2): BlockSet {
     val clients = linkedMapOf<Long, BlockRange>()
     repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
         val client = decoder.readClient()
-        val refs = MutableList(decoder.restDecoder.readVarUInt().toDecodedCount()) {
+        val refs = buildDecodedList(decoder.restDecoder.readVarUInt().toDecodedCount()) {
             readBlockSetStruct(decoder)
         }
         clients[client] = BlockRange(refs)

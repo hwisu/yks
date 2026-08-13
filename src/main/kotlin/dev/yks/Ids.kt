@@ -918,7 +918,7 @@ public fun readIdMap(decoder: BinaryDecoder): IdMap {
         repeat(decoder.readVarUInt().toDecodedCount()) {
             val clock = decoder.readVarUInt()
             val len = decoder.readVarUInt()
-            val attrs = List(decoder.readVarUInt().toDecodedCount()) {
+            val attrs = buildDecodedList(decoder.readVarUInt().toDecodedCount()) {
                 ContentAttribute(decoder.readString(), readYValue(decoder))
             }
             idMap.add(client, clock, len, attrs)
@@ -939,7 +939,7 @@ public fun readIdMap(decoder: IdSetDecoderV1): IdMap {
         repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
             val clock = decoder.readDsClock()
             val len = decoder.readDsLen()
-            val attrs = List(decoder.restDecoder.readVarUInt().toDecodedCount()) {
+            val attrs = buildDecodedList(decoder.restDecoder.readVarUInt().toDecodedCount()) {
                 val attrId = decoder.restDecoder.readVarUInt().toDecodedCount()
                 if (attrId >= visitedAttributes.size) {
                     val attrNameId = decoder.restDecoder.readVarUInt().toDecodedCount()

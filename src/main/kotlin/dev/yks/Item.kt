@@ -50,8 +50,12 @@ internal sealed class ItemContent {
         override val kind: RootKind = RootKind.Text,
     ) : ItemContent() {
         init {
-            require(value.isNotEmpty()) { "text items must not be empty" }
-            require(kind == RootKind.Text || kind == RootKind.XmlText) { "text content must belong to a text sequence" }
+            require(
+                kind == RootKind.Text ||
+                    kind == RootKind.XmlText ||
+                    kind == RootKind.XmlFragment ||
+                    kind == RootKind.XmlElement,
+            ) { "text content must belong to a text or XML sequence" }
         }
     }
 

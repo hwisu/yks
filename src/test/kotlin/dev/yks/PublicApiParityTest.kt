@@ -11,6 +11,40 @@ import kotlin.test.assertTrue
 
 class PublicApiParityTest {
     @Test
+    fun yjs14AttributionManagerNamesResolveToRendererImplementations() {
+        val previous = YDoc(clientId = 1, gc = false)
+        val next = YDoc(clientId = 2, gc = false)
+        previous.getText("body").insert(0, "a")
+        next.applyUpdate(previous.encodeStateAsUpdate())
+        next.getText("body").insert(1, "b")
+
+        val manager: AbstractAttributionManager = createAttributionManagerFromDiff(previous, next)
+        val previousSnapshot = snapshot(previous)
+        val snapshotManager: SnapshotAttributionManager = createAttributionManagerFromSnapshots(previousSnapshot)
+
+        assertTrue(`$attributionManager`(manager))
+        assertSame(baseRenderer, noAttributionsManager)
+        assertTrue(manager is DiffRenderer)
+        assertSame(previousSnapshot, snapshotManager.prevSnapshot)
+        manager.destroy()
+        snapshotManager.destroy()
+    }
+
+    @Test
+    fun activeTransactionExposesChangedKeysAndSubdocSets() {
+        val doc = YDoc(clientId = 1)
+        val map = doc.getMap("meta")
+        lateinit var changed: Map<AbstractYType, Set<String?>>
+
+        doc.transact({ transaction: YTransaction ->
+            map.set("title", "hello")
+            changed = transaction.changed
+        })
+
+        assertEquals(setOf("title"), changed[map])
+    }
+
+    @Test
     fun yjsClassAliasesResolveToLocalDocumentAndTypeObjects() {
         val doc = Doc(clientId = 1)
         val type: Type = doc.getText("body")
@@ -102,12 +136,16 @@ class PublicApiParityTest {
         val text = doc.get("body", YTextRefID)
         val xml = doc.get("xml", YXmlFragmentRefID)
         val element = doc.get("element", YXmlElementRefID)
+        val hook = doc.get("hook", YXmlHookRefID)
+        val xmlText = doc.get("xml-text", YXmlTextRefID)
 
         assertTrue(array is YArray)
         assertTrue(map is YMap)
         assertTrue(text is YText)
         assertTrue(xml is YXmlFragment)
         assertTrue(element is YXmlElementType)
+        assertTrue(hook is YXmlHook)
+        assertTrue(xmlText is YXmlTextType)
         assertEquals("UNDEFINED", element.nodeName)
         assertSame(array, doc.get("items", YArrayRefID))
         assertSame(map, doc.get("meta", YMapRefID))
@@ -118,7 +156,8 @@ class PublicApiParityTest {
         assertEquals(RootKind.XmlHook, rootKindFromTypeRefId(YXmlHookRefID))
         assertEquals(RootKind.XmlText, rootKindFromTypeRefId(YXmlTextRefID))
         assertFailsWith<IllegalArgumentException> { doc.get("items", RootKind.Map) }
-        assertFailsWith<IllegalStateException> { doc.get("hook", YXmlHookRefID) }
+        assertSame(hook, doc.getXmlHook("hook"))
+        assertSame(xmlText, doc.getXmlText("xml-text"))
         assertFailsWith<IllegalStateException> { rootKindFromTypeRefId(99) }
     }
 
@@ -134,7 +173,7 @@ class PublicApiParityTest {
         assertEquals("<p id=\"intro\">hello<br></br></p>", paragraph.toString())
         assertTrue(source.share["paragraph"] is YXmlElementType)
 
-        val target = createDocFromUpdate(source.encodeStateAsUpdateLossless())
+        val target = createDocFromUpdateLossless(source.encodeStateAsUpdateLossless())
         val synced = target.getXmlElement("paragraph", "p")
 
         assertEquals("<p id=\"intro\">hello<br></br></p>", synced.toString())
@@ -199,7 +238,7 @@ class PublicApiParityTest {
         val target = YDoc(clientId = 2)
         val share: Map<String, AbstractYType> = target.share
         assertTrue(share.isEmpty())
-        target.applyUpdate(source.encodeStateAsUpdateLossless())
+        target.applyUpdateLossless(source.encodeStateAsUpdateLossless())
 
         assertEquals(setOf("body", "items", "meta", "xml"), target.rootNames())
         assertTrue("items" in share)

@@ -45,6 +45,16 @@ if (scenario === 'subdoc-text' || scenario === 'subdoc-xml-text') {
   assert.equal(actual.text, expected.text)
   assert.deepEqual(actual.json, expected.json)
   assert.equal(actual.stateVectorBase64, expected.stateVectorBase64)
+} else if (scenario === 'xml-root-text') {
+  const actual = new Y.Doc()
+  const text = actual.get('root-xml-text', Y.XmlText)
+  Y.applyUpdate(actual, fs.readFileSync(input))
+  assert.equal(text.toString(), '<strong level="1">hello</strong>')
+} else if (scenario === 'xml-root-hook') {
+  const actual = new Y.Doc()
+  const hook = actual.get('root-xml-hook', Y.XmlHook)
+  Y.applyUpdate(actual, fs.readFileSync(input))
+  assert.deepEqual(hook.toJSON(), { count: 1, nested: { ok: true } })
 } else {
   const expected = createScenarioDocument(scenario)
   const actual = new Y.Doc()

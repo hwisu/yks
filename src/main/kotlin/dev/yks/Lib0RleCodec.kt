@@ -20,14 +20,14 @@ internal class Lib0ByteRleEncoder {
     fun toByteArray(): ByteArray = encoder.toByteArray()
 }
 
-internal class Lib0ByteRleDecoder(bytes: ByteArray) {
-    private val decoder = BinaryDecoder(bytes)
+internal class Lib0ByteRleDecoder(private val decoder: BinaryDecoder) {
+    constructor(bytes: ByteArray) : this(BinaryDecoder(bytes))
     private var state = 0
     private var count = 0L
 
     fun read(): Int {
         if (count == 0L) {
-            state = decoder.readByte()
+            state = decoder.readByteOrZero()
             count = if (decoder.hasRemaining()) decoder.readVarUInt() + 1 else Long.MAX_VALUE
         }
         count--
@@ -64,14 +64,14 @@ internal class Lib0UintOptRleEncoder {
     }
 }
 
-internal class Lib0UintOptRleDecoder(bytes: ByteArray) {
-    private val decoder = BinaryDecoder(bytes)
+internal class Lib0UintOptRleDecoder(private val decoder: BinaryDecoder) {
+    constructor(bytes: ByteArray) : this(BinaryDecoder(bytes))
     private var state = 0L
     private var count = 0L
 
     fun read(): Long {
         if (count == 0L) {
-            val (value, negative) = decoder.readLib0VarIntWithSign()
+            val (value, negative) = decoder.readLib0VarIntWithSignOrZero()
             state = kotlin.math.abs(value)
             count = if (negative) decoder.readVarUInt() + 2 else 1
         }
@@ -112,15 +112,15 @@ internal class Lib0IntDiffOptRleEncoder {
     }
 }
 
-internal class Lib0IntDiffOptRleDecoder(bytes: ByteArray) {
-    private val decoder = BinaryDecoder(bytes)
+internal class Lib0IntDiffOptRleDecoder(private val decoder: BinaryDecoder) {
+    constructor(bytes: ByteArray) : this(BinaryDecoder(bytes))
     private var state = 0L
     private var count = 0L
     private var diff = 0L
 
     fun read(): Long {
         if (count == 0L) {
-            val encoded = decoder.readLib0VarInt()
+            val encoded = decoder.readLib0VarIntWithSignOrZero().first
             val hasCount = (encoded and 1L) != 0L
             diff = Math.floorDiv(encoded, 2L)
             count = if (hasCount) decoder.readVarUInt() + 2 else 1
@@ -146,21 +146,23 @@ internal class Lib0StringEncoder {
     }.toByteArray()
 }
 
-internal class Lib0StringDecoder(bytes: ByteArray) {
+internal class Lib0StringDecoder(decoder: BinaryDecoder) {
     private val lengths: Lib0UintOptRleDecoder
     private val value: String
     private var offset = 0
 
     init {
-        val decoder = BinaryDecoder(bytes)
-        value = decoder.readString()
-        lengths = Lib0UintOptRleDecoder(decoder.readRemainingBytes())
+        value = decoder.readLib0StringFromBacking()
+        lengths = Lib0UintOptRleDecoder(decoder)
     }
+
+    constructor(bytes: ByteArray) : this(BinaryDecoder(bytes))
 
     fun read(): String {
         val length = lengths.read()
-        check(length <= (value.length - offset).toLong()) { "invalid string stream length" }
-        val end = offset + length.toNonNegativeInt("string stream length")
+        // lib0 uses String.slice(), which clamps an overlong end index instead of rejecting it.
+        val requestedEnd = checkedClockAdd(offset.toLong(), length, "string stream end")
+        val end = minOf(requestedEnd, value.length.toLong()).toNonNegativeInt("string stream end")
         return value.substring(offset, end).also { offset = end }
     }
 }

@@ -143,7 +143,6 @@ public open class UpdateEncoderV2(
 
     override fun toByteArray(): ByteArray {
         encodedUpdate?.let { return it.copyOf() }
-        if (!hasOptimizedContent) return restEncoder.toByteArray()
         return BinaryEncoder().also { encoder ->
         encoder.writeVarUInt(0)
         encoder.writeBytes(keyClocks.toByteArray())

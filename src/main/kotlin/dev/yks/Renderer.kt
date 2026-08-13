@@ -3,6 +3,10 @@ package dev.yks
 public const val rendererType: String = "y:r"
 public val `$renderer`: String = rendererType
 
+/** Yjs 14 RC naming for the renderer/attribution-manager protocol. */
+public const val attributionManagerType: String = "y:am"
+public val `$attributionManager`: (Any?) -> Boolean = { value -> value is AbstractRenderer }
+
 public data class AttributionSchemaField(
     val type: String,
     val optional: Boolean = true,
@@ -167,6 +171,12 @@ public open class BaseRenderer : AbstractRenderer() {
 
 public val baseRenderer: BaseRenderer = BaseRenderer()
 
+/** Yjs 14 RC name for the renderer that does not attach change attributions. */
+public val noAttributionsManager: BaseRenderer = baseRenderer
+
+public typealias AbstractAttributionManager = AbstractRenderer
+public typealias NoAttributionsManager = BaseRenderer
+
 public open class TwosetRenderer(
     inserts: IdMap,
     deletes: IdMap,
@@ -216,6 +226,133 @@ public open class TwosetRenderer(
     }
 }
 
+public typealias TwosetAttributionManager = TwosetRenderer
+
+public data class AttributionsRendererOptions(
+    val renderedContent: IdSet? = null,
+)
+
+/** Yjs 14 renderer for a combined attribution map and an optional visible-content set. */
+public class AttributionsRenderer(
+    attributions: ContentMap,
+    options: AttributionsRendererOptions = AttributionsRendererOptions(),
+) : AbstractRenderer() {
+    public val renderAs: IdMap = mergeIdMaps(listOf(attributions.inserts, attributions.deletes))
+    public val renderedContent: IdSet? = options.renderedContent
+    private val rendered: IdSet? = renderedContent?.let { content ->
+        mergeIdSets(listOf(content, createIdSetFromIdMap(renderAs)))
+    }
+
+    override val attributed: IdSet = createIdSetFromIdMap(renderAs)
+
+    override fun hasItem(item: ItemStruct): Boolean {
+        if (attributed.intersects(item.id.client, item.id.clock, item.length)) return true
+        val visible = renderedContent ?: return false
+        return if (item.deleted) {
+            visible.intersects(item.id.client, item.id.clock, item.length)
+        } else {
+            !visible.coversRange(item.id.client, item.id.clock, item.length)
+        }
+    }
+
+    override fun readContent(
+        contents: MutableList<AttributedContent>,
+        client: Long,
+        clock: Long,
+        deleted: Boolean,
+        content: AbstractContent,
+        renderBehavior: Int,
+    ) {
+        require(renderBehavior in 0..3) { "renderBehavior must be 0, 1, 2, or 3" }
+        val total = content.getLength()
+        var outer: List<MaybeIdRange>? = null
+        var inRenderedContent = !deleted
+        renderedContent?.let { visible ->
+            outer = visible.slice(client, clock, total)
+            if (outer?.size == 1) {
+                inRenderedContent = outer!!.single().exists
+                outer = null
+            }
+        }
+
+        val partitions = outer
+        if (partitions == null) {
+            val slices = renderAs.slice(client, clock, total)
+            var remaining = if (slices.size == 1) content else content.copy()
+            slices.forEachIndexed { index, range ->
+                val current = remaining
+                if (index < slices.lastIndex) remaining = current.splice(range.len)
+                contents.pushAttributedPiece(
+                    current,
+                    range.clock,
+                    deleted,
+                    inRenderedContent,
+                    range.attrs,
+                    renderBehavior,
+                )
+            }
+            return
+        }
+
+        var remaining = content.copy()
+        partitions.forEachIndexed { outerIndex, visibleRange ->
+            val slices = renderAs.slice(client, visibleRange.clock, visibleRange.len)
+            slices.forEachIndexed { innerIndex, range ->
+                val current = remaining
+                val isLast = outerIndex == partitions.lastIndex && innerIndex == slices.lastIndex
+                if (!isLast) remaining = current.splice(range.len)
+                contents.pushAttributedPiece(
+                    current,
+                    range.clock,
+                    deleted,
+                    visibleRange.exists,
+                    range.attrs,
+                    renderBehavior,
+                )
+            }
+        }
+    }
+
+    override fun contentLength(item: ItemStruct): Long {
+        if (!item.countable) return 0
+        val visible = rendered
+        return if (visible == null) {
+            if (item.deleted) renderAs.coveredLength(item.id.client, item.id.clock, item.length) else item.length
+        } else {
+            visible.coveredLength(item.id.client, item.id.clock, item.length)
+        }
+    }
+}
+
+public fun createAttributionsRenderer(
+    attributions: ContentMap,
+    options: AttributionsRendererOptions = AttributionsRendererOptions(),
+): AttributionsRenderer = AttributionsRenderer(attributions, options)
+
+private fun MutableList<AttributedContent>.pushAttributedPiece(
+    content: AbstractContent,
+    clock: Long,
+    deleted: Boolean,
+    inRenderedContent: Boolean,
+    attrs: List<ContentAttribute>?,
+    renderBehavior: Int,
+) {
+    if (inRenderedContent || attrs != null) {
+        add(AttributedContent(content, clock, deleted && !inRenderedContent, attrs, renderBehavior))
+    } else if (deleted && renderBehavior != 0 && renderBehavior != 3) {
+        add(AttributedContent(content, clock, deleted = true, attrs = null, renderBehavior))
+    }
+}
+
+private fun IdSet.coversRange(client: Long, clock: Long, len: Long): Boolean =
+    slice(client, clock, len).all { range -> range.exists }
+
+private fun IdSet.coveredLength(client: Long, clock: Long, len: Long): Long =
+    slice(client, clock, len).filter { range -> range.exists }.sumOf { range -> range.len }
+
+private fun IdMap.coveredLength(client: Long, clock: Long, len: Long): Long =
+    slice(client, clock, len).filter { range -> range.attrs != null }.sumOf { range -> range.len }
+
 public class Attributions(
     public val inserts: IdMap = createIdMap(),
     public val deletes: IdMap = createIdMap(),
@@ -262,7 +399,7 @@ public class DiffRenderer(
     public var suggestionOrigins: List<Any?>? = null
 
     public fun acceptAllChanges() {
-        applyUpdate(prevDoc, encodeStateAsUpdateLossless(nextDoc), origin = this)
+        applyUpdateLossless(prevDoc, encodeStateAsUpdateLossless(nextDoc), origin = this)
     }
 
     public fun acceptChanges(start: Id, end: Id = start) {
@@ -270,7 +407,7 @@ public class DiffRenderer(
         require(end.clock >= start.clock) { "end must not be before start" }
         val selected = createIdSet().also { ids -> ids.add(start.client, start.clock, end.clock - start.clock + 1) }
         val contentIds = acceptedContentIds(intersectSets(selected, inserts), intersectSets(selected, deletes))
-        applyUpdate(
+        applyUpdateLossless(
             prevDoc,
             intersectUpdateWithContentIdsLossless(encodeStateAsUpdateLossless(nextDoc), contentIds),
             origin = this,
@@ -464,7 +601,7 @@ public class DiffRenderer(
             encodeStateAsUpdateLossless(nextDoc),
             ContentIds(inserts = syncInserts, deletes = syncDeletes),
         )
-        applyUpdate(prevDoc, update, origin = this)
+        applyUpdateLossless(prevDoc, update, origin = this)
     }
 
     private fun handlePrevDocUpdate(
@@ -474,7 +611,7 @@ public class DiffRenderer(
         @Suppress("UNUSED_PARAMETER") transaction: YTransactionEvent?,
     ) {
         if (origin !== this) {
-            applyUpdate(nextDoc, update)
+            applyUpdateLossless(nextDoc, update)
         }
     }
 
@@ -490,7 +627,7 @@ public class DiffRenderer(
             transaction?.local == true &&
             (origins == null || origins.any { suggestionOrigin -> suggestionOrigin == origin })
         ) {
-            applyUpdate(prevDoc, update, origin = this)
+            applyUpdateLossless(prevDoc, update, origin = this)
         }
     }
 
@@ -505,7 +642,7 @@ public class DiffRenderer(
         }
         val attributedDeletes = event.meta[attributedDeletesMetaKey] as? IdSet ?: return
         if (attributedDeletes.isEmpty()) return
-        applyUpdate(
+        applyUpdateLossless(
             prevDoc,
             UpdateCodec.encodeLossless(DocumentUpdate(emptyList(), attributedDeletes.toDeleteSet())),
             origin = this,
@@ -568,6 +705,14 @@ public fun createDiffRenderer(
     options: DiffRendererOptions = DiffRendererOptions(),
 ): DiffRenderer = DiffRenderer(prevDoc, nextDoc, options)
 
+public typealias DiffAttributionManager = DiffRenderer
+
+public fun createAttributionManagerFromDiff(
+    prevDoc: YDoc,
+    nextDoc: YDoc,
+    options: DiffRendererOptions = DiffRendererOptions(),
+): DiffAttributionManager = createDiffRenderer(prevDoc, nextDoc, options)
+
 public class SnapshotRenderer(
     public val prevSnapshot: Snapshot,
     public val nextSnapshot: Snapshot = prevSnapshot,
@@ -621,6 +766,13 @@ public fun createSnapshotRenderer(
     prevSnapshot: Snapshot,
     nextSnapshot: Snapshot = prevSnapshot,
 ): SnapshotRenderer = SnapshotRenderer(prevSnapshot, nextSnapshot)
+
+public typealias SnapshotAttributionManager = SnapshotRenderer
+
+public fun createAttributionManagerFromSnapshots(
+    prevSnapshot: Snapshot,
+    nextSnapshot: Snapshot = prevSnapshot,
+): SnapshotAttributionManager = createSnapshotRenderer(prevSnapshot, nextSnapshot)
 
 private fun extractAttributions(attrs: IdMap?, slice: IdSet): IdMap =
     if (attrs == null) {

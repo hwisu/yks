@@ -628,7 +628,7 @@ public class StructStore(private val owner: YDoc? = null) {
         val state = java.util.TreeMap<Long, Long>()
         clientItems.forEach { (client, structs) ->
             val clock = structs.lastOrNull()?.endClock() ?: 0
-            if (clock > 0) state[client] = clock
+            if (structs.isNotEmpty()) state[client] = clock
         }
         skips.clients.forEach { (client, ranges) ->
             ranges.minOfOrNull { range -> range.clock }?.let { clock -> state[client] = clock }
