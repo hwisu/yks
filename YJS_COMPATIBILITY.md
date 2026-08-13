@@ -79,8 +79,9 @@ CI와 로컬 gate는 설치된 oracle 버전을 실행 전에 exact pin과 대�
 ## 플랫폼·생태계 경계
 
 Yjs wire에는 root shared-type kind와 root `XmlElement` 이름이 없다. 모호한 원격 root는
-typed getter가 schema를 줄 때 materialize하며 clone/snapshot은 로컬에서 아는 root
-metadata를 보존한다.
+typed getter 또는 immutable `YRootSchemaRegistry`가 schema를 줄 때 materialize하며
+clone/snapshot은 로컬에서 아는 root metadata를 보존한다. Registry는 wire를 바꾸지 않고
+root별 결과를 캐시하며, 기존 concrete type·XML 이름과 충돌하면 적용 전에 거절한다.
 
 Awareness, WebSocket/WebRTC provider, ProseMirror/Tiptap/CodeMirror binding은 Yjs core
 패키지 자체가 아니라 별도 JavaScript 생태계 모듈이다. YKS가 그 모듈을 JVM에서
