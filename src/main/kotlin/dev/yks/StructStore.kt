@@ -1349,7 +1349,12 @@ public class StructStore(private val owner: YDoc? = null) {
                         }
                         put(item.id, attributes)
                     }
-                    else -> Unit
+                    else -> if (item.countable) {
+                        // @y/y 14's unified Type applies ContentFormat markers to every child
+                        // kind, including ContentAny/JSON/Binary. Legacy projections ignore the
+                        // metadata but retain the standard marker structs on the wire.
+                        put(item.id, activeWithoutNulls)
+                    }
                 }
             }
         }

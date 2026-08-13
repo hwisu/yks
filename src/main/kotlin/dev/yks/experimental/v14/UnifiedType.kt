@@ -6,6 +6,7 @@ import dev.yks.AbstractYType
 import dev.yks.AbstractRenderer
 import dev.yks.ItemContent
 import dev.yks.RootKind
+import dev.yks.SequenceCursor
 import dev.yks.StoreItem
 import dev.yks.Subscription
 import dev.yks.YArray
@@ -28,6 +29,7 @@ import dev.yks.renderedSequenceIndexToVisibleIndex
 import dev.yks.recordRendererAttributedDeletes
 import dev.yks.rendererContentLength
 import dev.yks.toItemStruct
+import dev.yks.toNonNegativeInt
 import dev.yks.toXmlListValue
 import java.util.UUID
 
@@ -1356,11 +1358,6 @@ private fun validateDelta(
         when (op) {
             is ChildOp.InsertText -> {
                 require(target !is YMap) { "map-backed type ${target.kind} cannot contain indexed children" }
-                if (target !is YText) {
-                    require(op.formats.isEmpty()) {
-                        "formatted text insertion currently requires a Text or XmlText projection"
-                    }
-                }
                 virtualChildren.insertText(cursor, op.text.length)
                 cursor = Math.addExact(cursor, op.text.length)
             }
@@ -1423,8 +1420,7 @@ private fun validateValueInsertion(
     values: List<DeltaValue>,
     formats: Map<String, YValue>,
 ) {
-    if (formats.isNotEmpty()) {
-        require(target is YText) { "insert formats require a Text or XmlText projection" }
+    if (formats.isNotEmpty() && target is YText) {
         require(values.none { value -> value is DeltaValue.Data && value.value == YValue.Null }) {
             "formatted null values are not representable by the legacy Text projection"
         }
@@ -1433,7 +1429,7 @@ private fun validateValueInsertion(
 
 private fun validateFormatChange(target: AbstractYType, change: FormatChange) {
     if (change != FormatChange.Unchanged) {
-        require(target is YText) { "format changes require a Text or XmlText projection" }
+        require(target !is YMap) { "map-backed type ${target.kind} has no child format dimension" }
     }
 }
 
@@ -1620,6 +1616,14 @@ private fun applyChildren(
                     target.insert(visibleIndex, op.text, op.formats.mapValues { (_, value) -> value.toAny() })
                 } else {
                     insertUnifiedText(target, visibleIndex, op.text)
+                    if (op.formats.isNotEmpty()) {
+                        applyFormats(
+                            target,
+                            visibleIndex,
+                            op.text.length,
+                            FormatChange.Patch(op.formats),
+                        )
+                    }
                 }
                 cursor += op.text.length
                 expectedIndex += op.text.length
@@ -1645,6 +1649,14 @@ private fun applyChildren(
                     is YXmlElementType -> insertUnifiedValues(target, visibleIndex, op.values)
                     is YXmlFragment -> insertUnifiedValues(target, visibleIndex, op.values)
                     else -> error("type ${target.kind} cannot contain indexed children")
+                }
+                if (target !is YText && op.formats.isNotEmpty()) {
+                    applyFormats(
+                        target,
+                        visibleIndex,
+                        values.size,
+                        FormatChange.Patch(op.formats),
+                    )
                 }
                 cursor += values.size
                 expectedIndex += values.size
@@ -1744,11 +1756,204 @@ private fun applyRenderedFormats(
 
 private fun applyFormats(target: AbstractYType, index: Int, length: Int, change: FormatChange) {
     if (change == FormatChange.Unchanged || length == 0) return
-    val text = target as YText
+    if (target is YText) {
+        when (change) {
+            FormatChange.Unchanged -> Unit
+            is FormatChange.Patch -> target.format(index, length, checkNotNull(formatPatchToAny(change)))
+            FormatChange.Clear -> clearTextFormats(target, index, length)
+        }
+        return
+    }
     when (change) {
         FormatChange.Unchanged -> Unit
-        is FormatChange.Patch -> text.format(index, length, checkNotNull(formatPatchToAny(change)))
-        FormatChange.Clear -> clearTextFormats(text, index, length)
+        is FormatChange.Patch -> formatUnifiedRange(
+            target,
+            index,
+            length,
+            change.values.mapValues { (_, value) -> value ?: YValue.Null },
+        )
+        FormatChange.Clear -> clearUnifiedFormats(target, index, length)
+    }
+}
+
+private fun formatUnifiedRange(
+    target: AbstractYType,
+    index: Int,
+    length: Int,
+    attributes: Map<String, YValue>,
+) {
+    if (length <= 0 || attributes.isEmpty()) return
+    require(target !is YMap) { "map-backed type ${target.kind} has no child format dimension" }
+    val start = index.coerceAtLeast(0)
+    target.doc.transact {
+        if (start > 0) target.doc.insertionAnchors(target.name, target.kind, start)
+        target.doc.insertionAnchors(target.name, target.kind, Math.addExact(start, length))
+        val cursor = findUnifiedFormatPosition(target, start)
+        minimizeUnifiedAttributeChanges(target, cursor, attributes)
+        val negated = insertUnifiedAttributes(target, cursor, attributes)
+        var remaining = length.toLong()
+        while (true) {
+            val right = cursor.right ?: break
+            val marker = if (right.deleted) null else right.unifiedFormat(target)
+            if (remaining <= 0L && (negated.isEmpty() || !right.deleted && marker == null)) break
+            if (!right.deleted) {
+                if (marker != null) {
+                    if (attributes.containsKey(marker.key)) {
+                        val desired = attributes.getValue(marker.key)
+                        if (desired == marker.value) {
+                            negated.remove(marker.key)
+                        } else {
+                            if (remaining <= 0L) break
+                            negated[marker.key] = marker.value
+                        }
+                        target.doc.deleteItemsByIds(listOf(right.id))
+                    } else {
+                        cursor.currentAttributes.applyUnifiedFormat(mapOf(marker.key to marker.value))
+                    }
+                } else if (right.countable && right.content.kind == target.kind) {
+                    check(remaining >= right.length) { "format boundary must split packed content" }
+                    remaining -= right.length
+                }
+            }
+            forwardUnifiedFormatCursor(target, cursor)
+        }
+        insertNegatedUnifiedAttributes(target, cursor, negated)
+    }
+}
+
+private class UnifiedFormatCursor(
+    var left: StoreItem?,
+    val sequence: SequenceCursor,
+    val currentAttributes: MutableMap<String, YValue>,
+) {
+    val right: StoreItem? get() = sequence.current
+}
+
+private fun findUnifiedFormatPosition(target: AbstractYType, index: Int): UnifiedFormatCursor {
+    var remaining = index.toLong()
+    val sequence = target.doc.sequenceCursorAtFirstUndeleted(target.name)
+    val cursor = UnifiedFormatCursor(
+        left = sequence.previous,
+        sequence = sequence,
+        currentAttributes = linkedMapOf(),
+    )
+    while (remaining > 0L) {
+        val right = cursor.right ?: break
+        if (!right.deleted) {
+            val marker = right.unifiedFormat(target)
+            if (marker != null) {
+                cursor.currentAttributes.applyUnifiedFormat(mapOf(marker.key to marker.value))
+            } else if (right.countable && right.content.kind == target.kind) {
+                check(remaining >= right.length) { "format start must split packed content" }
+                remaining -= right.length
+            }
+        }
+        forwardUnifiedFormatCursor(target, cursor, updateAttributes = false)
+    }
+    require(remaining == 0L) { "format index is out of bounds" }
+    return cursor
+}
+
+private fun forwardUnifiedFormatCursor(
+    target: AbstractYType,
+    cursor: UnifiedFormatCursor,
+    updateAttributes: Boolean = true,
+) {
+    val right = cursor.right ?: return
+    if (updateAttributes && !right.deleted) {
+        right.unifiedFormat(target)?.let { marker ->
+            cursor.currentAttributes.applyUnifiedFormat(mapOf(marker.key to marker.value))
+        }
+    }
+    cursor.sequence.advanceToNextUndeleted()
+    cursor.left = cursor.sequence.previous
+}
+
+private fun minimizeUnifiedAttributeChanges(
+    target: AbstractYType,
+    cursor: UnifiedFormatCursor,
+    attributes: Map<String, YValue>,
+) {
+    while (true) {
+        val right = cursor.right ?: return
+        val marker = if (right.deleted) null else right.unifiedFormat(target)
+        if (!right.deleted && (marker == null || (attributes[marker.key] ?: YValue.Null) != marker.value)) return
+        forwardUnifiedFormatCursor(target, cursor)
+    }
+}
+
+private fun insertUnifiedAttributes(
+    target: AbstractYType,
+    cursor: UnifiedFormatCursor,
+    attributes: Map<String, YValue>,
+): MutableMap<String, YValue> {
+    val negated = linkedMapOf<String, YValue>()
+    attributes.forEach { (key, value) ->
+        val current = cursor.currentAttributes[key] ?: YValue.Null
+        if (current != value) {
+            negated[key] = current
+            insertUnifiedFormatMarker(target, cursor, key, value)
+        }
+    }
+    return negated
+}
+
+private fun insertNegatedUnifiedAttributes(
+    target: AbstractYType,
+    cursor: UnifiedFormatCursor,
+    negatedAttributes: MutableMap<String, YValue>,
+) {
+    while (true) {
+        val right = cursor.right ?: break
+        val marker = if (right.deleted) null else right.unifiedFormat(target)
+        val matchesNegated = marker != null && negatedAttributes[marker.key] == marker.value
+        if (!right.deleted && !matchesNegated) break
+        if (!right.deleted && marker != null) negatedAttributes.remove(marker.key)
+        forwardUnifiedFormatCursor(target, cursor)
+    }
+    negatedAttributes.forEach { (key, value) -> insertUnifiedFormatMarker(target, cursor, key, value) }
+}
+
+private fun insertUnifiedFormatMarker(
+    target: AbstractYType,
+    cursor: UnifiedFormatCursor,
+    key: String,
+    value: YValue,
+) {
+    val item = StoreItem(
+        id = target.doc.nextId(),
+        origin = cursor.left?.lastId,
+        rightOrigin = cursor.right?.id,
+        parent = target.name,
+        parentSub = null,
+        content = ItemContent.NativeTextFormat(key, value, target.kind),
+    )
+    target.doc.integrateLocal(item)
+    cursor.sequence.seek(item)
+    forwardUnifiedFormatCursor(target, cursor)
+}
+
+private fun StoreItem.unifiedFormat(target: AbstractYType): ItemContent.NativeTextFormat? =
+    (content as? ItemContent.NativeTextFormat)?.takeIf { marker -> marker.kind == target.kind }
+
+private fun MutableMap<String, YValue>.applyUnifiedFormat(attributes: Map<String, YValue>) {
+    attributes.forEach { (key, value) ->
+        if (value == YValue.Null) remove(key) else this[key] = value
+    }
+}
+
+private fun clearUnifiedFormats(target: AbstractYType, index: Int, length: Int) {
+    val end = Math.addExact(index, length)
+    var position = 0
+    val keys = sortedSetOf<String>()
+    target.doc.sequence(target.name).forEach { item ->
+        if (item.deleted || !item.countable || item.content.kind != target.kind) return@forEach
+        val itemEnd = Math.addExact(position, item.length.toNonNegativeInt("formatted item length"))
+        if (itemEnd > index && position < end) keys += target.doc.renderedTextAttributes(item).keys
+        position = itemEnd
+    }
+    if (keys.isNotEmpty()) {
+        formatUnifiedRange(target, index, length, keys.associateWith { YValue.Null })
     }
 }
 
