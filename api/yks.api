@@ -2019,6 +2019,8 @@ public final class dev/yks/YDoc {
 	public synthetic fun <init> (JLjava/lang/String;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ljava/lang/Object;ZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun <init> (Ldev/yks/YDocOptions;)V
 	public fun <init> (Ldev/yks/YDocOptions;Ldev/yks/YDocRuntimeOptions;)V
+	public fun <init> (Ldev/yks/YDocOptions;Ldev/yks/YDocRuntimeOptions;Ldev/yks/YRootSchemaRegistry;)V
+	public fun <init> (Ldev/yks/YDocOptions;Ldev/yks/YRootSchemaRegistry;)V
 	public final fun applyUpdate ([BLjava/lang/Object;)V
 	public static synthetic fun applyUpdate$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
 	public final fun applyUpdateLossless ([BLjava/lang/Object;)V
@@ -2063,6 +2065,7 @@ public final class dev/yks/YDoc {
 	public static synthetic fun getMap$default (Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YMap;
 	public final fun getMeta ()Ljava/lang/Object;
 	public final fun getOrNull (Ljava/lang/String;)Ldev/yks/AbstractYType;
+	public final fun getRootSchemas ()Ldev/yks/YRootSchemaRegistry;
 	public final fun getShare ()Ljava/util/Map;
 	public final fun getShouldLoad ()Z
 	public final fun getStandardUpdatePolicy ()Ldev/yks/YStandardUpdatePolicy;
@@ -2084,6 +2087,7 @@ public final class dev/yks/YDoc {
 	public static synthetic fun getXmlHook$default (Ldev/yks/YDoc;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YXmlHook;
 	public final fun getXmlText (Ljava/lang/String;)Ldev/yks/YXmlTextType;
 	public static synthetic fun getXmlText$default (Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YXmlTextType;
+	public final fun installRootSchemas (Ldev/yks/YRootSchemaRegistry;)Ldev/yks/YDoc;
 	public final fun isDestroyed ()Z
 	public final fun isLoaded ()Z
 	public final fun isRootEmpty (Ljava/lang/String;)Z
@@ -2125,6 +2129,7 @@ public final class dev/yks/YDoc {
 	public final fun onceAfterAllTransactions (Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
 	public final fun onceDoc (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
 	public final fun onceSync (Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;
+	public final fun registerRootSchema (Ljava/lang/String;Ldev/yks/YRootSchema;)Ldev/yks/YDoc;
 	public final fun rootNames ()Ljava/util/Set;
 	public final fun setAutoLoad (Z)V
 	public final fun setCleanupFormatting (Z)V
@@ -2449,6 +2454,99 @@ public final class dev/yks/YMapEvent : dev/yks/YTypedEvent {
 	public final fun getMapChanges ()Ljava/util/Map;
 	public synthetic fun getTarget ()Ldev/yks/AbstractYType;
 	public fun getTarget ()Ldev/yks/YMap;
+}
+
+public abstract interface class dev/yks/YRootSchema {
+	public abstract fun getKind ()Ldev/yks/RootKind;
+}
+
+public final class dev/yks/YRootSchema$Array : dev/yks/YRootSchema {
+	public static final field INSTANCE Ldev/yks/YRootSchema$Array;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getKind ()Ldev/yks/RootKind;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YRootSchema$Map : dev/yks/YRootSchema {
+	public static final field INSTANCE Ldev/yks/YRootSchema$Map;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getKind ()Ldev/yks/RootKind;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YRootSchema$Text : dev/yks/YRootSchema {
+	public static final field INSTANCE Ldev/yks/YRootSchema$Text;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getKind ()Ldev/yks/RootKind;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YRootSchema$XmlElement : dev/yks/YRootSchema {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Ldev/yks/YRootSchema$XmlElement;
+	public static synthetic fun copy$default (Ldev/yks/YRootSchema$XmlElement;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YRootSchema$XmlElement;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getKind ()Ldev/yks/RootKind;
+	public final fun getNodeName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YRootSchema$XmlFragment : dev/yks/YRootSchema {
+	public static final field INSTANCE Ldev/yks/YRootSchema$XmlFragment;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getKind ()Ldev/yks/RootKind;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YRootSchema$XmlHook : dev/yks/YRootSchema {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Ldev/yks/YRootSchema$XmlHook;
+	public static synthetic fun copy$default (Ldev/yks/YRootSchema$XmlHook;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YRootSchema$XmlHook;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHookName ()Ljava/lang/String;
+	public fun getKind ()Ldev/yks/RootKind;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YRootSchema$XmlText : dev/yks/YRootSchema {
+	public static final field INSTANCE Ldev/yks/YRootSchema$XmlText;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getKind ()Ldev/yks/RootKind;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YRootSchemaConflictException : dev/yks/YksException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun getRootName ()Ljava/lang/String;
+}
+
+public final class dev/yks/YRootSchemaRegistry {
+	public static final field Companion Ldev/yks/YRootSchemaRegistry$Companion;
+	public static final field EMPTY Ldev/yks/YRootSchemaRegistry;
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Map;Ldev/yks/YRootSchemaResolver;)V
+	public synthetic fun <init> (Ljava/util/Map;Ldev/yks/YRootSchemaResolver;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun get (Ljava/lang/String;)Ldev/yks/YRootSchema;
+	public final fun getResolver ()Ldev/yks/YRootSchemaResolver;
+	public final fun getSchemas ()Ljava/util/Map;
+	public final fun resolve (Ljava/lang/String;)Ldev/yks/YRootSchema;
+	public final fun withSchema (Ljava/lang/String;Ldev/yks/YRootSchema;)Ldev/yks/YRootSchemaRegistry;
+}
+
+public final class dev/yks/YRootSchemaRegistry$Companion {
+}
+
+public abstract interface class dev/yks/YRootSchemaResolver {
+	public abstract fun resolve (Ljava/lang/String;)Ldev/yks/YRootSchema;
 }
 
 public final class dev/yks/YStandardUpdatePolicy : java/lang/Enum {

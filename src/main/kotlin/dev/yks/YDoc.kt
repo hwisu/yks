@@ -44,6 +44,9 @@ public class YDoc(
 ) {
     public constructor(options: YDocOptions) : this(options, YDocRuntimeOptions.DEFAULT)
 
+    public constructor(options: YDocOptions, rootSchemas: YRootSchemaRegistry) :
+        this(options, YDocRuntimeOptions.DEFAULT, rootSchemas)
+
     public constructor(options: YDocOptions, runtimeOptions: YDocRuntimeOptions) : this(
         clientId = options.clientId,
         guid = options.guid,
@@ -60,6 +63,14 @@ public class YDoc(
         configuredStandardUpdatePolicy = runtimeOptions.standardUpdatePolicy
     }
 
+    public constructor(
+        options: YDocOptions,
+        runtimeOptions: YDocRuntimeOptions,
+        rootSchemas: YRootSchemaRegistry,
+    ) : this(options, runtimeOptions) {
+        configuredRootSchemas = rootSchemas
+    }
+
     private val ownerThread = AtomicReference<Thread?>()
     // Only the owning thread writes this same-thread fast path. Foreign threads always miss it
     // and fall back to the atomic owner below, preserving the confinement check without paying an
@@ -71,10 +82,13 @@ public class YDoc(
     private var configuredThreadAccessPolicy: YThreadAccessPolicy = YThreadAccessPolicy.ENFORCED
     private var configuredStandardUpdatePolicy: YStandardUpdatePolicy =
         YStandardUpdatePolicy.ALLOW_LOSSLESS_EXTENSIONS
+    private var configuredRootSchemas: YRootSchemaRegistry = YRootSchemaRegistry.EMPTY
+    private val resolvedRootSchemas = linkedMapOf<String, YRootSchema?>()
 
     public val updateLimits: YUpdateLimits get() = configuredUpdateLimits
     public val threadAccessPolicy: YThreadAccessPolicy get() = configuredThreadAccessPolicy
     public val standardUpdatePolicy: YStandardUpdatePolicy get() = configuredStandardUpdatePolicy
+    public val rootSchemas: YRootSchemaRegistry get() = configuredRootSchemas
 
     internal fun ensureThreadAccess() {
         val current = Thread.currentThread()
@@ -288,7 +302,10 @@ public class YDoc(
 
     public operator fun get(name: String): AbstractYType {
         ensureThreadAccess()
-        return rootType(name) ?: unopenedRoot(name) ?: createUnopenedRoot(name)
+        return rootType(name)
+            ?: materializeConfiguredRoot(name)
+            ?: unopenedRoot(name)
+            ?: createUnopenedRoot(name)
     }
 
     public fun get(name: String, kind: RootKind): AbstractYType = when (kind) {
@@ -305,7 +322,33 @@ public class YDoc(
 
     public fun getOrNull(name: String): AbstractYType? {
         ensureThreadAccess()
-        return rootType(name) ?: unopenedRoot(name)
+        return rootType(name) ?: materializeConfiguredStoredRoot(name) ?: unopenedRoot(name)
+    }
+
+    /**
+     * Replace the optional schema lookup. Existing roots are validated and materialized, while
+     * schemas for absent roots stay lazy and do not change [share] or [rootNames].
+     */
+    public fun installRootSchemas(registry: YRootSchemaRegistry): YDoc = withDocumentAccess {
+        val rootNames = rootNames()
+        val resolved = rootNames.mapNotNull { name -> registry.resolve(name)?.let { schema -> name to schema } }
+        resolved.forEach { (name, schema) -> requireCompatibleRootSchema(name, schema) }
+        configuredRootSchemas = registry
+        resolvedRootSchemas.clear()
+        resolved.forEach { (name, schema) ->
+            resolvedRootSchemas[name] = schema
+            materializeRootSchema(name, schema)
+        }
+        this
+    }
+
+    /** Register one schema without creating an absent root. */
+    public fun registerRootSchema(name: String, schema: YRootSchema): YDoc = withDocumentAccess {
+        requireCompatibleRootSchema(name, schema)
+        configuredRootSchemas = configuredRootSchemas.withSchema(name, schema)
+        resolvedRootSchemas[name] = schema
+        if (name in rootNames()) materializeRootSchema(name, schema)
+        this
     }
 
     public fun get(): YArray = getArray("")
@@ -319,11 +362,19 @@ public class YDoc(
     public fun getXmlFragment(name: String = ""): YXmlFragment =
         getOrCreate(name, RootKind.XmlFragment) { YXmlFragment(this, name) }
 
-    public fun getXmlElement(name: String = "", nodeName: String = "UNDEFINED"): YXmlElementType =
-        getOrCreate(name, RootKind.XmlElement) { YXmlElementType(this, name, nodeName) }
+    public fun getXmlElement(name: String = "", nodeName: String = "UNDEFINED"): YXmlElementType {
+        val schema = resolveRootSchema(name) as? YRootSchema.XmlElement
+        val resolvedNodeName = schema?.nodeName?.takeIf { nodeName == "UNDEFINED" } ?: nodeName
+        requireConfiguredXmlName(name, RootKind.XmlElement, resolvedNodeName)
+        return getOrCreate(name, RootKind.XmlElement) { YXmlElementType(this, name, resolvedNodeName) }
+    }
 
-    public fun getXmlHook(name: String = "", hookName: String = "UNDEFINED"): YXmlHook =
-        getOrCreate(name, RootKind.XmlHook) { YXmlHook(this, name, hookName) }
+    public fun getXmlHook(name: String = "", hookName: String = "UNDEFINED"): YXmlHook {
+        val schema = resolveRootSchema(name) as? YRootSchema.XmlHook
+        val resolvedHookName = schema?.hookName?.takeIf { hookName == "UNDEFINED" } ?: hookName
+        requireConfiguredXmlName(name, RootKind.XmlHook, resolvedHookName)
+        return getOrCreate(name, RootKind.XmlHook) { YXmlHook(this, name, resolvedHookName) }
+    }
 
     public fun getXmlText(name: String = ""): YXmlTextType =
         getOrCreate(name, RootKind.XmlText) { YXmlTextType(this, name) }
@@ -1227,6 +1278,7 @@ public class YDoc(
         withDocumentAccess {
             updateLimits.requireStructCount(update.items.size)
             updateLimits.requireDeleteRangeCount(update.deleteSet.rangeCount())
+            prepareConfiguredRoots(update)
             avoidClientIdCollision(update)
             transact(origin, local = false) {
                 integrateRemote(update.items)
@@ -1545,7 +1597,7 @@ public class YDoc(
 
     private fun sharedRootEntry(name: String): AbstractYType? {
         rootTypes[name]?.let { return it }
-        return unopenedRoot(name)
+        return materializeConfiguredStoredRoot(name) ?: unopenedRoot(name)
     }
 
     private fun hasSharedRoot(name: String): Boolean =
@@ -1567,6 +1619,101 @@ public class YDoc(
     }
 
     internal fun concreteRootTypes(): Map<String, AbstractYType> = rootTypes.toMap()
+
+    private fun resolveRootSchema(name: String): YRootSchema? {
+        if (configuredRootSchemas === YRootSchemaRegistry.EMPTY) return null
+        if (name in resolvedRootSchemas) return resolvedRootSchemas[name]
+        return configuredRootSchemas.resolve(name).also { schema -> resolvedRootSchemas[name] = schema }
+    }
+
+    private fun materializeConfiguredStoredRoot(name: String): AbstractYType? {
+        if (!store.hasParent(name)) return null
+        return materializeConfiguredRoot(name)
+    }
+
+    private fun materializeConfiguredRoot(name: String): AbstractYType? =
+        resolveRootSchema(name)?.let { schema -> materializeRootSchema(name, schema) }
+
+    private fun materializeRootSchema(name: String, schema: YRootSchema): AbstractYType {
+        require(!isNestedName(name)) { "nested type '$name' cannot be opened as a root type" }
+        requireCompatibleRootSchema(name, schema)
+        return when (schema) {
+            YRootSchema.Array -> getArray(name)
+            YRootSchema.Map -> getMap(name)
+            YRootSchema.Text -> getText(name)
+            YRootSchema.XmlFragment -> getXmlFragment(name)
+            is YRootSchema.XmlElement -> getXmlElement(name, schema.nodeName)
+            is YRootSchema.XmlHook -> getXmlHook(name, schema.hookName)
+            YRootSchema.XmlText -> getXmlText(name)
+        }
+    }
+
+    private fun requireCompatibleRootSchema(name: String, schema: YRootSchema) {
+        val existing = rootTypes[name] ?: return
+        if (existing.kind != schema.kind) {
+            throw YRootSchemaConflictException(name, "configured ${schema.kind}, document has ${existing.kind}")
+        }
+        when {
+            existing is YXmlElementType && schema is YRootSchema.XmlElement &&
+                existing.nodeName != schema.nodeName -> throw YRootSchemaConflictException(
+                name,
+                "configured XML nodeName '${schema.nodeName}', document has '${existing.nodeName}'",
+            )
+
+            existing is YXmlHook && schema is YRootSchema.XmlHook &&
+                existing.hookName != schema.hookName -> throw YRootSchemaConflictException(
+                name,
+                "configured XML hookName '${schema.hookName}', document has '${existing.hookName}'",
+            )
+        }
+    }
+
+    private fun requireConfiguredXmlName(name: String, kind: RootKind, requestedName: String) {
+        when (val schema = resolveRootSchema(name)) {
+            is YRootSchema.XmlElement -> if (kind == RootKind.XmlElement && schema.nodeName != requestedName) {
+                throw YRootSchemaConflictException(
+                    name,
+                    "configured XML nodeName '${schema.nodeName}', getter requested '$requestedName'",
+                )
+            }
+
+            is YRootSchema.XmlHook -> if (kind == RootKind.XmlHook && schema.hookName != requestedName) {
+                throw YRootSchemaConflictException(
+                    name,
+                    "configured XML hookName '${schema.hookName}', getter requested '$requestedName'",
+                )
+            }
+
+            else -> Unit
+        }
+    }
+
+    private fun prepareConfiguredRoots(update: DocumentUpdate) {
+        if (configuredRootSchemas === YRootSchemaRegistry.EMPTY) return
+        val nestedParents = update.parentItemIds.keys
+        val candidateNames = buildSet {
+            update.items.asSequence()
+                .filter { item -> item.unresolvedParent == null }
+                .mapTo(this) { item -> item.parent }
+            addAll(update.parentKinds.keys)
+        }.filter { name ->
+            isSharedRootName(name) &&
+                name !in nestedParents &&
+                !name.startsWith("__yks_yjs_nested__:")
+        }
+        val resolved = candidateNames.mapNotNull { name ->
+            resolveRootSchema(name)?.let { schema -> name to schema }
+        }
+        resolved.forEach { (name, schema) ->
+            update.parentKinds[name]?.let { updateKind ->
+                if (updateKind != schema.kind) {
+                    throw YRootSchemaConflictException(name, "configured ${schema.kind}, update declares $updateKind")
+                }
+            }
+            requireCompatibleRootSchema(name, schema)
+        }
+        resolved.forEach { (name, schema) -> materializeRootSchema(name, schema) }
+    }
 
     internal fun knownParentKinds(): Map<String, RootKind> = buildMap {
         rootTypes.forEach { (name, type) -> put(name, type.kind) }
@@ -4258,6 +4405,11 @@ public class YDoc(
         factory: () -> T,
     ): T {
         ensureThreadAccess()
+        resolveRootSchema(name)?.let { schema ->
+            if (schema.kind != kind) {
+                throw YRootSchemaConflictException(name, "configured ${schema.kind}, getter requested $kind")
+            }
+        }
         val existing = rootTypes[name]
         if (existing != null) {
             require(existing.kind == kind) { "root type '$name' already exists as ${existing.kind}" }
