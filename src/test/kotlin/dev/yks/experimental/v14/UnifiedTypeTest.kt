@@ -16,6 +16,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertSame
 import kotlin.test.assertNull
+import kotlin.test.assertNotSame
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalYjs14Api::class)
@@ -308,5 +309,126 @@ class UnifiedTypeTest {
             modify.delta.attributes["count"],
         )
         assertNull(outer.asV14Type().applyDeltaWithCorrection(DeltaBuilder().done(), renderer = renderer))
+    }
+
+    @Test
+    fun heldDeltaReferenceStaysLiveAndClearCacheDetachesIt() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        val type = text.asV14Type()
+        text.insert(0, "ab")
+        val held = type.delta
+
+        text.insert(2, "!")
+
+        assertSame(held, type.delta)
+        assertEquals("ab!", assertIs<ChildOp.InsertText>(held.children.single()).text)
+
+        type.clearCache()
+        text.insert(3, "?")
+
+        val rematerialized = type.delta
+        assertNotSame(held, rematerialized)
+        assertEquals("ab!", assertIs<ChildOp.InsertText>(held.children.single()).text)
+        assertEquals("ab!?", assertIs<ChildOp.InsertText>(rematerialized.children.single()).text)
+    }
+
+    @Test
+    fun deltaEventEmitsAChangeAndRefreshesNestedStateInPlace() {
+        val doc = YDoc(clientId = 1)
+        val outer = doc.getArray("items")
+        val nested = YMap()
+        nested.setAttr("count", 1)
+        outer.push(nested)
+        val type = outer.asV14Type()
+        val held = type.delta
+        val events = mutableListOf<TypeEvent>()
+        type.on("delta") { event -> events += event }
+
+        doc.transact(origin = "local") { nested.setAttr("count", 2) }
+
+        assertSame(held, type.delta)
+        assertEquals(1, events.size)
+        assertEquals("local", events.single().origin)
+        val eventModify = assertIs<ChildOp.Modify>(checkNotNull(events.single().delta).children.single())
+        assertEquals(
+            AttributeOp.Set(DeltaValue.integer(2)),
+            eventModify.delta.attributes["count"],
+        )
+        val childState = assertIs<DeltaValue.SharedTypeState>(
+            assertIs<ChildOp.InsertValues>(held.children.single()).values.single(),
+        )
+        assertSame(nested, childState.value)
+        assertEquals(
+            AttributeOp.Set(DeltaValue.integer(2)),
+            childState.delta.attributes["count"],
+        )
+        assertTrue(events.single().transaction != null)
+
+        type.clearCache()
+        nested.setAttr("count", 3)
+
+        assertEquals(2, events.size)
+        assertEquals(
+            AttributeOp.Set(DeltaValue.integer(3)),
+            assertIs<ChildOp.Modify>(checkNotNull(events.last().delta).children.single())
+                .delta.attributes["count"],
+        )
+    }
+
+    @Test
+    fun rendererSwitchRefreshesLiveDeltaAndEmitsRendererOnlyChange() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("body")
+        text.insert(0, "ab")
+        val type = text.asV14Type()
+        val held = type.delta
+        val events = mutableListOf<TypeEvent>()
+        type.on("delta") { event -> events += event }
+        val renderer = object : dev.yks.BaseRenderer() {
+            override val attributed = dev.yks.createIdSet().also { ids -> ids.add(1, 0, 1) }
+
+            override fun readContent(
+                contents: MutableList<dev.yks.AttributedContent>,
+                client: Long,
+                clock: Long,
+                deleted: Boolean,
+                content: dev.yks.AbstractContent,
+                renderBehavior: Int,
+            ) {
+                if (client == 1L && clock == 0L) return
+                super.readContent(contents, client, clock, deleted, content, renderBehavior)
+            }
+        }
+
+        type.useRenderer(renderer)
+
+        assertSame(held, type.delta)
+        assertEquals("b", assertIs<ChildOp.InsertText>(held.children.single()).text)
+        assertEquals(1, events.size)
+        assertNull(events.single().origin)
+        assertNull(events.single().transaction)
+        assertEquals(1, assertIs<ChildOp.Delete>(checkNotNull(events.single().delta).children.first()).length)
+    }
+
+    @Test
+    fun deepSnapshotPreservesSharedTypesInsideDataContainers() {
+        val doc = YDoc(clientId = 1)
+        val root = doc.getArray("root")
+        val nested = YMap()
+        nested.setAttr("name", "Ada")
+        root.push(mapOf("children" to listOf(nested)))
+
+        val value = assertIs<DeltaValue.MapData>(
+            assertIs<ChildOp.InsertValues>(root.asV14Type().toDelta().children.single()).values.single(),
+        )
+        val list = assertIs<DeltaValue.ListData>(value.values["children"])
+        val child = assertIs<DeltaValue.SharedTypeState>(list.values.single())
+
+        assertSame(nested, child.value)
+        assertEquals(
+            AttributeOp.Set(DeltaValue.text("Ada")),
+            child.delta.attributes["name"],
+        )
     }
 }
