@@ -12,6 +12,8 @@ doc.clientID = 14
 doc.get('body').insert(0, 'A😀한', { bold: true })
 doc.get('items').insert(0, [1, 'x', true])
 doc.get('meta').setAttr('title', 'hello')
+doc.get('mixed').insert(0, 'A')
+doc.get('mixed').insert(1, [null, 7])
 const paragraph = new Y.Type('p')
 paragraph.setAttr('id', 'intro')
 paragraph.insert(0, 'hello')

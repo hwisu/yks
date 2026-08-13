@@ -659,7 +659,7 @@ public class YArray internal constructor(doc: YDoc, name: String) : AbstractYTyp
             if (warnIfPreliminary()) return 0
             doc.ensureThreadAccess()
             if (!maintainedLengthInitialized) {
-                maintainedLength = doc.visibleLength(name, RootKind.Array).toNonNegativeInt("array length")
+                maintainedLength = doc.totalVisibleLength(name).toNonNegativeInt("array length")
                 cachedAccessUnchecked = doc.threadAccessPolicy == YThreadAccessPolicy.UNCHECKED
                 maintainedLengthInitialized = true
                 doc.registerMaintainedLength(name)
@@ -670,7 +670,6 @@ public class YArray internal constructor(doc: YDoc, name: String) : AbstractYTyp
     public val length: Int get() = size
 
     internal override fun adjustVisibleLength(changedKind: RootKind, delta: Long) {
-        if (changedKind != RootKind.Array) return
         firstVisibleItemCached = false
         firstVisibleItem = null
         firstVisibleScalarCached = false
@@ -702,7 +701,7 @@ public class YArray internal constructor(doc: YDoc, name: String) : AbstractYTyp
         require(start <= size) { "insert index is out of bounds" }
         doc.preflightNestedValue(values)
         doc.transact {
-            val anchors = doc.insertionAnchors(name, RootKind.Array, start)
+            val anchors = doc.insertionAnchors(name, start)
             var origin = anchors.first
             val rightOrigin = anchors.second
             val contents = buildList {
@@ -898,7 +897,7 @@ public class YArray internal constructor(doc: YDoc, name: String) : AbstractYTyp
                 doc.ensureThreadAccess()
             }
             if (!firstVisibleItemCached) {
-                firstVisibleItem = doc.firstVisibleSequenceItem(name, RootKind.Array)
+                firstVisibleItem = doc.firstVisibleSequenceItem(name)
                 cachedAccessUnchecked = doc.threadAccessPolicy == YThreadAccessPolicy.UNCHECKED
                 firstVisibleItemCached = true
             }
@@ -918,15 +917,19 @@ public class YArray internal constructor(doc: YDoc, name: String) : AbstractYTyp
             }
             return when (val content = item.content) {
                 is ItemContent.XmlType -> doc.typeFromXmlType(content)
+                is ItemContent.Text -> content.value.firstOrNull()?.toString()
+                is ItemContent.TextEmbed -> doc.valueToAny(content.value)
                 else -> null
             }
         }
-        val (item, offset) = doc.visibleSequencePositionAt(name, RootKind.Array, index) ?: return null
+        val (item, offset) = doc.visibleSequencePositionAt(name, index) ?: return null
         return when (val content = item.content) {
             is ItemContent.Value -> doc.valueToAny(content.value)
             is ItemContent.ArrayValues ->
                 doc.valueToAny(content.values[offset.toNonNegativeInt("array value offset")])
             is ItemContent.XmlType -> doc.typeFromXmlType(content)
+            is ItemContent.Text -> content.value[offset.toNonNegativeInt("array text offset")].toString()
+            is ItemContent.TextEmbed -> doc.valueToAny(content.value)
             else -> null
         }
     }
@@ -945,13 +948,17 @@ public class YArray internal constructor(doc: YDoc, name: String) : AbstractYTyp
             .filter { item ->
                 item.content is ItemContent.Value ||
                     item.content is ItemContent.ArrayValues ||
-                    (item.content is ItemContent.XmlType && item.content.kind == RootKind.Array)
+                    item.content is ItemContent.Text ||
+                    item.content is ItemContent.TextEmbed ||
+                    item.content is ItemContent.XmlType
             }
             .flatMap { item ->
                 when (val content = item.content) {
                     is ItemContent.Value -> listOf(doc.valueToAny(content.value))
                     is ItemContent.ArrayValues -> content.values.map(doc::valueToAny)
                     is ItemContent.XmlType -> listOf(doc.typeFromXmlType(content))
+                    is ItemContent.Text -> content.value.map(Char::toString)
+                    is ItemContent.TextEmbed -> listOf(doc.valueToAny(content.value))
                     else -> error("item content is not an array value: ${content::class.simpleName}")
                 }
             }
@@ -1057,13 +1064,17 @@ public class YArray internal constructor(doc: YDoc, name: String) : AbstractYTyp
             .filter { item ->
                 item.content is ItemContent.Value ||
                     item.content is ItemContent.ArrayValues ||
-                    (item.content is ItemContent.XmlType && item.content.kind == RootKind.Array)
+                    item.content is ItemContent.Text ||
+                    item.content is ItemContent.TextEmbed ||
+                    item.content is ItemContent.XmlType
             }
             .flatMap { item ->
                 when (val content = item.content) {
                     is ItemContent.Value -> listOf(doc.valueToJson(content.value))
                     is ItemContent.ArrayValues -> content.values.map(doc::valueToJson)
                     is ItemContent.XmlType -> listOf(doc.typeFromXmlType(content).toJson())
+                    is ItemContent.Text -> content.value.map(Char::toString)
+                    is ItemContent.TextEmbed -> listOf(doc.valueToJson(content.value))
                     else -> error("item content is not an array value: ${content::class.simpleName}")
                 }
             }

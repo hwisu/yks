@@ -1248,8 +1248,8 @@ private fun StoreItem.hasCompatibleKnownParentKind(parentKind: RootKind): Boolea
         parentSub != null -> true
         else -> parentKind == RootKind.Map || parentKind == RootKind.XmlHook
     }
-    is ItemContent.ArrayValues -> parentSub == null && parentKind == RootKind.Array
-    is ItemContent.Value -> parentKind == RootKind.Array
+    is ItemContent.ArrayValues -> parentSub == null && parentKind == content.kind
+    is ItemContent.Value -> parentSub == null && parentKind == content.kind
     is ItemContent.Text,
     is ItemContent.TextEmbed,
     is ItemContent.NativeTextFormat -> parentKind == content.kind
@@ -1406,10 +1406,10 @@ private fun StoreItem.hasCompatibleV1ParentKind(
             else -> nestedKind?.let { kind -> kind == RootKind.Map || kind == RootKind.XmlHook }
                 ?: (profile?.allMapEntries == true)
         }
-        is ItemContent.ArrayValues -> nestedKind?.let { kind -> kind == RootKind.Array }
-            ?: (untypedRoot || profile?.allArraySequence == true)
-        is ItemContent.Value -> nestedKind?.let { kind -> kind == RootKind.Array }
-            ?: (untypedRoot || profile?.allArraySequence == true)
+        is ItemContent.ArrayValues -> nestedKind?.let { kind -> kind == content.kind }
+            ?: (untypedRoot || profile?.singleSequenceKind == content.kind)
+        is ItemContent.Value -> nestedKind?.let { kind -> kind == content.kind }
+            ?: (untypedRoot || profile?.singleSequenceKind == content.kind)
         is ItemContent.Text,
         is ItemContent.TextEmbed,
         is ItemContent.NativeTextFormat -> nestedKind?.let { kind -> kind == content.kind }
@@ -1438,22 +1438,24 @@ private fun StoreItem.hasCompatibleV1ParentKind(
 }
 
 private fun ItemContent.isSupportedStandardContent(isV2: Boolean): Boolean = when (this) {
-    is ItemContent.Value -> kind == RootKind.Array && value.isSupportedAnyValue(topLevel = true)
-    is ItemContent.ArrayValues -> values.all { value -> value.isSupportedAnyValue(topLevel = true) }
+    is ItemContent.Value ->
+        kind !in setOf(RootKind.Map, RootKind.XmlHook) && value.isSupportedAnyValue(topLevel = true)
+    is ItemContent.ArrayValues ->
+        kind !in setOf(RootKind.Map, RootKind.XmlHook) && values.all { value -> value.isSupportedAnyValue(topLevel = true) }
     is ItemContent.MapEntry -> value.isSupportedAnyValue(topLevel = true)
     is ItemContent.MapEntries -> values.all { value -> value.isSupportedAnyValue(topLevel = true) }
     is ItemContent.Text ->
-        kind in setOf(RootKind.Text, RootKind.XmlText, RootKind.XmlFragment, RootKind.XmlElement) &&
+        kind in setOf(RootKind.Array, RootKind.Text, RootKind.XmlText, RootKind.XmlFragment, RootKind.XmlElement) &&
             baseAttributes.isEmpty()
     is ItemContent.TextEmbed ->
-        kind in setOf(RootKind.Text, RootKind.XmlText) &&
+        kind !in setOf(RootKind.Map, RootKind.XmlHook) &&
             baseAttributes.isEmpty() &&
             if (value is YValue.SubdocRef) value.isSupportedAnyValue(topLevel = true)
             else if (isV2) value.isSupportedAnyValue(topLevel = false)
             else value.isSupportedJsonValue()
     is ItemContent.TextFormat -> false
     is ItemContent.NativeTextFormat ->
-        kind in setOf(RootKind.Text, RootKind.XmlText) &&
+        kind !in setOf(RootKind.Map, RootKind.XmlHook) &&
             if (isV2) value.isSupportedAnyValue(topLevel = false) else value.isSupportedJsonValue()
     is ItemContent.XmlNode -> false
     is ItemContent.XmlType ->
@@ -2315,9 +2317,13 @@ private fun WireContent.toSingleItemContentOrNull(kind: RootKind): ItemContent? 
     is WireContent.Json -> if (values.size > 1) {
         val packedValues = values.map { value -> YValue.from(value.toSemanticJsonValue()) }
         when (kind) {
-            RootKind.Array -> ItemContent.ArrayValues(packedValues)
+            RootKind.Array,
+            RootKind.Text,
+            RootKind.XmlText,
+            RootKind.XmlFragment,
+            RootKind.XmlElement -> ItemContent.ArrayValues(packedValues, kind)
             RootKind.Map -> ItemContent.MapEntries(packedValues)
-            else -> null
+            RootKind.XmlHook -> ItemContent.MapEntries(packedValues)
         }
     } else {
         null
@@ -2325,9 +2331,13 @@ private fun WireContent.toSingleItemContentOrNull(kind: RootKind): ItemContent? 
     is WireContent.AnyContent -> if (values.size > 1) {
         val packedValues = values.map(YValue::from)
         when (kind) {
-            RootKind.Array -> ItemContent.ArrayValues(packedValues)
+            RootKind.Array,
+            RootKind.Text,
+            RootKind.XmlText,
+            RootKind.XmlFragment,
+            RootKind.XmlElement -> ItemContent.ArrayValues(packedValues, kind)
             RootKind.Map -> ItemContent.MapEntries(packedValues)
-            else -> null
+            RootKind.XmlHook -> ItemContent.MapEntries(packedValues)
         }
     } else {
         null
@@ -2369,7 +2379,7 @@ private fun Any?.toSequenceContent(kind: RootKind): ItemContent {
         RootKind.Text,
         RootKind.XmlText -> ItemContent.TextEmbed(value, kind = kind)
         RootKind.XmlFragment,
-        RootKind.XmlElement -> ItemContent.XmlNode(xmlNodeFromDeltaValue(this).toValue(), kind)
+        RootKind.XmlElement -> ItemContent.Value(value, kind)
         RootKind.Array -> ItemContent.Value(value)
     }
 }

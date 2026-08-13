@@ -366,7 +366,8 @@ public class YXmlElementType internal constructor(
 
     public fun get(index: Int): Any? {
         if (index < 0) return null
-        return doc.visibleSequenceItemAt(name, kind, index)?.content?.toXmlChild(doc)
+        val (item, offset) = doc.visibleSequencePositionAt(name, kind, index) ?: return null
+        return item.content.toXmlListValue(doc, offset.toNonNegativeInt("XML child offset"))
     }
 
     public fun getType(index: Int): AbstractYType? {
@@ -385,7 +386,7 @@ public class YXmlElementType internal constructor(
 
     public fun toArray(): List<Any?> {
         if (warnIfPreliminary()) return emptyList()
-        return xmlItems().map { it.content.toXmlChild(doc) }
+        return xmlItems().flatMap { item -> item.content.toXmlListValues(doc) }
     }
 
     public fun toDelta(): List<YArrayDeltaOp> = xmlChildrenToDelta(toArray())
@@ -484,7 +485,7 @@ public class YXmlElementType internal constructor(
     override fun toJson(): Map<String, Any?> = linkedMapOf(
         "nodeName" to nodeName,
         "attributes" to getAttrs(),
-        "children" to xmlItems().map { item -> item.content.toXmlEventJson(doc) },
+        "children" to xmlItems().flatMap { item -> item.content.toXmlEventJsonValues(doc) },
     )
 
     override fun toJSON(): String = toString()
@@ -1128,7 +1129,8 @@ public class YXmlFragment internal constructor(doc: YDoc, name: String) :
 
     public fun get(index: Int): Any? {
         if (index < 0) return null
-        return doc.visibleSequenceItemAt(name, RootKind.XmlFragment, index)?.content?.toXmlChild(doc)
+        val (item, offset) = doc.visibleSequencePositionAt(name, RootKind.XmlFragment, index) ?: return null
+        return item.content.toXmlListValue(doc, offset.toNonNegativeInt("XML child offset"))
     }
 
     public fun getType(index: Int): AbstractYType? {
@@ -1147,7 +1149,7 @@ public class YXmlFragment internal constructor(doc: YDoc, name: String) :
 
     public fun toArray(): List<Any?> {
         if (warnIfPreliminary()) return emptyList()
-        return xmlItems().map { it.content.toXmlChild(doc) }
+        return xmlItems().flatMap { item -> item.content.toXmlListValues(doc) }
     }
 
     public fun toDelta(): List<YArrayDeltaOp> = xmlChildrenToDelta(toArray())
@@ -1279,7 +1281,7 @@ public class YXmlFragment internal constructor(doc: YDoc, name: String) :
         }
     }
 
-    override fun toJson(): List<Any?> = xmlItems().map { item -> item.content.toXmlEventJson(doc) }
+    override fun toJson(): List<Any?> = xmlItems().flatMap { item -> item.content.toXmlEventJsonValues(doc) }
 
     override fun toJSON(): String = toString()
 
@@ -1403,12 +1405,48 @@ internal fun AbstractYType.xmlNodeNameOrEmpty(): String = when (this) {
 internal fun ItemContent.isXmlSequenceChild(): Boolean =
     this is ItemContent.XmlNode ||
         this is ItemContent.XmlType ||
+        this is ItemContent.Value ||
+        this is ItemContent.ArrayValues ||
+        this is ItemContent.TextEmbed ||
         (this is ItemContent.Text && kind in setOf(RootKind.XmlFragment, RootKind.XmlElement))
+
+internal fun ItemContent.toXmlListValues(doc: YDoc): List<Any?> = when (this) {
+    is ItemContent.XmlNode -> listOf(value.toNode())
+    is ItemContent.XmlType -> listOf(doc.typeFromXmlType(this))
+    is ItemContent.Text -> value.map(Char::toString)
+    is ItemContent.Value -> listOf(doc.valueToAny(value))
+    is ItemContent.ArrayValues -> values.map(doc::valueToAny)
+    is ItemContent.TextEmbed -> listOf(doc.valueToAny(value))
+    else -> error("item content is not an XML child: ${this::class.simpleName}")
+}
+
+internal fun ItemContent.toXmlListValue(doc: YDoc, offset: Int): Any? = when (this) {
+    is ItemContent.XmlNode -> value.toNode()
+    is ItemContent.XmlType -> doc.typeFromXmlType(this)
+    is ItemContent.Text -> value[offset].toString()
+    is ItemContent.Value -> doc.valueToAny(value)
+    is ItemContent.ArrayValues -> doc.valueToAny(values[offset])
+    is ItemContent.TextEmbed -> doc.valueToAny(value)
+    else -> error("item content is not an XML child: ${this::class.simpleName}")
+}
+
+internal fun ItemContent.toXmlEventJsonValues(doc: YDoc): List<Any?> = when (this) {
+    is ItemContent.XmlNode -> listOf(value.toNode().toJson())
+    is ItemContent.XmlType -> listOf(doc.typeFromXmlType(this).toJson())
+    is ItemContent.Text -> value.map(Char::toString)
+    is ItemContent.Value -> listOf(doc.valueToJson(value))
+    is ItemContent.ArrayValues -> values.map(doc::valueToJson)
+    is ItemContent.TextEmbed -> listOf(doc.valueToJson(value))
+    else -> error("item content is not an XML child: ${this::class.simpleName}")
+}
 
 internal fun ItemContent.toXmlEventJson(doc: YDoc): Any? = when (this) {
     is ItemContent.XmlNode -> value.toNode().toJson()
     is ItemContent.XmlType -> doc.typeFromXmlType(this).toJson()
     is ItemContent.Text -> value
+    is ItemContent.Value -> doc.valueToJson(value)
+    is ItemContent.ArrayValues -> values.map(doc::valueToJson)
+    is ItemContent.TextEmbed -> doc.valueToJson(value)
     else -> error("item content is not an XML child: ${this::class.simpleName}")
 }
 
@@ -1416,6 +1454,11 @@ internal fun ItemContent.toXmlString(doc: YDoc): String = when (this) {
     is ItemContent.XmlNode -> value.toNode().toString()
     is ItemContent.XmlType -> doc.typeFromXmlType(this).toString()
     is ItemContent.Text -> renderXmlText(value, textAttributesToPublic(attributes))
+    is ItemContent.Value -> xmlAttrValueToString(doc.valueToAny(value))
+    is ItemContent.ArrayValues -> values.joinToString(separator = "") { value ->
+        xmlAttrValueToString(doc.valueToAny(value))
+    }
+    is ItemContent.TextEmbed -> xmlAttrValueToString(doc.valueToAny(value))
     else -> error("item content is not an XML child: ${this::class.simpleName}")
 }
 
@@ -1423,6 +1466,9 @@ internal fun ItemContent.toXmlChild(doc: YDoc): Any? = when (this) {
     is ItemContent.XmlNode -> value.toNode()
     is ItemContent.XmlType -> doc.typeFromXmlType(this)
     is ItemContent.Text -> YXmlText(value, textAttributesToPublic(attributes))
+    is ItemContent.Value -> doc.valueToAny(value)
+    is ItemContent.ArrayValues -> values.map(doc::valueToAny)
+    is ItemContent.TextEmbed -> doc.valueToAny(value)
     else -> error("item content is not an XML child: ${this::class.simpleName}")
 }
 
@@ -1437,6 +1483,11 @@ internal fun ItemContent.toXmlNode(doc: YDoc): YXmlNode = when (this) {
         else -> YXmlText("[object Object]")
     }
     is ItemContent.Text -> YXmlText(value, textAttributesToPublic(attributes))
+    is ItemContent.Value -> YXmlText(xmlAttrValueToString(doc.valueToAny(value)))
+    is ItemContent.ArrayValues -> YXmlText(
+        values.joinToString(separator = "") { value -> xmlAttrValueToString(doc.valueToAny(value)) },
+    )
+    is ItemContent.TextEmbed -> YXmlText(xmlAttrValueToString(doc.valueToAny(value)))
     else -> error("item content is not an XML fragment child: ${this::class.simpleName}")
 }
 

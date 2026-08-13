@@ -23,5 +23,6 @@ for (const format of ['v1', 'v2']) {
   })
   assert.deepEqual(target.get('items').toArray(), [1, 'x', true])
   assert.deepEqual(target.get('meta').getAttrs(), { title: 'hello' })
+  assert.deepEqual(target.get('mixed').toArray(), ['A', null, 7])
   assert.equal(target.get('xml').toString(), '<p id="intro">hello</p>')
 }

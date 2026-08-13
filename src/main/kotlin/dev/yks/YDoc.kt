@@ -1300,6 +1300,11 @@ public class YDoc(
         return store.visibleLength(parent, kind)
     }
 
+    internal fun totalVisibleLength(parent: String): Long {
+        ensureThreadAccess()
+        return store.totalVisibleLength(parent)
+    }
+
     internal fun visibleSequenceItemAt(parent: String, kind: RootKind, index: Int): StoreItem? {
         ensureThreadAccess()
         if (index < 0) return null
@@ -1313,9 +1318,21 @@ public class YDoc(
         return item to (index.toLong() - itemStart)
     }
 
+    internal fun visibleSequencePositionAt(parent: String, index: Int): Pair<StoreItem, Long>? {
+        ensureThreadAccess()
+        if (index < 0) return null
+        val (item, itemStart) = store.visibleSequenceItemAt(parent, index.toLong()) ?: return null
+        return item to (index.toLong() - itemStart)
+    }
+
     internal fun firstVisibleSequenceItem(parent: String, kind: RootKind): StoreItem? {
         ensureThreadAccess()
         return store.firstVisibleSequenceItem(parent, kind)
+    }
+
+    internal fun firstVisibleSequenceItem(parent: String): StoreItem? {
+        ensureThreadAccess()
+        return store.firstVisibleSequenceItem(parent)
     }
 
     internal fun visibleSequenceIndexAfter(parent: String, kind: RootKind, id: Id): Int? =
@@ -1975,6 +1992,32 @@ public class YDoc(
         return left?.lastId to right?.id
     }
 
+    internal fun insertionAnchors(parent: String, index: Int): Pair<Id?, Id?> {
+        val targetIndex = index.toLong()
+        val visibleLength = store.totalVisibleLength(parent)
+        require(targetIndex <= visibleLength) { "insert index is out of bounds" }
+        if (targetIndex == visibleLength) {
+            val left = store.lastSequenceItem(parent)
+            registerVirtualInsertionSplitCandidate(left, null)
+            return left?.lastId to null
+        }
+        val position = store.visibleSequenceItemAt(parent, targetIndex)
+        if (position != null && targetIndex > position.second) {
+            val containing = position.first
+            val splitClock = checkedClockAdd(
+                containing.id.clock,
+                targetIndex - position.second,
+                "sequence insertion split clock",
+            )
+            store.getStoreItemCleanStart(Id(containing.id.client, splitClock)) { right ->
+                currentTransaction?.mergeStructs?.add(right.id)
+            }
+        }
+        val (left, right) = store.sequenceAnchors(parent, targetIndex)
+        registerVirtualInsertionSplitCandidate(left, right)
+        return left?.lastId to right?.id
+    }
+
     private fun registerVirtualInsertionSplitCandidate(left: StoreItem?, right: StoreItem?) {
         if (
             left != null &&
@@ -2211,7 +2254,7 @@ public class YDoc(
         }
         ClockRangeCursor(sequence(type.name)).forEachRange(::boundaries) { source, startClock, endClock ->
             val item = source.clockRangeView(startClock, endClock)
-            if (item.content.kind == type.kind && item.countable && item.isVisibleIn(snapshot)) {
+            if (item.countable && item.isVisibleIn(snapshot)) {
                 addAll(arrayItemValues(item))
             }
             true
@@ -2222,6 +2265,8 @@ public class YDoc(
         is ItemContent.Value -> valueToAny(content.value)
         is ItemContent.ArrayValues -> valueToAny(content.values.last())
         is ItemContent.XmlType -> typeFromXmlType(content)
+        is ItemContent.Text -> content.value.lastOrNull()?.toString()
+        is ItemContent.TextEmbed -> valueToAny(content.value)
         else -> error("item content is not an array value: ${content::class.simpleName}")
     }
 
@@ -2229,6 +2274,8 @@ public class YDoc(
         is ItemContent.Value -> listOf(valueToAny(content.value))
         is ItemContent.ArrayValues -> content.values.map(::valueToAny)
         is ItemContent.XmlType -> listOf(typeFromXmlType(content))
+        is ItemContent.Text -> content.value.map(Char::toString)
+        is ItemContent.TextEmbed -> listOf(valueToAny(content.value))
         else -> error("item content is not an array value: ${content::class.simpleName}")
     }
 
@@ -5413,15 +5460,17 @@ private fun ItemContent.withRemoteParentKind(kind: RootKind): ItemContent = when
     is ItemContent.Value -> when (kind) {
         RootKind.Map,
         RootKind.XmlHook -> ItemContent.MapEntry(value)
-        RootKind.Array -> this
         RootKind.Text,
-        RootKind.XmlText -> ItemContent.TextEmbed(value, kind = kind)
-        else -> this
+        RootKind.XmlText -> if (value is YValue.SubdocRef) ItemContent.TextEmbed(value, kind = kind) else copy(kind = kind)
+        else -> copy(kind = kind)
     }
-    is ItemContent.MapEntry -> if (kind == RootKind.Map || kind == RootKind.XmlHook) this else ItemContent.Value(value)
+    is ItemContent.MapEntry ->
+        if (kind == RootKind.Map || kind == RootKind.XmlHook) this else ItemContent.Value(value, kind)
     is ItemContent.ArrayValues -> {
-        require(kind == RootKind.Array) { "packed array values cannot be retagged as $kind" }
-        this
+        require(kind !in setOf(RootKind.Map, RootKind.XmlHook)) {
+            "packed sequence values cannot be retagged as $kind"
+        }
+        copy(kind = kind)
     }
     is ItemContent.MapEntries -> {
         require(kind == RootKind.Map || kind == RootKind.XmlHook) {
@@ -5430,14 +5479,17 @@ private fun ItemContent.withRemoteParentKind(kind: RootKind): ItemContent = when
         this
     }
     is ItemContent.Text -> if (
+        kind == RootKind.Array ||
         kind == RootKind.Text ||
         kind == RootKind.XmlText ||
         kind == RootKind.XmlFragment ||
         kind == RootKind.XmlElement
     ) copy(kind = kind) else this
-    is ItemContent.TextEmbed -> if (kind == RootKind.Text || kind == RootKind.XmlText) copy(kind = kind) else this
+    is ItemContent.TextEmbed ->
+        if (kind !in setOf(RootKind.Map, RootKind.XmlHook)) copy(kind = kind) else this
     is ItemContent.TextFormat -> if (kind == RootKind.Text || kind == RootKind.XmlText) copy(kind = kind) else this
-    is ItemContent.NativeTextFormat -> if (kind == RootKind.Text || kind == RootKind.XmlText) copy(kind = kind) else this
+    is ItemContent.NativeTextFormat ->
+        if (kind !in setOf(RootKind.Map, RootKind.XmlHook)) copy(kind = kind) else this
     is ItemContent.XmlNode -> copy(kind = kind)
     is ItemContent.XmlType -> copy(kind = kind)
     is ItemContent.Deleted -> copy(kind = kind)

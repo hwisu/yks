@@ -901,6 +901,9 @@ public class StructStore(private val owner: YDoc? = null) {
     internal fun sequenceAnchors(parent: String, kind: RootKind, index: Long): Pair<StoreItem?, StoreItem?> =
         sequenceIndex(parent).anchorsAt(kind, index)
 
+    internal fun sequenceAnchors(parent: String, index: Long): Pair<StoreItem?, StoreItem?> =
+        sequenceIndex(parent).anchorsAt(index)
+
     internal fun visibleSequenceIndexAfter(parent: String, kind: RootKind, id: Id): Long? =
         sequenceIndex(parent).visibleIndexAfter(kind, id)
 
@@ -951,6 +954,8 @@ public class StructStore(private val owner: YDoc? = null) {
         return sequenceIndex(parent).last { item -> item.content.kind == kind }
     }
 
+    internal fun lastSequenceItem(parent: String): StoreItem? = sequenceIndex(parent).last { true }
+
     internal fun areSequenceAdjacent(left: StoreItem, right: StoreItem): Boolean =
         left.parentSub == null &&
             left.parent == right.parent &&
@@ -966,6 +971,8 @@ public class StructStore(private val owner: YDoc? = null) {
 
     internal fun firstVisibleSequenceItem(parent: String, kind: RootKind): StoreItem? =
         sequenceIndex(parent).firstVisible(kind)
+
+    internal fun firstVisibleSequenceItem(parent: String): StoreItem? = sequenceIndex(parent).firstVisible()
 
     internal fun sequenceCursor(parent: String): SequenceCursor = sequenceIndex(parent).cursor()
 
@@ -1550,6 +1557,8 @@ private class IndexedSequence(
         return firstVisibleByKind[kindIndex]?.item
     }
 
+    fun firstVisible(): StoreItem? = visibleItemAt(0)?.first
+
     fun cursor(): SequenceCursor {
         var current = first
         return SequenceCursor(
@@ -1727,6 +1736,14 @@ private class IndexedSequence(
         val right = if (index == totalLength) null else visibleItemAt(kind, index)?.first
         var leftNode = if (right == null) last else nodesByStart[right.id]?.left
         while (leftNode != null && leftNode.item.content.kind != kind) leftNode = leftNode.left
+        return leftNode?.item to right
+    }
+
+    fun anchorsAt(index: Long): Pair<StoreItem?, StoreItem?> {
+        val totalLength = visibleLength(treeRoot, kind = null)
+        require(index in 0..totalLength) { "sequence index is out of bounds" }
+        val right = if (index == totalLength) null else visibleItemAt(index)?.first
+        val leftNode = if (right == null) last else nodesByStart[right.id]?.left
         return leftNode?.item to right
     }
 
