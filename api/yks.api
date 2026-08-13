@@ -49,6 +49,7 @@ public abstract class dev/yks/AbstractRenderer {
 	public static synthetic fun emit$default (Ldev/yks/AbstractRenderer;Ljava/lang/String;Ldev/yks/RendererEvent;ILjava/lang/Object;)V
 	public fun get$type ()Ljava/lang/String;
 	public fun getAttributed ()Ldev/yks/IdSet;
+	public fun getSchema ()Ldev/yks/YTypeSchema;
 	public fun getType ()Ljava/lang/String;
 	public fun hasItem (Ldev/yks/ItemStruct;)Z
 	public final fun off (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)V
@@ -186,9 +187,18 @@ public final class dev/yks/AttributedContent {
 	public fun toString ()Ljava/lang/String;
 }
 
-public final class dev/yks/AttributionJsonSchema {
-	public final fun check (Ljava/lang/Object;)Z
+public final class dev/yks/AttributionJsonSchema : dev/yks/YSchema {
+	public synthetic fun cast (Ljava/lang/Object;)Ljava/lang/Object;
+	public fun cast (Ljava/lang/Object;)Ljava/util/Map;
+	public fun check (Ljava/lang/Object;)Z
+	public synthetic fun expect (Ljava/lang/Object;)Ljava/lang/Object;
+	public fun expect (Ljava/lang/Object;)Ljava/util/Map;
+	public fun getDescription ()Ljava/lang/String;
 	public final fun getFields ()Ljava/util/Map;
+	public fun invoke (Ljava/lang/Object;)Ljava/lang/Boolean;
+	public synthetic fun invoke (Ljava/lang/Object;)Ljava/lang/Object;
+	public synthetic fun validate (Ljava/lang/Object;)Z
+	public fun validate (Ljava/util/Map;)Z
 }
 
 public final class dev/yks/AttributionSchemaField {
@@ -2549,6 +2559,29 @@ public abstract interface class dev/yks/YRootSchemaResolver {
 	public abstract fun resolve (Ljava/lang/String;)Ldev/yks/YRootSchema;
 }
 
+public abstract interface class dev/yks/YSchema : kotlin/jvm/functions/Function1 {
+	public fun cast (Ljava/lang/Object;)Ljava/lang/Object;
+	public abstract fun check (Ljava/lang/Object;)Z
+	public fun expect (Ljava/lang/Object;)Ljava/lang/Object;
+	public abstract fun getDescription ()Ljava/lang/String;
+	public fun invoke (Ljava/lang/Object;)Ljava/lang/Boolean;
+	public synthetic fun invoke (Ljava/lang/Object;)Ljava/lang/Object;
+	public fun validate (Ljava/lang/Object;)Z
+}
+
+public final class dev/yks/YSchema$DefaultImpls {
+	public static fun cast (Ldev/yks/YSchema;Ljava/lang/Object;)Ljava/lang/Object;
+	public static fun expect (Ldev/yks/YSchema;Ljava/lang/Object;)Ljava/lang/Object;
+	public static fun invoke (Ldev/yks/YSchema;Ljava/lang/Object;)Ljava/lang/Boolean;
+	public static fun validate (Ldev/yks/YSchema;Ljava/lang/Object;)Z
+}
+
+public final class dev/yks/YSchemaKt {
+	public static final fun getRendererSchema ()Ldev/yks/YTypeSchema;
+	public static final fun getYdocSchema ()Ldev/yks/YTypeSchema;
+	public static final fun getYtypeAnySchema ()Ldev/yks/YSchema;
+}
+
 public final class dev/yks/YStandardUpdatePolicy : java/lang/Enum {
 	public static final field ALLOW_LOSSLESS_EXTENSIONS Ldev/yks/YStandardUpdatePolicy;
 	public static final field REQUIRE_STANDARD Ldev/yks/YStandardUpdatePolicy;
@@ -2883,6 +2916,19 @@ public final class dev/yks/YTypeHelpersKt {
 	public static final fun typeMapHas (Ldev/yks/AbstractYType;Ljava/lang/String;)Z
 	public static final fun typeMapSet (Ldev/yks/AbstractYType;Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;
 	public static final fun updateMarkerChanges (Ljava/util/List;II)V
+}
+
+public abstract interface class dev/yks/YTypeSchema : dev/yks/YSchema {
+	public fun getDescription ()Ljava/lang/String;
+	public abstract fun getName ()Ljava/lang/String;
+}
+
+public final class dev/yks/YTypeSchema$DefaultImpls {
+	public static fun cast (Ldev/yks/YTypeSchema;Ljava/lang/Object;)Ljava/lang/Object;
+	public static fun expect (Ldev/yks/YTypeSchema;Ljava/lang/Object;)Ljava/lang/Object;
+	public static fun getDescription (Ldev/yks/YTypeSchema;)Ljava/lang/String;
+	public static fun invoke (Ldev/yks/YTypeSchema;Ljava/lang/Object;)Ljava/lang/Boolean;
+	public static fun validate (Ldev/yks/YTypeSchema;Ljava/lang/Object;)Z
 }
 
 public abstract class dev/yks/YTypedEvent {
@@ -3891,5 +3937,13 @@ public final class dev/yks/experimental/v14/Type {
 public final class dev/yks/experimental/v14/UnifiedTypeKt {
 	public static final fun asV14Type (Ldev/yks/AbstractYType;)Ldev/yks/experimental/v14/Type;
 	public static final fun getType (Ldev/yks/YDoc;Ljava/lang/String;Ldev/yks/RootKind;)Ldev/yks/experimental/v14/Type;
+}
+
+public final class dev/yks/experimental/v14/Yjs14SchemaMarkers {
+	public static final field $renderer Ldev/yks/YTypeSchema;
+	public static final field $ydoc Ldev/yks/YTypeSchema;
+	public static final field $ytypeAny Ldev/yks/YSchema;
+	public static final field INSTANCE Ldev/yks/experimental/v14/Yjs14SchemaMarkers;
+	public final fun $ytype ()Ldev/yks/YSchema;
 }
 

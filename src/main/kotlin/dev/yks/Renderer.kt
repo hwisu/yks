@@ -1,11 +1,13 @@
 package dev.yks
 
+import java.util.Collections
+
 public const val rendererType: String = "y:r"
 public val `$renderer`: String = rendererType
 
 /** Yjs 14 RC naming for the renderer/attribution-manager protocol. */
 public const val attributionManagerType: String = "y:am"
-public val `$attributionManager`: (Any?) -> Boolean = { value -> value is AbstractRenderer }
+public val `$attributionManager`: (Any?) -> Boolean = rendererSchema
 
 public data class AttributionSchemaField(
     val type: String,
@@ -14,20 +16,28 @@ public data class AttributionSchemaField(
     val valueType: String? = null,
 )
 
-public class AttributionJsonSchema internal constructor() {
-    public val fields: Map<String, AttributionSchemaField> = linkedMapOf(
-        "insert" to AttributionSchemaField(type = "array", itemType = "string"),
-        "insertAt" to AttributionSchemaField(type = "number"),
-        "delete" to AttributionSchemaField(type = "array", itemType = "string"),
-        "deleteAt" to AttributionSchemaField(type = "number"),
-        "format" to AttributionSchemaField(type = "record", itemType = "string", valueType = "array<string>"),
-        "formatAt" to AttributionSchemaField(type = "number"),
+public class AttributionJsonSchema internal constructor() : YSchema<Attribution> {
+    override val description: String = "a Yjs attribution object"
+
+    public val fields: Map<String, AttributionSchemaField> = Collections.unmodifiableMap(
+        linkedMapOf(
+            "insert" to AttributionSchemaField(type = "array", itemType = "string"),
+            "insertAt" to AttributionSchemaField(type = "number"),
+            "delete" to AttributionSchemaField(type = "array", itemType = "string"),
+            "deleteAt" to AttributionSchemaField(type = "number"),
+            "format" to AttributionSchemaField(
+                type = "record",
+                itemType = "string",
+                valueType = "array<string>",
+            ),
+            "formatAt" to AttributionSchemaField(type = "number"),
+        ),
     )
 
-    public fun check(value: Any?): Boolean {
+    override fun check(value: Any?): Boolean {
         val map = value as? Map<*, *> ?: return false
-        return map.all { (key, rawValue) ->
-            key is String && fields[key]?.matches(rawValue) == true
+        return fields.all { (key, field) ->
+            if (map.containsKey(key)) field.matches(map[key]) else field.optional
         }
     }
 }
@@ -87,6 +97,8 @@ public abstract class AbstractRenderer {
     private val eventListeners = linkedMapOf<String, MutableList<(RendererEvent) -> Unit>>()
 
     public open val attributed: IdSet = createIdSet()
+    /** Typed Yjs 14 schema marker. The string [type] and [`$type`] remain as legacy ABI aliases. */
+    public open val schema: YTypeSchema<AbstractRenderer> get() = rendererSchema
     public open val type: String get() = rendererType
     public open val `$type`: String get() = rendererType
 

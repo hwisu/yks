@@ -27,7 +27,8 @@ class RendererTest {
         assertFalse(attributionJsonSchema.check(mapOf("insert" to listOf(1))))
         assertFalse(attributionJsonSchema.check(mapOf("insertAt" to "1")))
         assertFalse(attributionJsonSchema.check(mapOf("format" to mapOf("bold" to listOf(1)))))
-        assertFalse(attributionJsonSchema.check(mapOf("unknown" to true)))
+        // lib0 object schemas validate their declared shape and allow additional properties.
+        assertTrue(attributionJsonSchema.check(mapOf("unknown" to true)))
     }
 
     @Test

@@ -59,6 +59,12 @@ correction 반환, live deep-delta cache와 Text/XmlText 밖의 format patch는 
 필요하면 `Type.delegate`의 안정 API를 사용한다. 표현할 수 없는 연산은 조용히
 변환하지 않고 preflight에서 거절한다.
 
+Yjs 14의 lib0 `Schema<T>` marker는 `YSchema<T>`의 `check`/`validate`/`expect` 계약으로
+매핑한다. `ydocSchema`, `ytypeAnySchema`, `rendererSchema`와 opt-in
+`Yjs14SchemaMarkers`는 typed narrowing을 제공한다. 기존 `$ydoc`/`$ytypeAny` 함수와
+renderer type 문자열은 JVM ABI를 위해 유지되며 같은 schema predicate 또는 이름을
+사용한다. 이 marker들은 런타임 메타데이터일 뿐 update wire에는 기록되지 않는다.
+
 1. Yjs 14 → Yjs 13
 2. Yjs 13 → Yjs 14
 3. Yjs 14 → Kotlin

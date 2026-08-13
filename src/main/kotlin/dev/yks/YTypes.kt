@@ -18,11 +18,11 @@ public const val YXmlFragmentRefID: Int = 4
 public const val YXmlHookRefID: Int = 5
 public const val YXmlTextRefID: Int = 6
 
-public val `$ytypeAny`: (Any?) -> Boolean = { value -> value is AbstractYType }
+public val `$ytypeAny`: (Any?) -> Boolean = ytypeAnySchema
 
 public fun `$ytype`(): (Any?) -> Boolean = `$ytypeAny`
 
-public val `$ydoc`: (Any?) -> Boolean = { value -> value is YDoc }
+public val `$ydoc`: (Any?) -> Boolean = ydocSchema
 
 public typealias Attribution = Map<String, Any?>
 
