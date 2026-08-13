@@ -78,7 +78,11 @@ internal fun renderUnifiedSequenceContent(
     renderer: AbstractRenderer,
 ): List<UnifiedRenderedSequenceContent> {
     val options = DeepDeltaRenderOptions(renderer = renderer)
-    val formatAttributions = if (type is YText) textFormatAttributionsByTarget(type, options) else emptyMap()
+    val formatAttributions = if (type is YText) {
+        textFormatAttributionsByTarget(type, options)
+    } else {
+        unifiedFormatAttributionsByTarget(type, options)
+    }
     return buildList {
         renderSequenceItems(type, type.kind, options).forEach { rendered ->
             if (rendered.action != RenderedDeltaAction.Insert) return@forEach
@@ -87,11 +91,7 @@ internal fun renderUnifiedSequenceContent(
                 rendered.content.attrs,
                 rendered.content.deleted,
             ).orEmpty().mergeTextAttribution(formatAttributions[rendered.item.id].orEmpty())
-            val formats = if (type is YText) {
-                rendered.item.textAttributesForDeepDelta(type.doc, options)
-            } else {
-                emptyMap()
-            }
+            val formats = rendered.item.textAttributesForDeepDelta(type.doc, options)
             add(
                 UnifiedRenderedSequenceContent(
                     text = (content as? ContentString)?.str,
@@ -102,6 +102,35 @@ internal fun renderUnifiedSequenceContent(
             )
         }
     }
+}
+
+private fun unifiedFormatAttributionsByTarget(
+    type: AbstractYType,
+    options: DeepDeltaRenderOptions,
+): Map<Id, Map<String, Any?>> {
+    val attributionsByTarget = linkedMapOf<Id, Map<String, Any?>>()
+    val active = linkedMapOf<String, Map<String, Any?>>()
+    type.doc.sequence(type.name).forEach { item ->
+        if (item.content.kind != type.kind) return@forEach
+        when (val content = item.content) {
+            is ItemContent.NativeTextFormat -> {
+                active[content.key] = if (content.value == YValue.Null) {
+                    emptyMap()
+                } else {
+                    item.readRenderedContents(type.doc, options)
+                        .map { rendered -> nativeFormatAttribution(content.key, rendered.attrs, rendered.deleted) }
+                        .fold(emptyMap()) { merged, value -> merged.mergeTextAttribution(value) }
+                }
+            }
+            else -> if (item.countable) {
+                val attribution = active.values.fold(emptyMap<String, Any?>()) { merged, value ->
+                    merged.mergeTextAttribution(value)
+                }
+                if (attribution.isNotEmpty()) attributionsByTarget[item.id] = attribution
+            }
+        }
+    }
+    return attributionsByTarget
 }
 
 /** Resolve both the selected value and its attribution through the supplied renderer. */

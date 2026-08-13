@@ -105,6 +105,15 @@ class Yjs14InteropTest {
                     .insertValues(listOf(DeltaValue.Data(YValue.Null), DeltaValue.integer(7)))
                     .done(),
             )
+            source.getType("formatted", RootKind.Array).applyDelta(
+                DeltaBuilder()
+                    .insert("A", mapOf("bold" to YValue.Bool(true)))
+                    .insertValue(
+                        DeltaValue.integer(1),
+                        mapOf("color" to YValue.StringValue("red")),
+                    )
+                    .done(),
+            )
             val paragraph = YXmlElementType("p")
             source.getType("xml", RootKind.XmlFragment).applyDelta(
                 DeltaBuilder().insertType(paragraph).done(),
@@ -122,6 +131,7 @@ class Yjs14InteropTest {
                 val meta = target.getMap("meta")
                 val xml = target.getXmlFragment("xml")
                 val mixed = target.getArray("mixed")
+                val formatted = target.getType("formatted", RootKind.Array)
                 val update = Files.readAllBytes(directory.resolve("facade-yjs14-$format.bin"))
                 if (format == "v1") target.applyUpdate(update) else target.applyUpdateV2(update)
 
@@ -130,6 +140,20 @@ class Yjs14InteropTest {
                 assertEquals(mapOf("title" to "hello", "verified" to true), meta.toMap())
                 assertEquals("<p>hello!</p>", xml.toString())
                 assertEquals(listOf("A", null, 8L), mixed.toArray())
+                assertEquals(listOf("A", 1L), formatted.delegate.toJson())
+                assertEquals(
+                    listOf(
+                        dev.yks.experimental.v14.ChildOp.InsertText(
+                            "A",
+                            mapOf("italic" to YValue.Bool(true)),
+                        ),
+                        dev.yks.experimental.v14.ChildOp.InsertValues(
+                            listOf(DeltaValue.integer(1)),
+                            mapOf("color" to YValue.StringValue("blue")),
+                        ),
+                    ),
+                    formatted.toDelta().children,
+                )
             }
         } finally {
             Files.walk(directory).sorted(Comparator.reverseOrder()).forEach(Path::deleteIfExists)

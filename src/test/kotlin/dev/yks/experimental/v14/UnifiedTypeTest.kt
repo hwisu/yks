@@ -431,4 +431,137 @@ class UnifiedTypeTest {
             child.delta.attributes["name"],
         )
     }
+
+    @Test
+    fun arrayFormatsApplyAcrossTextAndDataWithoutChangingLegacyValues() {
+        val doc = YDoc(clientId = 1)
+        val type = doc.getType("mixed", RootKind.Array)
+        type.applyDelta(
+            DeltaBuilder()
+                .insert("AB", mapOf("bold" to YValue.Bool(true)))
+                .insertValues(
+                    listOf(DeltaValue.integer(1), DeltaValue.integer(2)),
+                    mapOf("color" to YValue.StringValue("red")),
+                )
+                .done(),
+        )
+        type.applyDelta(
+            DeltaBuilder()
+                .retain(1)
+                .retain(
+                    2,
+                    mapOf(
+                        "bold" to null,
+                        "italic" to YValue.Bool(true),
+                    ),
+                )
+                .done(),
+        )
+
+        assertEquals(listOf("A", "B", 1L, 2L), doc.getArray("mixed").toArray())
+        assertEquals(
+            listOf(
+                ChildOp.InsertText("A", mapOf("bold" to YValue.Bool(true))),
+                ChildOp.InsertText("B", mapOf("italic" to YValue.Bool(true))),
+                ChildOp.InsertValues(
+                    listOf(DeltaValue.integer(1)),
+                    mapOf(
+                        "color" to YValue.StringValue("red"),
+                        "italic" to YValue.Bool(true),
+                    ),
+                ),
+                ChildOp.InsertValues(
+                    listOf(DeltaValue.integer(2)),
+                    mapOf("color" to YValue.StringValue("red")),
+                ),
+            ),
+            type.toDelta().children,
+        )
+
+        type.applyDelta(DeltaBuilder().retainChanges(3, FormatChange.Clear).done())
+
+        assertEquals(
+            listOf(
+                ChildOp.InsertText("AB", emptyMap()),
+                ChildOp.InsertValues(listOf(DeltaValue.integer(1)), emptyMap()),
+                ChildOp.InsertValues(
+                    listOf(DeltaValue.integer(2)),
+                    mapOf("color" to YValue.StringValue("red")),
+                ),
+            ),
+            type.toDelta().children,
+        )
+    }
+
+    @Test
+    fun generalizedFormatsRoundTripThroughStandardYjsUpdates() {
+        val source = YDoc(clientId = 1)
+        val sourceType = source.getType("items", RootKind.Array)
+        sourceType.applyDelta(
+            DeltaBuilder()
+                .insertValue(
+                    DeltaValue.text("x"),
+                    mapOf("tag" to YValue.StringValue("one")),
+                )
+                .done(),
+        )
+        val target = YDoc(clientId = 2)
+        target.applyUpdate(source.encodeStateAsUpdate())
+
+        assertEquals(listOf("x"), target.getArray("items").toArray())
+        assertEquals(
+            listOf(
+                ChildOp.InsertValues(
+                    listOf(DeltaValue.text("x")),
+                    mapOf("tag" to YValue.StringValue("one")),
+                ),
+            ),
+            target.getType("items", RootKind.Array).toDelta().children,
+        )
+    }
+
+    @Test
+    fun arrayFormatAttributionRemainsSeparateFromTheFormatValue() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val type = doc.getType("items", RootKind.Array)
+        type.applyDelta(
+            DeltaBuilder()
+                .insertValue(
+                    DeltaValue.text("x"),
+                    mapOf("bold" to YValue.Bool(true)),
+                )
+                .done(),
+        )
+        val marker = doc.sequence("items").first { item ->
+            item.content is dev.yks.ItemContent.NativeTextFormat &&
+                (item.content as dev.yks.ItemContent.NativeTextFormat).value != YValue.Null
+        }
+        val renderer = TwosetRenderer(
+            inserts = createIdMap().also { ids ->
+                ids.add(
+                    marker.id.client,
+                    marker.id.clock,
+                    marker.length,
+                    listOf(createContentAttribute("insert", "alice")),
+                )
+            },
+            deletes = createIdMap(),
+        )
+
+        val insert = assertIs<ChildOp.InsertValues>(type.toDelta(renderer).children.single())
+
+        assertEquals(mapOf("bold" to YValue.Bool(true)), insert.formats)
+        assertEquals(
+            DeltaAttribution.of(
+                mapOf(
+                    "format" to YValue.MapValue(
+                        mapOf(
+                            "bold" to YValue.ListValue(listOf(YValue.StringValue("alice"))),
+                        ),
+                    ),
+                ),
+            ),
+            insert.attribution,
+        )
+    }
 }
