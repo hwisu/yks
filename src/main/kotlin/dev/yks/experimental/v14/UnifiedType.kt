@@ -3,19 +3,31 @@
 package dev.yks.experimental.v14
 
 import dev.yks.AbstractYType
+import dev.yks.AbstractRenderer
 import dev.yks.ItemContent
 import dev.yks.RootKind
 import dev.yks.StoreItem
 import dev.yks.YArray
+import dev.yks.YArrayDeltaOp
 import dev.yks.YDoc
 import dev.yks.YMap
 import dev.yks.YText
+import dev.yks.YTextDelta
+import dev.yks.YTransaction
 import dev.yks.YUnopenedRoot
 import dev.yks.YValue
 import dev.yks.YXmlElementType
 import dev.yks.YXmlFragment
 import dev.yks.YXmlHook
+import dev.yks.attributionJsonSchema
+import dev.yks.renderUnifiedAttributes
+import dev.yks.renderUnifiedSequenceContent
+import dev.yks.renderedSequenceIndexToVisibleIndex
+import dev.yks.recordRendererAttributedDeletes
+import dev.yks.rendererContentLength
+import dev.yks.toItemStruct
 import dev.yks.toXmlListValue
+import java.util.UUID
 
 /**
  * Opt-in surface for the unified Type/DeltaBuilder direction in @y/y 14 release candidates.
@@ -90,40 +102,142 @@ public sealed interface FormatChange {
     }
 }
 
+/** Immutable, schema-checked attribution stored on a settled insert/set/delete delta operation. */
+@ExperimentalYjs14Api
+public class DeltaAttribution private constructor(values: Map<String, YValue>) {
+    public val values: Map<String, YValue> = values.toSortedMap()
+
+    override fun equals(other: Any?): Boolean = other is DeltaAttribution && values == other.values
+
+    override fun hashCode(): Int = values.hashCode()
+
+    override fun toString(): String = "DeltaAttribution(values=$values)"
+
+    public companion object {
+        public fun of(values: Map<String, YValue>): DeltaAttribution {
+            values.values.forEach(::requirePortableDataValue)
+            val normalized = values.filterValues { value -> value != YValue.Null }.toSortedMap()
+            require(attributionJsonSchema.check(normalized.mapValues { (_, value) -> value.toAny() })) {
+                "attribution does not match the @y/y 14 attribution schema"
+            }
+            return DeltaAttribution(normalized)
+        }
+    }
+}
+
+/** Tri-state attribution instruction used by retain/modify operations. */
+@ExperimentalYjs14Api
+public sealed interface AttributionChange {
+    /** Inherit the builder context, or leave attribution unchanged when no context is active. */
+    public data object Unchanged : AttributionChange
+
+    /** Clear all attribution in the addressed dimension. */
+    public data object Clear : AttributionChange
+
+    /** Set values and remove keys whose value is null. `format` merges one level deeper. */
+    public class Patch internal constructor(values: Map<String, YValue?>) : AttributionChange {
+        public val values: Map<String, YValue?> = normalizeAttributionPatch(values)
+
+        init {
+            validateAttributionPatch(this.values)
+        }
+
+        override fun equals(other: Any?): Boolean = other is Patch && values == other.values
+
+        override fun hashCode(): Int = values.hashCode()
+
+        override fun toString(): String = "Patch(values=$values)"
+    }
+}
+
+/** A mark's terminal location within one delta node. */
+@ExperimentalYjs14Api
+public sealed interface DeltaMarkKey {
+    @ConsistentCopyVisibility
+    public data class Child internal constructor(val index: Int) : DeltaMarkKey {
+        init {
+            require(index >= 0) { "mark child index must be non-negative" }
+        }
+    }
+
+    @ConsistentCopyVisibility
+    public data class Attribute internal constructor(val key: String) : DeltaMarkKey {
+        init {
+            require(key.isNotEmpty()) { "mark attribute key must not be empty" }
+        }
+    }
+}
+
+/** Immutable cursor/selection anchor carried by a v14 delta tree. */
+@ExperimentalYjs14Api
+public class DeltaMark internal constructor(
+    public val key: DeltaMarkKey,
+    public val id: String,
+    public val association: Int,
+    attrs: Map<String, YValue>,
+) {
+    public val attrs: Map<String, YValue> = attrs.toSortedMap()
+
+    init {
+        require(id.isNotEmpty()) { "mark id must not be empty" }
+        require(association == -1 || association == 1) { "mark association must be -1 or 1" }
+        this.attrs.values.forEach(::requirePortableDataValue)
+    }
+
+    override fun equals(other: Any?): Boolean =
+        other is DeltaMark &&
+            key == other.key && id == other.id && association == other.association && attrs == other.attrs
+
+    override fun hashCode(): Int =
+        31 * (31 * (31 * key.hashCode() + id.hashCode()) + association) + attrs.hashCode()
+
+    override fun toString(): String =
+        "DeltaMark(key=$key, id=$id, association=$association, attrs=$attrs)"
+}
+
 /** A child-list operation in the pinned @y/y 14 delta vocabulary. */
 @ExperimentalYjs14Api
 public sealed interface ChildOp {
-    public class InsertText internal constructor(text: String, formats: Map<String, YValue>) : ChildOp {
+    public class InsertText internal constructor(
+        text: String,
+        formats: Map<String, YValue>,
+        public val attribution: DeltaAttribution? = null,
+    ) : ChildOp {
         public val text: String = text
         public val formats: Map<String, YValue> = formats.toSortedMap()
 
         override fun equals(other: Any?): Boolean =
-            other is InsertText && text == other.text && formats == other.formats
+            other is InsertText &&
+                text == other.text && formats == other.formats && attribution == other.attribution
 
-        override fun hashCode(): Int = 31 * text.hashCode() + formats.hashCode()
+        override fun hashCode(): Int = 31 * (31 * text.hashCode() + formats.hashCode()) + (attribution?.hashCode() ?: 0)
 
-        override fun toString(): String = "InsertText(text=$text, formats=$formats)"
+        override fun toString(): String = "InsertText(text=$text, formats=$formats, attribution=$attribution)"
     }
 
     public class InsertValues internal constructor(
         values: List<DeltaValue>,
         formats: Map<String, YValue>,
+        public val attribution: DeltaAttribution? = null,
     ) : ChildOp {
         public val values: List<DeltaValue> = values.toList()
         public val formats: Map<String, YValue> = formats.toSortedMap()
 
         override fun equals(other: Any?): Boolean =
-            other is InsertValues && values == other.values && formats == other.formats
+            other is InsertValues &&
+                values == other.values && formats == other.formats && attribution == other.attribution
 
-        override fun hashCode(): Int = 31 * values.hashCode() + formats.hashCode()
+        override fun hashCode(): Int =
+            31 * (31 * values.hashCode() + formats.hashCode()) + (attribution?.hashCode() ?: 0)
 
-        override fun toString(): String = "InsertValues(values=$values, formats=$formats)"
+        override fun toString(): String = "InsertValues(values=$values, formats=$formats, attribution=$attribution)"
     }
 
     @ConsistentCopyVisibility
     public data class Retain internal constructor(
         val length: Int,
         val formats: FormatChange,
+        val attribution: AttributionChange = AttributionChange.Unchanged,
     ) : ChildOp
 
     @ConsistentCopyVisibility
@@ -133,6 +247,7 @@ public sealed interface ChildOp {
     public data class Modify internal constructor(
         val delta: Delta,
         val formats: FormatChange,
+        val attribution: AttributionChange = AttributionChange.Unchanged,
     ) : ChildOp
 }
 
@@ -140,12 +255,23 @@ public sealed interface ChildOp {
 @ExperimentalYjs14Api
 public sealed interface AttributeOp {
     @ConsistentCopyVisibility
-    public data class Set internal constructor(val value: DeltaValue) : AttributeOp
+    public data class Set internal constructor(
+        val value: DeltaValue,
+        val attribution: DeltaAttribution? = null,
+    ) : AttributeOp
 
     public data object Delete : AttributeOp
 
     @ConsistentCopyVisibility
-    public data class Modify internal constructor(val delta: Delta) : AttributeOp
+    public data class DeleteAttributed internal constructor(
+        val attribution: DeltaAttribution,
+    ) : AttributeOp
+
+    @ConsistentCopyVisibility
+    public data class Modify internal constructor(
+        val delta: Delta,
+        val attribution: AttributionChange = AttributionChange.Unchanged,
+    ) : AttributeOp
 }
 
 /** Immutable result of [DeltaBuilder.done]. */
@@ -154,18 +280,28 @@ public class Delta internal constructor(
     public val name: String?,
     attributes: Map<String, AttributeOp>,
     children: List<ChildOp>,
+    marks: List<DeltaMark> = emptyList(),
+    deletedMarkIds: Set<String> = emptySet(),
 ) {
     public val attributes: Map<String, AttributeOp> = attributes.toSortedMap()
     public val children: List<ChildOp> = children.toList()
+    public val marks: List<DeltaMark> = marks.sortedBy(DeltaMark::id)
+    public val deletedMarkIds: Set<String> = deletedMarkIds.toSortedSet()
 
-    public val isEmpty: Boolean get() = attributes.isEmpty() && children.isEmpty()
+    public val isEmpty: Boolean
+        get() = attributes.isEmpty() && children.isEmpty() && marks.isEmpty() && deletedMarkIds.isEmpty()
 
     override fun equals(other: Any?): Boolean =
-        other is Delta && name == other.name && attributes == other.attributes && children == other.children
+        other is Delta &&
+            name == other.name && attributes == other.attributes && children == other.children &&
+            marks == other.marks && deletedMarkIds == other.deletedMarkIds
 
-    override fun hashCode(): Int = 31 * (31 * (name?.hashCode() ?: 0) + attributes.hashCode()) + children.hashCode()
+    override fun hashCode(): Int =
+        31 * (31 * (31 * (31 * (name?.hashCode() ?: 0) + attributes.hashCode()) + children.hashCode()) +
+            marks.hashCode()) + deletedMarkIds.hashCode()
 
-    override fun toString(): String = "Delta(name=$name, attributes=$attributes, children=$children)"
+    override fun toString(): String =
+        "Delta(name=$name, attributes=$attributes, children=$children, marks=$marks, deletedMarkIds=$deletedMarkIds)"
 }
 
 /**
@@ -178,35 +314,119 @@ public class Delta internal constructor(
 public class DeltaBuilder(public val name: String? = null) {
     private val attributes = linkedMapOf<String, AttributeOp>()
     private val children = mutableListOf<ChildOp>()
+    private val marks = linkedMapOf<String, DeltaMark>()
+    private val deletedMarkIds = linkedSetOf<String>()
+    private var usedAttribution: Map<String, YValue?>? = null
     private var completed = false
 
-    public fun insert(text: String, formats: Map<String, YValue> = emptyMap()): DeltaBuilder = apply {
+    public fun useAttribution(attribution: DeltaAttribution?): DeltaBuilder = apply {
+        ensureMutable()
+        usedAttribution = attribution?.values
+    }
+
+    public fun useAttribution(change: AttributionChange): DeltaBuilder = apply {
+        ensureMutable()
+        usedAttribution = when (change) {
+            AttributionChange.Unchanged -> usedAttribution
+            AttributionChange.Clear -> null
+            is AttributionChange.Patch -> change.values.ifEmpty { null }
+        }
+    }
+
+    public fun updateUsedAttribution(key: String, value: YValue?): DeltaBuilder = apply {
+        ensureMutable()
+        require(key.isNotEmpty()) { "attribution key must not be empty" }
+        val next = usedAttribution.orEmpty().toMutableMap()
+        if (value == null || value == YValue.Null) next.remove(key) else next[key] = value
+        usedAttribution = next.ifEmpty { null }?.toSortedMap()
+    }
+
+    public fun insert(text: String, formats: Map<String, YValue> = emptyMap()): DeltaBuilder =
+        appendText(text, formats, AttributionChange.Unchanged)
+
+    public fun insert(
+        text: String,
+        formats: Map<String, YValue>,
+        attribution: DeltaAttribution?,
+    ): DeltaBuilder = appendText(
+        text,
+        formats,
+        attribution?.let { AttributionChange.Patch(it.values) } ?: AttributionChange.Clear,
+    )
+
+    public fun insertAttributed(
+        text: String,
+        formats: Map<String, YValue> = emptyMap(),
+        attribution: AttributionChange,
+    ): DeltaBuilder = appendText(text, formats, attribution)
+
+    private fun appendText(
+        text: String,
+        formats: Map<String, YValue>,
+        attribution: AttributionChange,
+    ): DeltaBuilder = apply {
         ensureMutable()
         validateFormats(formats)
         if (text.isEmpty()) return@apply
         val normalized = normalizeDataFormats(formats)
+        val resolvedAttribution = resolveDataAttribution(usedAttribution, attribution)
         val previous = children.lastOrNull() as? ChildOp.InsertText
-        if (previous != null && previous.formats == normalized) {
-            children[children.lastIndex] = ChildOp.InsertText(previous.text + text, normalized)
+        if (previous != null &&
+            previous.formats == normalized && previous.attribution == resolvedAttribution
+        ) {
+            children[children.lastIndex] = ChildOp.InsertText(
+                previous.text + text,
+                normalized,
+                resolvedAttribution,
+            )
         } else {
-            children += ChildOp.InsertText(text, normalized)
+            children += ChildOp.InsertText(text, normalized, resolvedAttribution)
         }
     }
 
     public fun insertValues(
         values: List<DeltaValue>,
         formats: Map<String, YValue> = emptyMap(),
+    ): DeltaBuilder = appendValues(values, formats, AttributionChange.Unchanged)
+
+    public fun insertValues(
+        values: List<DeltaValue>,
+        formats: Map<String, YValue>,
+        attribution: DeltaAttribution?,
+    ): DeltaBuilder = appendValues(
+        values,
+        formats,
+        attribution?.let { AttributionChange.Patch(it.values) } ?: AttributionChange.Clear,
+    )
+
+    public fun insertValuesAttributed(
+        values: List<DeltaValue>,
+        formats: Map<String, YValue> = emptyMap(),
+        attribution: AttributionChange,
+    ): DeltaBuilder = appendValues(values, formats, attribution)
+
+    private fun appendValues(
+        values: List<DeltaValue>,
+        formats: Map<String, YValue>,
+        attribution: AttributionChange,
     ): DeltaBuilder = apply {
         ensureMutable()
         validateFormats(formats)
         if (values.isEmpty()) return@apply
         val copied = values.toList()
         val normalized = normalizeDataFormats(formats)
+        val resolvedAttribution = resolveDataAttribution(usedAttribution, attribution)
         val previous = children.lastOrNull() as? ChildOp.InsertValues
-        if (previous != null && previous.formats == normalized) {
-            children[children.lastIndex] = ChildOp.InsertValues(previous.values + copied, normalized)
+        if (previous != null &&
+            previous.formats == normalized && previous.attribution == resolvedAttribution
+        ) {
+            children[children.lastIndex] = ChildOp.InsertValues(
+                previous.values + copied,
+                normalized,
+                resolvedAttribution,
+            )
         } else {
-            children += ChildOp.InsertValues(copied, normalized)
+            children += ChildOp.InsertValues(copied, normalized, resolvedAttribution)
         }
     }
 
@@ -229,6 +449,26 @@ public class DeltaBuilder(public val name: String? = null) {
 
     public fun retainClearingFormats(length: Int): DeltaBuilder = appendRetain(length, FormatChange.Clear)
 
+    public fun retainWithAttribution(
+        length: Int,
+        attribution: AttributionChange,
+    ): DeltaBuilder = appendRetain(length, FormatChange.Unchanged, attribution)
+
+    public fun retainChanges(
+        length: Int,
+        formats: FormatChange = FormatChange.Unchanged,
+        attribution: AttributionChange = AttributionChange.Unchanged,
+    ): DeltaBuilder = appendRetain(length, formats, attribution)
+
+    public fun retain(
+        length: Int,
+        formats: Map<String, YValue?>,
+        attribution: AttributionChange,
+    ): DeltaBuilder {
+        validateFormatPatch(formats)
+        return appendRetain(length, FormatChange.Patch(normalizeFormatPatch(formats)), attribution)
+    }
+
     public fun delete(length: Int): DeltaBuilder = apply {
         ensureMutable()
         require(length >= 0) { "delete length must be non-negative" }
@@ -250,10 +490,40 @@ public class DeltaBuilder(public val name: String? = null) {
 
     public fun modifyClearingFormats(delta: Delta): DeltaBuilder = appendModify(delta, FormatChange.Clear)
 
+    public fun modifyWithAttribution(
+        delta: Delta,
+        attribution: AttributionChange,
+    ): DeltaBuilder = appendModify(delta, FormatChange.Unchanged, attribution)
+
+    public fun modifyChanges(
+        delta: Delta,
+        formats: FormatChange = FormatChange.Unchanged,
+        attribution: AttributionChange = AttributionChange.Unchanged,
+    ): DeltaBuilder = appendModify(delta, formats, attribution)
+
+    public fun modify(
+        delta: Delta,
+        formats: Map<String, YValue?>,
+        attribution: AttributionChange,
+    ): DeltaBuilder {
+        validateFormatPatch(formats)
+        return appendModify(delta, FormatChange.Patch(normalizeFormatPatch(formats)), attribution)
+    }
+
     public fun setAttr(key: String, value: DeltaValue): DeltaBuilder = apply {
         ensureMutable()
         require(key.isNotEmpty()) { "attribute key must not be empty" }
-        attributes[key] = AttributeOp.Set(value)
+        attributes[key] = AttributeOp.Set(value, resolveDataAttribution(usedAttribution, AttributionChange.Unchanged))
+    }
+
+    public fun setAttr(
+        key: String,
+        value: DeltaValue,
+        attribution: DeltaAttribution?,
+    ): DeltaBuilder = apply {
+        ensureMutable()
+        require(key.isNotEmpty()) { "attribute key must not be empty" }
+        attributes[key] = AttributeOp.Set(value, attribution)
     }
 
     public fun setDataAttr(key: String, value: YValue): DeltaBuilder = setAttr(key, DeltaValue.Data(value))
@@ -264,36 +534,105 @@ public class DeltaBuilder(public val name: String? = null) {
     public fun deleteAttr(key: String): DeltaBuilder = apply {
         ensureMutable()
         require(key.isNotEmpty()) { "attribute key must not be empty" }
-        attributes[key] = AttributeOp.Delete
+        val attribution = resolveDataAttribution(usedAttribution, AttributionChange.Unchanged)
+        attributes[key] = if (attribution == null) AttributeOp.Delete else AttributeOp.DeleteAttributed(attribution)
+    }
+
+    public fun deleteAttr(key: String, attribution: DeltaAttribution?): DeltaBuilder = apply {
+        ensureMutable()
+        require(key.isNotEmpty()) { "attribute key must not be empty" }
+        attributes[key] = if (attribution == null) AttributeOp.Delete else AttributeOp.DeleteAttributed(attribution)
     }
 
     public fun modifyAttr(key: String, delta: Delta): DeltaBuilder = apply {
         ensureMutable()
         require(key.isNotEmpty()) { "attribute key must not be empty" }
-        attributes[key] = AttributeOp.Modify(delta)
+        attributes[key] = AttributeOp.Modify(delta, resolveInstructionAttribution(usedAttribution, AttributionChange.Unchanged))
+    }
+
+    public fun modifyAttr(
+        key: String,
+        delta: Delta,
+        attribution: AttributionChange,
+    ): DeltaBuilder = apply {
+        ensureMutable()
+        require(key.isNotEmpty()) { "attribute key must not be empty" }
+        attributes[key] = AttributeOp.Modify(delta, resolveInstructionAttribution(usedAttribution, attribution))
+    }
+
+    public fun addMark(
+        key: DeltaMarkKey,
+        id: String = UUID.randomUUID().toString(),
+        association: Int = 1,
+        attrs: Map<String, YValue> = emptyMap(),
+    ): DeltaBuilder = apply {
+        ensureMutable()
+        val mark = DeltaMark(key, id, association, attrs)
+        marks[id] = mark
+        deletedMarkIds.remove(id)
+    }
+
+    public fun addChildMark(
+        index: Int,
+        id: String = UUID.randomUUID().toString(),
+        association: Int = 1,
+        attrs: Map<String, YValue> = emptyMap(),
+    ): DeltaBuilder = addMark(DeltaMarkKey.Child(index), id, association, attrs)
+
+    public fun addAttributeMark(
+        key: String,
+        id: String = UUID.randomUUID().toString(),
+        association: Int = 1,
+        attrs: Map<String, YValue> = emptyMap(),
+    ): DeltaBuilder = addMark(DeltaMarkKey.Attribute(key), id, association, attrs)
+
+    public fun removeMark(id: String): DeltaBuilder = apply {
+        ensureMutable()
+        require(id.isNotEmpty()) { "mark id must not be empty" }
+        marks.remove(id)
+        deletedMarkIds += id
     }
 
     public fun done(): Delta {
         ensureMutable()
         completed = true
-        return Delta(name, attributes, children)
+        return Delta(name, attributes, children, marks.values.toList(), deletedMarkIds)
     }
 
-    private fun appendRetain(length: Int, formats: FormatChange): DeltaBuilder = apply {
+    private fun appendRetain(
+        length: Int,
+        formats: FormatChange,
+        attribution: AttributionChange = AttributionChange.Unchanged,
+    ): DeltaBuilder = apply {
         ensureMutable()
         require(length >= 0) { "retain length must be non-negative" }
         if (length == 0) return@apply
+        val resolvedAttribution = resolveInstructionAttribution(usedAttribution, attribution)
         val previous = children.lastOrNull() as? ChildOp.Retain
-        if (previous != null && previous.formats == formats) {
-            children[children.lastIndex] = ChildOp.Retain(Math.addExact(previous.length, length), formats)
+        if (previous != null &&
+            previous.formats == formats && previous.attribution == resolvedAttribution
+        ) {
+            children[children.lastIndex] = ChildOp.Retain(
+                Math.addExact(previous.length, length),
+                formats,
+                resolvedAttribution,
+            )
         } else {
-            children += ChildOp.Retain(length, formats)
+            children += ChildOp.Retain(length, formats, resolvedAttribution)
         }
     }
 
-    private fun appendModify(delta: Delta, formats: FormatChange): DeltaBuilder = apply {
+    private fun appendModify(
+        delta: Delta,
+        formats: FormatChange,
+        attribution: AttributionChange = AttributionChange.Unchanged,
+    ): DeltaBuilder = apply {
         ensureMutable()
-        children += ChildOp.Modify(delta, formats)
+        children += ChildOp.Modify(
+            delta,
+            formats,
+            resolveInstructionAttribution(usedAttribution, attribution),
+        )
     }
 
     private fun ensureMutable() {
@@ -344,30 +683,61 @@ public class Type(public val delegate: AbstractYType) {
 
     public val change: DeltaBuilder get() = DeltaBuilder()
 
-    /** A stable shallow snapshot. Use [delegate] when the existing deep-delta/renderer API is needed. */
-    public val delta: Delta get() = toDelta()
+    /** A stable renderer-aware snapshot using the delegate's active renderer. */
+    public val delta: Delta get() = toDelta(delegate.activeRenderer)
 
-    public fun toDelta(): Delta {
+    public fun toDelta(): Delta = toDelta(delegate.activeRenderer)
+
+    public fun toDelta(renderer: AbstractRenderer): Delta {
         val builder = DeltaBuilder(name)
-        getAttrs().forEach { (key, value) -> builder.setAttr(key, value) }
+        renderUnifiedAttributes(delegate, renderer).forEach { (key, rendered) ->
+            builder.setAttr(
+                key,
+                deltaValueFromAny(rendered.value),
+                rendered.attribution?.toDeltaAttribution(),
+            )
+        }
         when (val type = delegate) {
             is YMap -> Unit
             is YArray,
             is YText,
             is YXmlElementType,
-            is YXmlFragment -> appendUnifiedSequenceDelta(builder, type)
+            is YXmlFragment -> appendUnifiedSequenceDelta(builder, type, renderer)
             else -> error("unsupported shared type: ${type::class.qualifiedName}")
         }
         return builder.done()
     }
 
     public fun applyDelta(delta: Delta, origin: Any? = null) {
-        validateDelta(delegate, delta)
-        preflightDeltaValues(delegate, delta)
-        doc.transact(origin = origin) {
-            applyAttributes(delegate, delta.attributes, origin)
-            applyChildren(delegate, delta.children, origin)
+        applyDeltaWithCorrection(delta, origin, delegate.activeRenderer)
+    }
+
+    /**
+     * Apply a v14 delta and return the upstream-style correction when a rendered deleted node rejects
+     * all or part of the change. The correction is measured against the caller's expected state.
+     */
+    public fun applyDeltaWithCorrection(
+        delta: Delta,
+        origin: Any? = null,
+        renderer: AbstractRenderer = delegate.activeRenderer,
+    ): Delta? {
+        if (delta.isEmpty) return null
+        val owner = doc.typeRefItemId(delegate)?.let(doc::getItem)?.toItemStruct(doc)
+        if (owner?.deleted == true) {
+            return if (rendererContentLength(renderer, owner) > 0) {
+                inverseDelta(delta, toDelta(renderer), renderer).takeUnless(Delta::isEmpty)
+            } else {
+                null
+            }
         }
+        validateDelta(delegate, delta, renderer)
+        preflightDeltaValues(delegate, delta)
+        return doc.transact({ transaction ->
+            val fix = DeltaBuilder()
+            var hasFix = applyAttributes(delegate, delta.attributes, origin, renderer, fix)
+            hasFix = applyChildren(delegate, delta.children, origin, renderer, transaction, fix) || hasFix
+            if (hasFix) fix.done().takeUnless(Delta::isEmpty) else null
+        }, origin = origin)
     }
 
     public fun insert(index: Int, text: String, formats: Map<String, YValue> = emptyMap(), origin: Any? = null) {
@@ -471,6 +841,95 @@ private fun normalizeDataFormats(formats: Map<String, YValue>): Map<String, YVal
 private fun normalizeFormatPatch(formats: Map<String, YValue?>): Map<String, YValue?> =
     formats.mapValues { (_, value) -> if (value == YValue.Null) null else value }.toSortedMap()
 
+private fun normalizeAttributionPatch(values: Map<String, YValue?>): Map<String, YValue?> =
+    values.mapValues { (_, value) -> if (value == YValue.Null) null else value }.toSortedMap()
+
+private fun validateAttributionPatch(values: Map<String, YValue?>) {
+    require(values.keys.none(String::isEmpty)) { "attribution key must not be empty" }
+    values.values.filterNotNull().forEach(::requirePortableDataValue)
+    val resolved = values.mapNotNull { (key, value) ->
+        val canonical = when {
+            value == null -> null
+            key == "format" && value is YValue.MapValue -> YValue.MapValue(
+                value.value.filterValues { nested -> nested != YValue.Null },
+            ).takeIf { format -> format.value.isNotEmpty() }
+            else -> value
+        }
+        canonical?.let { key to it.toAny() }
+    }.toMap()
+    require(attributionJsonSchema.check(resolved)) {
+        "attribution patch does not match the @y/y 14 attribution schema"
+    }
+}
+
+private fun mergeAttribution(
+    base: Map<String, YValue?>?,
+    update: Map<String, YValue?>,
+    resolve: Boolean,
+): Map<String, YValue?> {
+    val merged = linkedMapOf<String, YValue?>()
+    base.orEmpty().forEach { (key, rawValue) ->
+        val value = if (rawValue == YValue.Null) null else rawValue
+        when {
+            value == null && resolve -> Unit
+            key == "format" && value is YValue.MapValue && resolve -> {
+                val inner = value.value.filterValues { nested -> nested != YValue.Null }
+                if (inner.isNotEmpty()) merged[key] = YValue.MapValue(inner.toSortedMap())
+            }
+            else -> merged[key] = value
+        }
+    }
+    update.forEach { (key, rawValue) ->
+        val value = if (rawValue == YValue.Null) null else rawValue
+        if (key == "format" && value is YValue.MapValue) {
+            val current = (merged[key] as? YValue.MapValue)?.value.orEmpty().toMutableMap()
+            value.value.forEach { (formatKey, rawFormatValue) ->
+                if (rawFormatValue == YValue.Null) {
+                    if (resolve) current.remove(formatKey) else current[formatKey] = YValue.Null
+                } else {
+                    current[formatKey] = rawFormatValue
+                }
+            }
+            if (current.isEmpty()) merged.remove(key) else merged[key] = YValue.MapValue(current.toSortedMap())
+        } else if (value == null) {
+            if (resolve) merged.remove(key) else merged[key] = null
+        } else {
+            merged[key] = value
+        }
+    }
+    return merged.toSortedMap()
+}
+
+private fun resolveDataAttribution(
+    used: Map<String, YValue?>?,
+    change: AttributionChange,
+): DeltaAttribution? {
+    val values = when (change) {
+        AttributionChange.Unchanged -> mergeAttribution(null, used.orEmpty(), resolve = true)
+        AttributionChange.Clear -> emptyMap()
+        is AttributionChange.Patch -> mergeAttribution(used, change.values, resolve = true)
+    }.mapNotNull { (key, value) -> value?.let { key to it } }.toMap()
+    return values.takeIf(Map<String, YValue>::isNotEmpty)?.let(DeltaAttribution::of)
+}
+
+private fun resolveInstructionAttribution(
+    used: Map<String, YValue?>?,
+    change: AttributionChange,
+): AttributionChange = when (change) {
+    AttributionChange.Unchanged -> used
+        ?.takeIf(Map<String, YValue?>::isNotEmpty)
+        ?.let(AttributionChange::Patch)
+        ?: AttributionChange.Unchanged
+    AttributionChange.Clear -> AttributionChange.Clear
+    is AttributionChange.Patch -> mergeAttribution(used, change.values, resolve = false)
+        .takeIf(Map<String, YValue?>::isNotEmpty)
+        ?.let(AttributionChange::Patch)
+        ?: AttributionChange.Unchanged
+}
+
+private fun Map<String, Any?>.toDeltaAttribution(): DeltaAttribution =
+    DeltaAttribution.of(mapValues { (_, value) -> YValue.from(value) })
+
 private fun DeltaValue.toAny(): Any? = when (this) {
     is DeltaValue.Data -> value.toAny()
     is DeltaValue.SharedType -> value
@@ -492,36 +951,18 @@ private fun formatPatchToAny(change: FormatChange): Map<String, Any?>? = when (c
     is FormatChange.Patch -> change.values.mapValues { (_, value) -> value?.toAny() }
 }
 
-private fun appendUnifiedSequenceDelta(builder: DeltaBuilder, type: AbstractYType) {
-    type.doc.sequence(type.name).forEach { item ->
-        if (item.deleted || !item.countable) return@forEach
-        val formats = when (item.content) {
-            is ItemContent.Text,
-            is ItemContent.TextEmbed,
-            is ItemContent.XmlType -> type.doc.renderedTextAttributes(item)
-                .filterValues { value -> value != YValue.Null }
-                .toSortedMap()
-            else -> emptyMap()
-        }
-        when (val content = item.content) {
-            is ItemContent.Text -> builder.insert(content.value, formats)
-            is ItemContent.TextEmbed -> builder.insertValue(
-                deltaValueFromAny(type.doc.valueToAny(content.value)),
-                formats,
-            )
-            is ItemContent.Value -> builder.insertValue(deltaValueFromAny(type.doc.valueToAny(content.value)))
-            is ItemContent.ArrayValues -> builder.insertValues(
-                content.values.map { value -> deltaValueFromAny(type.doc.valueToAny(value)) },
-            )
-            is ItemContent.XmlType -> builder.insertType(type.doc.typeFromXmlType(content), formats)
-            is ItemContent.XmlNode -> error(
-                "private static XML content has no @y/y 14 delta representation; use live XML shared types",
-            )
-            is ItemContent.Deleted,
-            is ItemContent.MapEntries,
-            is ItemContent.MapEntry,
-            is ItemContent.NativeTextFormat,
-            is ItemContent.TextFormat -> Unit
+private fun appendUnifiedSequenceDelta(
+    builder: DeltaBuilder,
+    type: AbstractYType,
+    renderer: AbstractRenderer,
+) {
+    renderUnifiedSequenceContent(type, renderer).forEach { rendered ->
+        val formats = formatDataFromAny(rendered.formats)
+        val attribution = rendered.attribution?.toDeltaAttribution()
+        if (rendered.text != null) {
+            builder.insert(rendered.text, formats, attribution)
+        } else {
+            builder.insertValues(rendered.values.map(::deltaValueFromAny), formats, attribution)
         }
     }
 }
@@ -657,7 +1098,11 @@ private fun deleteRawAttr(type: AbstractYType, key: String) {
     }
 }
 
-private fun validateDelta(target: AbstractYType, delta: Delta) {
+private fun validateDelta(
+    target: AbstractYType,
+    delta: Delta,
+    renderer: AbstractRenderer = target.activeRenderer,
+) {
     val targetName = when (target) {
         is YXmlElementType -> target.nodeName
         is YXmlHook -> target.hookName
@@ -670,11 +1115,12 @@ private fun validateDelta(target: AbstractYType, delta: Delta) {
     delta.attributes.forEach { (key, op) ->
         when (op) {
             is AttributeOp.Set -> Unit
-            AttributeOp.Delete -> Unit
+            AttributeOp.Delete,
+            is AttributeOp.DeleteAttributed -> Unit
             is AttributeOp.Modify -> {
-                val child = getRawAttr(target, key) as? AbstractYType
+                val child = renderUnifiedAttributes(target, renderer)[key]?.value as? AbstractYType
                     ?: error("modifyAttr '$key' must address a shared-type attribute")
-                validateDelta(child, op.delta)
+                validateDelta(child, op.delta, renderer)
             }
         }
     }
@@ -684,7 +1130,7 @@ private fun validateDelta(target: AbstractYType, delta: Delta) {
         return
     }
 
-    val virtualChildren = VirtualSequence(target)
+    val virtualChildren = VirtualSequence(target, renderer)
     var cursor = 0
     delta.children.forEach { op ->
         when (op) {
@@ -719,7 +1165,7 @@ private fun validateDelta(target: AbstractYType, delta: Delta) {
                 val child = virtualChildren.valueAt(cursor) as? AbstractYType
                     ?: error("modify must address a shared-type child")
                 validateFormatChange(target, op.formats)
-                validateDelta(child, op.delta)
+                validateDelta(child, op.delta, renderer)
                 cursor = Math.addExact(cursor, 1)
             }
         }
@@ -732,7 +1178,8 @@ private fun preflightDeltaValues(target: AbstractYType, delta: Delta) {
             current.attributes.values.forEach { op ->
                 when (op) {
                     is AttributeOp.Set -> add(op.value.toAny())
-                    AttributeOp.Delete -> Unit
+                    AttributeOp.Delete,
+                    is AttributeOp.DeleteAttributed -> Unit
                     is AttributeOp.Modify -> collect(op.delta)
                 }
             }
@@ -788,7 +1235,10 @@ private fun sequenceValueAt(target: AbstractYType, index: Int): Any? = when (tar
     else -> error("type ${target.kind} has no indexed children")
 }
 
-private class VirtualSequence(private val target: AbstractYType) {
+private class VirtualSequence(
+    private val target: AbstractYType,
+    renderer: AbstractRenderer = target.activeRenderer,
+) {
     private sealed interface Segment {
         val length: Int
 
@@ -802,8 +1252,15 @@ private class VirtualSequence(private val target: AbstractYType) {
     }
 
     private val segments = mutableListOf<Segment>()
+    private val existingValues: List<Any?> = if (target.isPreliminary) {
+        (0 until sequenceLength(target)).map { index -> sequenceValueAt(target, index) }
+    } else {
+        renderUnifiedSequenceContent(target, renderer).flatMap { rendered ->
+            rendered.text?.map(Char::toString) ?: rendered.values
+        }
+    }
 
-    var length: Int = sequenceLength(target)
+    var length: Int = existingValues.size
         private set
 
     init {
@@ -841,7 +1298,7 @@ private class VirtualSequence(private val target: AbstractYType) {
             if (index < end) {
                 val offset = index - position
                 return when (segment) {
-                    is Segment.Existing -> sequenceValueAt(target, segment.start + offset)
+                    is Segment.Existing -> existingValues[segment.start + offset]
                     is Segment.Values -> segment.values[offset]
                     is Segment.Text -> TextSlot
                 }
@@ -882,78 +1339,187 @@ private class VirtualSequence(private val target: AbstractYType) {
     private data object TextSlot
 }
 
-private fun applyAttributes(target: AbstractYType, operations: Map<String, AttributeOp>, origin: Any?) {
+private fun applyAttributes(
+    target: AbstractYType,
+    operations: Map<String, AttributeOp>,
+    origin: Any?,
+    renderer: AbstractRenderer,
+    fix: DeltaBuilder,
+): Boolean {
+    var hasFix = false
     operations.forEach { (key, op) ->
         when (op) {
             is AttributeOp.Set -> setRawAttr(target, key, op.value.toAny())
-            AttributeOp.Delete -> deleteRawAttr(target, key)
+            AttributeOp.Delete,
+            is AttributeOp.DeleteAttributed -> deleteRawAttr(target, key)
             is AttributeOp.Modify -> {
-                val child = getRawAttr(target, key) as AbstractYType
-                Type(child).applyDelta(op.delta, origin)
+                val child = renderUnifiedAttributes(target, renderer)[key]?.value as AbstractYType
+                val childFix = Type(child).applyDeltaWithCorrection(op.delta, origin, renderer)
+                if (childFix != null) {
+                    fix.modifyAttr(key, childFix)
+                    hasFix = true
+                }
             }
         }
     }
+    return hasFix
 }
 
-private fun applyChildren(target: AbstractYType, operations: List<ChildOp>, origin: Any?) {
+private fun applyChildren(
+    target: AbstractYType,
+    operations: List<ChildOp>,
+    origin: Any?,
+    renderer: AbstractRenderer,
+    transaction: YTransaction,
+    fix: DeltaBuilder,
+): Boolean {
     var cursor = 0
+    var expectedIndex = 0
+    var fixLength = 0
+    var hasFix = false
+
+    fun appendModifyFix(
+        childFix: Delta?,
+        formats: FormatChange = FormatChange.Unchanged,
+        attribution: AttributionChange = AttributionChange.Unchanged,
+    ) {
+        if (childFix == null && formats == FormatChange.Unchanged && attribution == AttributionChange.Unchanged) {
+            return
+        }
+        if (expectedIndex > fixLength) fix.retain(expectedIndex - fixLength)
+        fix.modifyChanges(childFix ?: DeltaBuilder().done(), formats, attribution)
+        fixLength = expectedIndex + 1
+        hasFix = true
+    }
+
     operations.forEach { op ->
         when (op) {
             is ChildOp.InsertText -> {
+                val visibleIndex = renderedSequenceIndexToVisibleIndex(target, cursor, renderer, clampToEnd = true)
                 if (target is YText) {
-                    target.insert(cursor, op.text, op.formats.mapValues { (_, value) -> value.toAny() })
+                    target.insert(visibleIndex, op.text, op.formats.mapValues { (_, value) -> value.toAny() })
                 } else {
-                    insertUnifiedText(target, cursor, op.text)
+                    insertUnifiedText(target, visibleIndex, op.text)
                 }
                 cursor += op.text.length
+                expectedIndex += op.text.length
             }
             is ChildOp.InsertValues -> {
                 val values = op.values.map(DeltaValue::toAny)
+                val visibleIndex = renderedSequenceIndexToVisibleIndex(target, cursor, renderer, clampToEnd = true)
                 when (target) {
-                    is YArray -> target.insert(cursor, values)
+                    is YArray -> target.insert(visibleIndex, values)
                     is YText -> if (op.formats.isEmpty()) {
-                        insertUnifiedValues(target, cursor, op.values)
+                        insertUnifiedValues(target, visibleIndex, op.values)
                     } else {
+                        var insertIndex = visibleIndex
                         values.forEach { value ->
                             target.insertEmbed(
-                                cursor++,
+                                insertIndex++,
                                 value,
                                 op.formats.mapValues { (_, format) -> format.toAny() },
                                 origin,
                             )
                         }
                     }
-                    is YXmlElementType -> insertUnifiedValues(target, cursor, op.values)
-                    is YXmlFragment -> insertUnifiedValues(target, cursor, op.values)
+                    is YXmlElementType -> insertUnifiedValues(target, visibleIndex, op.values)
+                    is YXmlFragment -> insertUnifiedValues(target, visibleIndex, op.values)
                     else -> error("type ${target.kind} cannot contain indexed children")
                 }
-                if (target !is YText || op.formats.isEmpty()) cursor += values.size
+                cursor += values.size
+                expectedIndex += values.size
             }
             is ChildOp.Retain -> {
-                applyFormats(target, cursor, op.length, op.formats)
+                applyRenderedFormats(target, cursor, op.length, op.formats, renderer)
                 cursor += op.length
+                expectedIndex += op.length
             }
-            is ChildOp.Delete -> when (target) {
-                is YArray -> target.delete(cursor, op.length)
-                is YText -> target.delete(cursor, op.length)
-                is YXmlElementType -> target.delete(cursor, op.length)
-                is YXmlFragment -> target.delete(cursor, op.length)
-                else -> error("type ${target.kind} cannot contain indexed children")
-            }
+            is ChildOp.Delete -> deleteRendered(target, cursor, op.length, renderer, transaction, origin)
             is ChildOp.Modify -> {
-                val child = when (target) {
-                    is YArray -> target.get(cursor)
-                    is YText -> target.get(cursor)
-                    is YXmlElementType -> target.get(cursor)
-                    is YXmlFragment -> target.get(cursor)
-                    else -> null
-                } as AbstractYType
-                Type(child).applyDelta(op.delta, origin)
-                applyFormats(target, cursor, 1, op.formats)
+                val slot = renderedSequenceSlots(target, renderer)[cursor]
+                val child = slot.value as AbstractYType
+                val owner = child.doc.typeRefItemId(child)?.let(child.doc::getItem)?.toItemStruct(child.doc)
+                val childFix = Type(child).applyDeltaWithCorrection(op.delta, origin, renderer)
+                if (owner?.deleted == true && rendererContentLength(renderer, owner) > 0) {
+                    appendModifyFix(
+                        childFix,
+                        inverseFormatChange(slot.formats, op.formats),
+                        inverseAttributionChange(slot.attribution, op.attribution),
+                    )
+                } else {
+                    applyRenderedFormats(target, cursor, 1, op.formats, renderer)
+                    appendModifyFix(childFix)
+                }
                 cursor++
+                expectedIndex++
             }
         }
     }
+    return hasFix
+}
+
+private data class RenderedSequenceSlot(
+    val value: Any?,
+    val formats: Map<String, YValue>,
+    val attribution: DeltaAttribution?,
+)
+
+private fun renderedSequenceSlots(
+    target: AbstractYType,
+    renderer: AbstractRenderer,
+): List<RenderedSequenceSlot> = renderUnifiedSequenceContent(target, renderer).flatMap { rendered ->
+    val formats = formatDataFromAny(rendered.formats)
+    val attribution = rendered.attribution?.toDeltaAttribution()
+    rendered.text?.map { char -> RenderedSequenceSlot(char.toString(), formats, attribution) }
+        ?: rendered.values.map { value -> RenderedSequenceSlot(value, formats, attribution) }
+}
+
+private fun deleteRendered(
+    target: AbstractYType,
+    cursor: Int,
+    length: Int,
+    renderer: AbstractRenderer,
+    transaction: YTransaction,
+    origin: Any?,
+) {
+    if (length == 0) return
+    when (target) {
+        is YArray -> target.applyDelta(
+            listOf(YArrayDeltaOp(retain = cursor), YArrayDeltaOp(delete = length)),
+            origin,
+            renderer,
+        )
+        is YText -> target.applyDelta(
+            YTextDelta().retain(cursor).delete(length),
+            origin,
+            renderer,
+        )
+        is YXmlFragment -> target.applyDelta(
+            listOf(YArrayDeltaOp(retain = cursor), YArrayDeltaOp(delete = length)),
+            origin,
+            renderer,
+        )
+        is YXmlElementType -> {
+            recordRendererAttributedDeletes(transaction, target, cursor, length, renderer)
+            val start = renderedSequenceIndexToVisibleIndex(target, cursor, renderer)
+            val end = renderedSequenceIndexToVisibleIndex(target, cursor + length, renderer, clampToEnd = true)
+            target.delete(start, end - start)
+        }
+        else -> error("type ${target.kind} cannot contain indexed children")
+    }
+}
+
+private fun applyRenderedFormats(
+    target: AbstractYType,
+    cursor: Int,
+    length: Int,
+    change: FormatChange,
+    renderer: AbstractRenderer,
+) {
+    if (change == FormatChange.Unchanged || length == 0) return
+    val start = renderedSequenceIndexToVisibleIndex(target, cursor, renderer)
+    val end = renderedSequenceIndexToVisibleIndex(target, cursor + length, renderer, clampToEnd = true)
+    applyFormats(target, start, end - start, change)
 }
 
 private fun applyFormats(target: AbstractYType, index: Int, length: Int, change: FormatChange) {
@@ -986,4 +1552,176 @@ private fun clearTextFormats(text: YText, index: Int, length: Int) {
         }
         position += opLength
     }
+}
+
+private fun applyFormatChange(
+    stored: Map<String, YValue>,
+    update: FormatChange,
+): Map<String, YValue> = when (update) {
+    FormatChange.Unchanged -> stored
+    FormatChange.Clear -> emptyMap()
+    is FormatChange.Patch -> stored.toMutableMap().apply {
+        update.values.forEach { (key, value) ->
+            if (value == null || value == YValue.Null) remove(key) else put(key, value)
+        }
+    }.toSortedMap()
+}
+
+private fun diffFormats(
+    current: Map<String, YValue>,
+    target: Map<String, YValue>,
+): FormatChange {
+    if (current == target) return FormatChange.Unchanged
+    val patch = (current.keys + target.keys).sorted().associateWith { key ->
+        target[key].takeIf { value -> value != current[key] }
+    }.filter { (key, value) -> value != null || key !in target }
+    return if (patch.isEmpty()) FormatChange.Unchanged else FormatChange.Patch(patch)
+}
+
+private fun inverseFormatChange(
+    stored: Map<String, YValue>,
+    update: FormatChange,
+): FormatChange = diffFormats(applyFormatChange(stored, update), stored)
+
+private fun attributionValues(attribution: DeltaAttribution?): Map<String, YValue> =
+    attribution?.values.orEmpty()
+
+private fun applyAttributionChange(
+    stored: DeltaAttribution?,
+    update: AttributionChange,
+): DeltaAttribution? = when (update) {
+    AttributionChange.Unchanged -> stored
+    AttributionChange.Clear -> null
+    is AttributionChange.Patch -> mergeAttribution(stored?.values, update.values, resolve = true)
+        .mapNotNull { (key, value) -> value?.let { key to it } }
+        .toMap()
+        .takeIf(Map<String, YValue>::isNotEmpty)
+        ?.let(DeltaAttribution::of)
+}
+
+private fun diffAttribution(
+    current: DeltaAttribution?,
+    target: DeltaAttribution?,
+): AttributionChange {
+    val currentValues = attributionValues(current)
+    val targetValues = attributionValues(target)
+    if (currentValues == targetValues) return AttributionChange.Unchanged
+    val patch = linkedMapOf<String, YValue?>()
+    (currentValues.keys + targetValues.keys).sorted().forEach { key ->
+        if (key == "format") {
+            val currentFormats = (currentValues[key] as? YValue.MapValue)?.value.orEmpty()
+            val targetFormats = (targetValues[key] as? YValue.MapValue)?.value.orEmpty()
+            if (currentFormats != targetFormats) {
+                val formatPatch = linkedMapOf<String, YValue>()
+                (currentFormats.keys + targetFormats.keys).sorted().forEach { formatKey ->
+                    if (currentFormats[formatKey] != targetFormats[formatKey]) {
+                        formatPatch[formatKey] = targetFormats[formatKey] ?: YValue.Null
+                    }
+                }
+                if (formatPatch.isNotEmpty()) patch[key] = YValue.MapValue(formatPatch)
+            }
+        } else if (currentValues[key] != targetValues[key]) {
+            patch[key] = targetValues[key]
+        }
+    }
+    return if (patch.isEmpty()) AttributionChange.Unchanged else AttributionChange.Patch(patch)
+}
+
+private fun inverseAttributionChange(
+    stored: DeltaAttribution?,
+    update: AttributionChange,
+): AttributionChange = diffAttribution(applyAttributionChange(stored, update), stored)
+
+private data class SettledDeltaSlot(
+    val text: String?,
+    val value: DeltaValue?,
+    val formats: Map<String, YValue>,
+    val attribution: DeltaAttribution?,
+)
+
+private fun Delta.settledSlots(): List<SettledDeltaSlot> = buildList {
+    children.forEach { op ->
+        when (op) {
+            is ChildOp.InsertText -> op.text.forEach { char ->
+                add(SettledDeltaSlot(char.toString(), null, op.formats, op.attribution))
+            }
+            is ChildOp.InsertValues -> op.values.forEach { value ->
+                add(SettledDeltaSlot(null, value, op.formats, op.attribution))
+            }
+            is ChildOp.Delete,
+            is ChildOp.Modify,
+            is ChildOp.Retain -> error("inverse base must be a settled insert-only delta")
+        }
+    }
+}
+
+private fun DeltaBuilder.insertSettledSlot(slot: SettledDeltaSlot) {
+    if (slot.text != null) {
+        insert(slot.text, slot.formats, slot.attribution)
+    } else {
+        insertValues(listOf(checkNotNull(slot.value)), slot.formats, slot.attribution)
+    }
+}
+
+/** Port of lib0/delta inverse for the typed subset represented by this adapter. */
+private fun inverseDelta(
+    change: Delta,
+    base: Delta,
+    renderer: AbstractRenderer,
+): Delta {
+    val inverse = DeltaBuilder(if (change.name == base.name) change.name else null)
+
+    change.attributes.forEach { (key, op) ->
+        val baseOp = base.attributes[key] as? AttributeOp.Set
+        when {
+            op is AttributeOp.Modify && baseOp?.value is DeltaValue.SharedType -> {
+                val nestedBase = Type(baseOp.value.value).toDelta(renderer)
+                inverse.modifyAttr(
+                    key,
+                    inverseDelta(op.delta, nestedBase, renderer),
+                    inverseAttributionChange(baseOp.attribution, op.attribution),
+                )
+            }
+            baseOp != null -> inverse.setAttr(key, baseOp.value, baseOp.attribution)
+            op !== AttributeOp.Delete && op !is AttributeOp.DeleteAttributed -> inverse.deleteAttr(key)
+        }
+    }
+
+    val baseSlots = base.settledSlots()
+    var baseIndex = 0
+    change.children.forEach { op ->
+        when (op) {
+            is ChildOp.InsertText -> inverse.delete(op.text.length)
+            is ChildOp.InsertValues -> inverse.delete(op.values.size)
+            is ChildOp.Retain -> repeat(op.length) {
+                val slot = baseSlots.getOrNull(baseIndex++)
+                if (slot == null) {
+                    inverse.retain(1)
+                } else {
+                    inverse.retainChanges(
+                        1,
+                        inverseFormatChange(slot.formats, op.formats),
+                        inverseAttributionChange(slot.attribution, op.attribution),
+                    )
+                }
+            }
+            is ChildOp.Modify -> {
+                val slot = baseSlots.getOrNull(baseIndex++)
+                val shared = slot?.value as? DeltaValue.SharedType
+                if (slot == null || shared == null) {
+                    inverse.retain(1)
+                } else {
+                    inverse.modifyChanges(
+                        inverseDelta(op.delta, Type(shared.value).toDelta(renderer), renderer),
+                        inverseFormatChange(slot.formats, op.formats),
+                        inverseAttributionChange(slot.attribution, op.attribution),
+                    )
+                }
+            }
+            is ChildOp.Delete -> repeat(op.length) {
+                baseSlots.getOrNull(baseIndex++)?.let(inverse::insertSettledSlot)
+            }
+        }
+    }
+    return inverse.done()
 }

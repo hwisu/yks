@@ -1,17 +1,21 @@
 package dev.yks.experimental.v14
 
 import dev.yks.RootKind
+import dev.yks.TwosetRenderer
 import dev.yks.YDoc
 import dev.yks.YMap
 import dev.yks.YTextDeltaOp
 import dev.yks.YUnopenedRoot
 import dev.yks.YValue
+import dev.yks.createContentAttribute
+import dev.yks.createIdMap
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertSame
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalYjs14Api::class)
@@ -184,5 +188,125 @@ class UnifiedTypeTest {
         assertFailsWith<IllegalStateException> {
             DeltaValue.Data(YValue.TypeRef(RootKind.Map, "synthetic"))
         }
+    }
+
+    @Test
+    fun builderKeepsAttributionSeparateAndCarriesMarks() {
+        val insertedBy = DeltaAttribution.of(
+            mapOf("insert" to YValue.ListValue(listOf(YValue.StringValue("alice")))),
+        )
+        val delta = DeltaBuilder()
+            .useAttribution(insertedBy)
+            .insert("a")
+            .insert("b")
+            .retainWithAttribution(
+                1,
+                AttributionChange.Patch(
+                    mapOf(
+                        "format" to YValue.MapValue(
+                            mapOf("bold" to YValue.ListValue(listOf(YValue.StringValue("bob")))),
+                        ),
+                    ),
+                ),
+            )
+            .addChildMark(
+                index = 1,
+                id = "cursor-1",
+                association = -1,
+                attrs = mapOf("color" to YValue.StringValue("blue")),
+            )
+            .done()
+
+        val insert = assertIs<ChildOp.InsertText>(delta.children[0])
+        assertEquals("ab", insert.text)
+        assertEquals(insertedBy, insert.attribution)
+        assertEquals(
+            AttributionChange.Patch(
+                insertedBy.values + (
+                    "format" to YValue.MapValue(
+                        mapOf("bold" to YValue.ListValue(listOf(YValue.StringValue("bob")))),
+                    )
+                ),
+            ),
+            assertIs<ChildOp.Retain>(delta.children[1]).attribution,
+        )
+        assertEquals(DeltaMarkKey.Child(1), delta.marks.single().key)
+        assertEquals("cursor-1", delta.marks.single().id)
+        assertEquals(-1, delta.marks.single().association)
+    }
+
+    @Test
+    fun rendererSnapshotPreservesDeletedContentAttributionAsItsOwnDimension() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val text = doc.getText("body")
+        text.insert(0, "ab")
+        text.delete(1, 1)
+        val renderer = TwosetRenderer(
+            inserts = createIdMap(),
+            deletes = createIdMap().also { ids ->
+                ids.add(1, 1, 1, listOf(createContentAttribute("delete", "bob")))
+            },
+        )
+
+        val delta = text.asV14Type().toDelta(renderer)
+
+        assertEquals(2, delta.children.size, delta.toString())
+        assertEquals("a", assertIs<ChildOp.InsertText>(delta.children[0]).text)
+        val deleted = assertIs<ChildOp.InsertText>(delta.children[1])
+        assertEquals("b", deleted.text)
+        assertEquals(
+            DeltaAttribution.of(
+                mapOf("delete" to YValue.ListValue(listOf(YValue.StringValue("bob")))),
+            ),
+            deleted.attribution,
+        )
+        assertTrue(deleted.formats.isEmpty())
+    }
+
+    @Test
+    fun nestedModifyOfRenderedDeletedTypeReturnsCorrectionWithoutMutation() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val outer = doc.getArray("items")
+        val nested = YMap()
+        nested.setAttr("count", 1)
+        outer.push(nested)
+        val owner = checkNotNull(doc.typeRefItemId(nested))
+        val countItem = doc.mapItemOrder(nested.name, "count").single().id
+        outer.delete(0, 1)
+        val renderer = TwosetRenderer(
+            inserts = createIdMap(),
+            deletes = createIdMap().also { ids ->
+                ids.add(owner.client, owner.clock, 1, listOf(createContentAttribute("delete", "bob")))
+                ids.add(
+                    countItem.client,
+                    countItem.clock,
+                    1,
+                    listOf(createContentAttribute("delete", "bob")),
+                )
+            },
+        )
+        val requested = DeltaBuilder()
+            .modify(DeltaBuilder().setDataAttr("count", YValue.LongNumber(2)).done())
+            .done()
+
+        val correction = outer.asV14Type().applyDeltaWithCorrection(requested, renderer = renderer)
+
+        assertEquals(
+            AttributeOp.Set(DeltaValue.integer(1), DeltaAttribution.of(
+                mapOf("delete" to YValue.ListValue(listOf(YValue.StringValue("bob")))),
+            )),
+            nested.asV14Type().toDelta(renderer).attributes["count"],
+        )
+        val modify = assertIs<ChildOp.Modify>(checkNotNull(correction).children.single())
+        assertEquals(
+            AttributeOp.Set(
+                DeltaValue.integer(1),
+                DeltaAttribution.of(
+                    mapOf("delete" to YValue.ListValue(listOf(YValue.StringValue("bob")))),
+                ),
+            ),
+            modify.delta.attributes["count"],
+        )
+        assertNull(outer.asV14Type().applyDeltaWithCorrection(DeltaBuilder().done(), renderer = renderer))
     }
 }

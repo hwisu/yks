@@ -55,6 +55,97 @@ internal data class DeepDeltaRenderOptions(
     val modified: Map<AbstractYType, Set<String?>>? = null,
 )
 
+/** Renderer-resolved sequence content used by the experimental @y/y 14 adapter. */
+internal data class UnifiedRenderedSequenceContent(
+    val text: String?,
+    val values: List<Any?>,
+    val formats: Map<String, Any?>,
+    val attribution: Attribution?,
+)
+
+/** Renderer-resolved map/attribute content used by the experimental @y/y 14 adapter. */
+internal data class UnifiedRenderedAttribute(
+    val value: Any?,
+    val attribution: Attribution?,
+)
+
+/**
+ * Preserve renderer attribution as its own v14 delta dimension instead of flattening it into the
+ * stable YText/YArray delta attribute maps.
+ */
+internal fun renderUnifiedSequenceContent(
+    type: AbstractYType,
+    renderer: AbstractRenderer,
+): List<UnifiedRenderedSequenceContent> {
+    val options = DeepDeltaRenderOptions(renderer = renderer)
+    val formatAttributions = if (type is YText) textFormatAttributionsByTarget(type, options) else emptyMap()
+    return buildList {
+        renderSequenceItems(type, type.kind, options).forEach { rendered ->
+            if (rendered.action != RenderedDeltaAction.Insert) return@forEach
+            val content = rendered.content.content
+            val attribution = createAttributionFromAttributionItems(
+                rendered.content.attrs,
+                rendered.content.deleted,
+            ).orEmpty().mergeTextAttribution(formatAttributions[rendered.item.id].orEmpty())
+            val formats = if (type is YText) {
+                rendered.item.textAttributesForDeepDelta(type.doc, options)
+            } else {
+                emptyMap()
+            }
+            add(
+                UnifiedRenderedSequenceContent(
+                    text = (content as? ContentString)?.str,
+                    values = if (content is ContentString) emptyList() else content.getContent(),
+                    formats = formats,
+                    attribution = attribution.ifEmpty { null },
+                ),
+            )
+        }
+    }
+}
+
+/** Resolve both the selected value and its attribution through the supplied renderer. */
+internal fun renderUnifiedAttributes(
+    type: AbstractYType,
+    renderer: AbstractRenderer,
+): Map<String, UnifiedRenderedAttribute> {
+    val options = DeepDeltaRenderOptions(renderer = renderer)
+    val visibleAttrs = when (type) {
+        is YUnopenedRoot -> error("open root '${type.name}' before rendering attributes")
+        is YArray -> type.getAttrs()
+        is YText -> type.getAttrs()
+        is YMap -> type.toMap()
+        is YXmlFragment -> type.getAttrs()
+        is YXmlElementType -> type.getAttrs()
+    }
+    val keys = (visibleAttrs.keys + type.doc.renderableMapKeys(type.name, options)).toSortedSet()
+    return keys.mapNotNull { key ->
+        val rendered = type.doc.mapItemOrder(type.name, key)
+            .mapNotNull { item ->
+                val value = when (val content = item.content) {
+                    is ItemContent.MapEntry -> type.doc.valueToAny(content.value)
+                    is ItemContent.MapEntries -> type.doc.valueToAny(content.values.last())
+                    is ItemContent.XmlType -> type.doc.typeFromXmlType(content)
+                    else -> return@mapNotNull null
+                }
+                val renderedContent = item.readRenderedContents(type.doc, options).lastOrNull()
+                    ?: return@mapNotNull null
+                if (renderedContent.deleted && renderedContent.attrs == null) return@mapNotNull null
+                val attribution = createAttributionFromAttributionItems(
+                    renderedContent.attrs,
+                    renderedContent.deleted,
+                )
+                UnifiedRenderedAttribute(value, attribution)
+            }
+            .lastOrNull()
+        when {
+            rendered != null -> key to rendered
+            visibleAttrs.containsKey(key) -> key to UnifiedRenderedAttribute(visibleAttrs[key], null)
+            else -> null
+        }
+    }.toMap().toSortedMap()
+}
+
 public fun YDoc.toDeltaDeep(renderer: AbstractRenderer = baseRenderer): YDocDeepDelta =
     YDocDeepDelta(
         roots = rootNames().mapNotNull { name ->
