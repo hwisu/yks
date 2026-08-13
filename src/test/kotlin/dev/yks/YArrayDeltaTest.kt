@@ -34,6 +34,28 @@ class YArrayDeltaTest {
     }
 
     @Test
+    fun arrayProjectionReadsTextContentLikeUpstreamYjs() {
+        val source = YDoc(clientId = 1)
+        val text = source.getText("root")
+        val nested = YMap(mapOf("answer" to 42))
+        text.insert(0, "A😀")
+        text.insertEmbed(text.length, mapOf("ok" to true))
+        text.insertEmbed(text.length, nested)
+
+        val target = YDoc(clientId = 2)
+        val array = target.getArray("root")
+        target.applyUpdate(source.encodeStateAsUpdate())
+
+        val expectedTextUnits = "A😀".map(Char::toString)
+        assertEquals(expectedTextUnits + listOf(mapOf("ok" to true)), array.toArray().dropLast(1))
+        assertEquals(expectedTextUnits.size + 2, array.length)
+        assertEquals(expectedTextUnits.first(), array.get(0))
+        assertEquals(expectedTextUnits[2], array.get(2))
+        assertEquals(mapOf("ok" to true), array.get(3))
+        assertEquals(mapOf("answer" to 42L), (array.get(4) as YMap).toMap())
+    }
+
+    @Test
     fun applyDeltaSupportsRetainDeleteAndInsert() {
         val doc = YDoc(clientId = 1)
         val array = doc.getArray("array")

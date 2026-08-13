@@ -45,6 +45,20 @@ v14는 기존 여러 shared type을 하나의 `Type` API로 합친다. YKS는 �
 유지하되 v14가 XML 요소 아래에 직접 기록하는 `ContentString`도 XML text child로
 materialize한다. 자동 매트릭스는 다음 네 경로를 V1과 V2 각각 검사한다.
 
+`dev.yks.experimental.v14`는 opt-in `Type`, immutable `Delta`, single-use
+`DeltaBuilder`와 `DeltaValue`를 제공한다. root는 wire에 kind가 없으므로
+`doc.getType(name, RootKind)`로 projection을 명시한다. data/shared type/subdocument를
+서로 다른 value variant로 받아 가짜 type reference를 막고, incompatible content,
+범위 초과와 잘못된 nested modify는 document 변경 전에 검증한다. builder는 인접한
+insert/retain/delete run을 합치며 적용은 한 transaction에서 수행한다. text/data/type이
+섞인 sequence와 XML direct `ContentString`도 표준 wire로 읽고 쓸 수 있다.
+
+이 facade는 기존 ABI나 wire를 바꾸지 않는다. RC.24의 attribution/mark, renderer
+correction 반환, live deep-delta cache와 Text/XmlText 밖의 format patch는 아직 직접
+매핑하지 않는다. `Type.delta`는 shallow snapshot이며 기존 renderer/deep delta가
+필요하면 `Type.delegate`의 안정 API를 사용한다. 표현할 수 없는 연산은 조용히
+변환하지 않고 preflight에서 거절한다.
+
 1. Yjs 14 → Yjs 13
 2. Yjs 13 → Yjs 14
 3. Yjs 14 → Kotlin
@@ -53,6 +67,8 @@ materialize한다. 자동 매트릭스는 다음 네 경로를 V1과 V2 각각 �
 text formatting/non-BMP 문자열, array, map attribute, nested XML element와 direct XML
 text를 결과 의미까지 비교하며 Yjs 14 → Kotlin → Yjs 14 재인코딩도 확인한다. RC API는
 변경될 수 있으므로 새 RC를 대상으로 주장하려면 alias pin과 매트릭스를 함께 갱신해야 한다.
+text root를 legacy array projection으로 여는 경우도 UTF-16 단위 length/value/embed를
+Yjs 13 oracle과 비교한다.
 
 ## 자원 한계와 malformed 입력
 
@@ -75,7 +91,7 @@ CI와 로컬 gate는 설치된 oracle 버전을 실행 전에 exact pin과 대�
 - 100 seed XML/subdocument/relative-position/V2/UndoManager;
 - 200 seed formatted text/embed, complex nested type, direct/deep event, snapshot, GC;
 - V1과 V2 각각 1,000 malformed seed의 accept/reject, 결과 text, state vector 비교;
-- root `XmlText`/`XmlHook`, W3C DOM, Awareness, standard/private 경계와 v14 양방향 matrix;
+- root `XmlText`/`XmlHook`, W3C DOM, Awareness, standard/private 경계와 v14 facade 양방향 matrix;
 - Yrs `0.27.2` UTF-16 mode 양방향 fixture와 publication consumer smoke test.
 
 ## 플랫폼·생태계 경계

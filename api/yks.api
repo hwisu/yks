@@ -3666,3 +3666,230 @@ public final class dev/yks/awareness/AwarenessState {
 public final class dev/yks/awareness/AwarenessState$Companion {
 }
 
+public abstract interface class dev/yks/experimental/v14/AttributeOp {
+}
+
+public final class dev/yks/experimental/v14/AttributeOp$Delete : dev/yks/experimental/v14/AttributeOp {
+	public static final field INSTANCE Ldev/yks/experimental/v14/AttributeOp$Delete;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/AttributeOp$Modify : dev/yks/experimental/v14/AttributeOp {
+	public final fun component1 ()Ldev/yks/experimental/v14/Delta;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDelta ()Ldev/yks/experimental/v14/Delta;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/AttributeOp$Set : dev/yks/experimental/v14/AttributeOp {
+	public final fun component1 ()Ldev/yks/experimental/v14/DeltaValue;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ldev/yks/experimental/v14/DeltaValue;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class dev/yks/experimental/v14/ChildOp {
+}
+
+public final class dev/yks/experimental/v14/ChildOp$Delete : dev/yks/experimental/v14/ChildOp {
+	public final fun component1 ()I
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLength ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/ChildOp$InsertText : dev/yks/experimental/v14/ChildOp {
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFormats ()Ljava/util/Map;
+	public final fun getText ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/ChildOp$InsertValues : dev/yks/experimental/v14/ChildOp {
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFormats ()Ljava/util/Map;
+	public final fun getValues ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/ChildOp$Modify : dev/yks/experimental/v14/ChildOp {
+	public final fun component1 ()Ldev/yks/experimental/v14/Delta;
+	public final fun component2 ()Ldev/yks/experimental/v14/FormatChange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDelta ()Ldev/yks/experimental/v14/Delta;
+	public final fun getFormats ()Ldev/yks/experimental/v14/FormatChange;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/ChildOp$Retain : dev/yks/experimental/v14/ChildOp {
+	public final fun component1 ()I
+	public final fun component2 ()Ldev/yks/experimental/v14/FormatChange;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFormats ()Ldev/yks/experimental/v14/FormatChange;
+	public final fun getLength ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/Delta {
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttributes ()Ljava/util/Map;
+	public final fun getChildren ()Ljava/util/List;
+	public final fun getName ()Ljava/lang/String;
+	public fun hashCode ()I
+	public final fun isEmpty ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/DeltaBuilder {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun delete (I)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun deleteAttr (Ljava/lang/String;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun done ()Ldev/yks/experimental/v14/Delta;
+	public final fun getName ()Ljava/lang/String;
+	public final fun insert (Ljava/lang/String;Ljava/util/Map;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public static synthetic fun insert$default (Ldev/yks/experimental/v14/DeltaBuilder;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun insertType (Ldev/yks/AbstractYType;Ljava/util/Map;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public static synthetic fun insertType$default (Ldev/yks/experimental/v14/DeltaBuilder;Ldev/yks/AbstractYType;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun insertValue (Ldev/yks/experimental/v14/DeltaValue;Ljava/util/Map;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public static synthetic fun insertValue$default (Ldev/yks/experimental/v14/DeltaBuilder;Ldev/yks/experimental/v14/DeltaValue;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun insertValues (Ljava/util/List;Ljava/util/Map;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public static synthetic fun insertValues$default (Ldev/yks/experimental/v14/DeltaBuilder;Ljava/util/List;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun modify (Ldev/yks/experimental/v14/Delta;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun modify (Ldev/yks/experimental/v14/Delta;Ljava/util/Map;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun modifyAttr (Ljava/lang/String;Ldev/yks/experimental/v14/Delta;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun modifyClearingFormats (Ldev/yks/experimental/v14/Delta;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun retain (I)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun retain (ILjava/util/Map;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun retainClearingFormats (I)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun setAttr (Ljava/lang/String;Ldev/yks/experimental/v14/DeltaValue;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun setDataAttr (Ljava/lang/String;Ldev/yks/YValue;)Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun setTypeAttr (Ljava/lang/String;Ldev/yks/AbstractYType;)Ldev/yks/experimental/v14/DeltaBuilder;
+}
+
+public abstract interface class dev/yks/experimental/v14/DeltaValue {
+	public static final field Companion Ldev/yks/experimental/v14/DeltaValue$Companion;
+}
+
+public final class dev/yks/experimental/v14/DeltaValue$Companion {
+	public final fun bool (Z)Ldev/yks/experimental/v14/DeltaValue;
+	public final fun data (Ldev/yks/YValue;)Ldev/yks/experimental/v14/DeltaValue;
+	public final fun integer (J)Ldev/yks/experimental/v14/DeltaValue;
+	public final fun shared (Ldev/yks/AbstractYType;)Ldev/yks/experimental/v14/DeltaValue;
+	public final fun subdocument (Ldev/yks/YDoc;)Ldev/yks/experimental/v14/DeltaValue;
+	public final fun text (Ljava/lang/String;)Ldev/yks/experimental/v14/DeltaValue;
+}
+
+public final class dev/yks/experimental/v14/DeltaValue$Data : dev/yks/experimental/v14/DeltaValue {
+	public fun <init> (Ldev/yks/YValue;)V
+	public final fun component1 ()Ldev/yks/YValue;
+	public final fun copy (Ldev/yks/YValue;)Ldev/yks/experimental/v14/DeltaValue$Data;
+	public static synthetic fun copy$default (Ldev/yks/experimental/v14/DeltaValue$Data;Ldev/yks/YValue;ILjava/lang/Object;)Ldev/yks/experimental/v14/DeltaValue$Data;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ldev/yks/YValue;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/DeltaValue$SharedType : dev/yks/experimental/v14/DeltaValue {
+	public fun <init> (Ldev/yks/AbstractYType;)V
+	public final fun component1 ()Ldev/yks/AbstractYType;
+	public final fun copy (Ldev/yks/AbstractYType;)Ldev/yks/experimental/v14/DeltaValue$SharedType;
+	public static synthetic fun copy$default (Ldev/yks/experimental/v14/DeltaValue$SharedType;Ldev/yks/AbstractYType;ILjava/lang/Object;)Ldev/yks/experimental/v14/DeltaValue$SharedType;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ldev/yks/AbstractYType;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/DeltaValue$Subdocument : dev/yks/experimental/v14/DeltaValue {
+	public fun <init> (Ldev/yks/YDoc;)V
+	public final fun component1 ()Ldev/yks/YDoc;
+	public final fun copy (Ldev/yks/YDoc;)Ldev/yks/experimental/v14/DeltaValue$Subdocument;
+	public static synthetic fun copy$default (Ldev/yks/experimental/v14/DeltaValue$Subdocument;Ldev/yks/YDoc;ILjava/lang/Object;)Ldev/yks/experimental/v14/DeltaValue$Subdocument;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ldev/yks/YDoc;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface annotation class dev/yks/experimental/v14/ExperimentalYjs14Api : java/lang/annotation/Annotation {
+}
+
+public abstract interface class dev/yks/experimental/v14/FormatChange {
+}
+
+public final class dev/yks/experimental/v14/FormatChange$Clear : dev/yks/experimental/v14/FormatChange {
+	public static final field INSTANCE Ldev/yks/experimental/v14/FormatChange$Clear;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/FormatChange$Patch : dev/yks/experimental/v14/FormatChange {
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValues ()Ljava/util/Map;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/FormatChange$Unchanged : dev/yks/experimental/v14/FormatChange {
+	public static final field INSTANCE Ldev/yks/experimental/v14/FormatChange$Unchanged;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/Type {
+	public fun <init> (Ldev/yks/AbstractYType;)V
+	public final fun applyDelta (Ldev/yks/experimental/v14/Delta;Ljava/lang/Object;)V
+	public static synthetic fun applyDelta$default (Ldev/yks/experimental/v14/Type;Ldev/yks/experimental/v14/Delta;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun clearCache ()V
+	public final fun delete (IILjava/lang/Object;)V
+	public static synthetic fun delete$default (Ldev/yks/experimental/v14/Type;IILjava/lang/Object;ILjava/lang/Object;)V
+	public final fun deleteAttr (Ljava/lang/String;Ljava/lang/Object;)V
+	public static synthetic fun deleteAttr$default (Ldev/yks/experimental/v14/Type;Ljava/lang/String;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun destroy ()V
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun format (IILjava/util/Map;Ljava/lang/Object;)V
+	public static synthetic fun format$default (Ldev/yks/experimental/v14/Type;IILjava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun get (I)Ldev/yks/experimental/v14/DeltaValue;
+	public final fun getAttr (Ljava/lang/String;)Ldev/yks/experimental/v14/DeltaValue;
+	public final fun getAttrs ()Ljava/util/Map;
+	public final fun getChange ()Ldev/yks/experimental/v14/DeltaBuilder;
+	public final fun getDelegate ()Ldev/yks/AbstractYType;
+	public final fun getDelta ()Ldev/yks/experimental/v14/Delta;
+	public final fun getDoc ()Ldev/yks/YDoc;
+	public final fun getKind ()Ldev/yks/RootKind;
+	public final fun getLength ()I
+	public final fun getName ()Ljava/lang/String;
+	public final fun getParent ()Ldev/yks/experimental/v14/Type;
+	public final fun getStorageName ()Ljava/lang/String;
+	public final fun hasAttr (Ljava/lang/String;)Z
+	public fun hashCode ()I
+	public final fun insert (ILjava/lang/String;Ljava/util/Map;Ljava/lang/Object;)V
+	public static synthetic fun insert$default (Ldev/yks/experimental/v14/Type;ILjava/lang/String;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun insertValues (ILjava/util/List;Ljava/util/Map;Ljava/lang/Object;)V
+	public static synthetic fun insertValues$default (Ldev/yks/experimental/v14/Type;ILjava/util/List;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun setAttr (Ljava/lang/String;Ldev/yks/experimental/v14/DeltaValue;Ljava/lang/Object;)V
+	public static synthetic fun setAttr$default (Ldev/yks/experimental/v14/Type;Ljava/lang/String;Ldev/yks/experimental/v14/DeltaValue;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun toDelta ()Ldev/yks/experimental/v14/Delta;
+	public final fun toJson ()Ljava/lang/Object;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/experimental/v14/UnifiedTypeKt {
+	public static final fun asV14Type (Ldev/yks/AbstractYType;)Ldev/yks/experimental/v14/Type;
+	public static final fun getType (Ldev/yks/YDoc;Ljava/lang/String;Ldev/yks/RootKind;)Ldev/yks/experimental/v14/Type;
+}
+

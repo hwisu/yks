@@ -30,17 +30,28 @@ internal data class StoreItem(
 internal sealed class ItemContent {
     abstract val kind: RootKind
 
-    data class Value(val value: YValue) : ItemContent() {
-        override val kind: RootKind = RootKind.Array
+    data class Value(
+        val value: YValue,
+        override val kind: RootKind = RootKind.Array,
+    ) : ItemContent() {
+        init {
+            require(kind !in setOf(RootKind.Map, RootKind.XmlHook)) {
+                "sequence values cannot belong to a map-backed type"
+            }
+        }
     }
 
     /** Packed Yjs ContentAny values for an array sequence. */
-    data class ArrayValues(val values: List<YValue>) : ItemContent() {
+    data class ArrayValues(
+        val values: List<YValue>,
+        override val kind: RootKind = RootKind.Array,
+    ) : ItemContent() {
         init {
             require(values.size > 1) { "packed array values must contain at least two values" }
+            require(kind !in setOf(RootKind.Map, RootKind.XmlHook)) {
+                "packed sequence values cannot belong to a map-backed type"
+            }
         }
-
-        override val kind: RootKind = RootKind.Array
     }
 
     data class Text(
@@ -52,6 +63,7 @@ internal sealed class ItemContent {
         init {
             require(
                 kind == RootKind.Text ||
+                    kind == RootKind.Array ||
                     kind == RootKind.XmlText ||
                     kind == RootKind.XmlFragment ||
                     kind == RootKind.XmlElement,
@@ -66,7 +78,9 @@ internal sealed class ItemContent {
         override val kind: RootKind = RootKind.Text,
     ) : ItemContent() {
         init {
-            require(kind == RootKind.Text || kind == RootKind.XmlText) { "text embed content must belong to a text sequence" }
+            require(kind !in setOf(RootKind.Map, RootKind.XmlHook)) {
+                "text embed content cannot belong to a map-backed type"
+            }
         }
     }
 
@@ -93,8 +107,8 @@ internal sealed class ItemContent {
         override val kind: RootKind = RootKind.Text,
     ) : ItemContent() {
         init {
-            require(kind == RootKind.Text || kind == RootKind.XmlText) {
-                "native text format content must belong to a text sequence"
+            require(kind !in setOf(RootKind.Map, RootKind.XmlHook)) {
+                "native text format content cannot belong to a map-backed type"
             }
         }
     }

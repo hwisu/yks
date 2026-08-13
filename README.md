@@ -1,10 +1,11 @@
 # YKS
 
-YKS는 Yjs 문서 모델과 업데이트 프로토콜을 구현한 순수 Kotlin/JVM CRDT 라이브러리입니다(JDK 21).
+YKS는 Yjs 문서 모델과 업데이트 프로토콜의 Kotlin/JVM CRDT 라이브러리입니다(JDK 21).
 
 - `YArray`, `YMap`, `YText`, live XML, 서브도큐먼트
 - 트랜잭션·옵저버, 스냅샷, 상대 위치, `UndoManager`
 - `y-protocols` 호환 Awareness
+- opt-in v14 typed `Type`/`DeltaBuilder` facade
 - Yjs update V1/V2 적용·병합·diff·변환 및 state vector
 - 스레드 접근 정책과 외부 업데이트 자원 제한
 
@@ -12,7 +13,7 @@ Yjs `13.6.32`, `@y/y` `14.0.0-rc.24`, UTF-16 모드 Yrs `0.27.2`와 양방향 wi
 
 ## 설치
 
-GitHub Packages 인증용 classic PAT(`read:packages`)를 `~/.gradle/gradle.properties`에 저장하세요.
+classic PAT(`read:packages`)를 `~/.gradle/gradle.properties`에 저장하세요.
 
 ```properties
 gpr.user=YOUR_GITHUB_USERNAME

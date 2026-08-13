@@ -1459,18 +1459,18 @@ private fun ItemContent.withResolvedParentKind(kind: RootKind): ItemContent = wh
     is ItemContent.Value -> when (kind) {
         RootKind.Map,
         RootKind.XmlHook -> ItemContent.MapEntry(value)
-        RootKind.Array -> this
         RootKind.Text,
-        RootKind.XmlText -> ItemContent.TextEmbed(value, kind = kind)
-        else -> this
+        RootKind.XmlText -> if (value is YValue.SubdocRef) ItemContent.TextEmbed(value, kind = kind) else copy(kind = kind)
+        else -> copy(kind = kind)
     }
     is ItemContent.ArrayValues -> {
-        require(kind == RootKind.Array) {
-            "packed array values cannot be resolved as $kind"
+        require(kind !in setOf(RootKind.Map, RootKind.XmlHook)) {
+            "packed sequence values cannot be resolved as $kind"
         }
-        this
+        copy(kind = kind)
     }
-    is ItemContent.MapEntry -> if (kind == RootKind.Map || kind == RootKind.XmlHook) this else ItemContent.Value(value)
+    is ItemContent.MapEntry ->
+        if (kind == RootKind.Map || kind == RootKind.XmlHook) this else ItemContent.Value(value, kind)
     is ItemContent.MapEntries -> {
         require(kind == RootKind.Map || kind == RootKind.XmlHook) {
             "packed map history cannot be resolved as $kind"

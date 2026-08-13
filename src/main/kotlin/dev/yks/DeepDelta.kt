@@ -123,7 +123,7 @@ internal fun AbstractYType.renderDeepDelta(options: DeepDeltaRenderOptions): YDe
 internal fun renderArrayDeepDelta(type: YArray, options: DeepDeltaRenderOptions): YArrayDeepDelta =
     YArrayDeepDelta(
         attrs = renderTypeAttrs(type, options),
-        delta = renderSequenceDelta(type, RootKind.Array, options) { rendered ->
+        delta = renderSequenceDelta(type, null, options) { rendered ->
             type.doc.arrayItemValues(rendered.item).map { value ->
                 DeepDeltaInsertValue(
                     value.toDeepDeltaValue(options.nestedValueOptions(rendered.action)),
@@ -520,7 +520,7 @@ private data class DeepDeltaInsertValue(
 
 private fun renderSequenceDelta(
     type: AbstractYType,
-    kind: RootKind,
+    kind: RootKind?,
     options: DeepDeltaRenderOptions,
     value: (RenderedSequenceItem) -> List<DeepDeltaInsertValue>,
 ): List<YArrayDeltaOp> {
@@ -543,11 +543,11 @@ private fun renderSequenceDelta(
 
 private fun renderSequenceItems(
     type: AbstractYType,
-    kind: RootKind,
+    kind: RootKind?,
     options: DeepDeltaRenderOptions,
 ): List<RenderedSequenceItem> {
     val items = type.doc.sequence(type.name)
-        .filter { item -> item.content.kind == kind && item.countable }
+        .filter { item -> (kind == null || item.content.kind == kind) && item.countable }
     val boundarySets = listOfNotNull(
         options.renderer.attributed,
         options.itemsToRender,
