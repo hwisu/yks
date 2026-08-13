@@ -280,6 +280,8 @@ public sealed class AbstractYType protected constructor(
     private var deepEventListObservers: MutableList<(List<YEvent>, YTransactionEvent?) -> Unit>? = null
     private var eventListeners: MutableMap<String, MutableList<(YTypeEvent) -> Unit>>? = null
     private var deltaCache: YDeepDelta? = null
+    /** Lazily owned by the opt-in @y/y 14 adapter without coupling the stable API to RC types. */
+    internal var experimentalV14State: Any? = null
     private var rendererChangeSubscription: Subscription? = null
     internal var activeRenderer: AbstractRenderer = baseRenderer
         private set

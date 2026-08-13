@@ -7,6 +7,7 @@ import dev.yks.AbstractRenderer
 import dev.yks.ItemContent
 import dev.yks.RootKind
 import dev.yks.StoreItem
+import dev.yks.Subscription
 import dev.yks.YArray
 import dev.yks.YArrayDeltaOp
 import dev.yks.YDoc
@@ -14,6 +15,7 @@ import dev.yks.YMap
 import dev.yks.YText
 import dev.yks.YTextDelta
 import dev.yks.YTransaction
+import dev.yks.YTransactionEvent
 import dev.yks.YUnopenedRoot
 import dev.yks.YValue
 import dev.yks.YXmlElementType
@@ -63,8 +65,33 @@ public sealed interface DeltaValue {
     /** A real shared type. It retains identity and is integrated by the target YDoc on insertion. */
     public data class SharedType(val value: AbstractYType) : DeltaValue
 
+    /** A deep settled snapshot that still retains the shared type identity needed when applied. */
+    public data class SharedTypeState(val value: AbstractYType, val delta: Delta) : DeltaValue
+
     /** A real subdocument. It retains identity and lifecycle semantics. */
     public data class Subdocument(val value: YDoc) : DeltaValue
+
+    /** Recursive data container used when shared types occur below a list value. */
+    public class ListData internal constructor(values: List<DeltaValue>) : DeltaValue {
+        public val values: List<DeltaValue> = values.toList()
+
+        override fun equals(other: Any?): Boolean = other is ListData && values == other.values
+
+        override fun hashCode(): Int = values.hashCode()
+
+        override fun toString(): String = "ListData(values=$values)"
+    }
+
+    /** Recursive data container used when shared types occur below a map value. */
+    public class MapData internal constructor(values: Map<String, DeltaValue>) : DeltaValue {
+        public val values: Map<String, DeltaValue> = values.toSortedMap()
+
+        override fun equals(other: Any?): Boolean = other is MapData && values == other.values
+
+        override fun hashCode(): Int = values.hashCode()
+
+        override fun toString(): String = "MapData(values=$values)"
+    }
 
     public companion object {
         public fun data(value: YValue): DeltaValue = Data(value)
@@ -77,7 +104,13 @@ public sealed interface DeltaValue {
 
         public fun shared(type: AbstractYType): DeltaValue = SharedType(type)
 
+        public fun sharedState(type: AbstractYType, delta: Delta): DeltaValue = SharedTypeState(type, delta)
+
         public fun subdocument(doc: YDoc): DeltaValue = Subdocument(doc)
+
+        public fun list(values: List<DeltaValue>): DeltaValue = ListData(values.toList())
+
+        public fun map(values: Map<String, DeltaValue>): DeltaValue = MapData(values.toSortedMap())
     }
 }
 
@@ -283,10 +316,15 @@ public class Delta internal constructor(
     marks: List<DeltaMark> = emptyList(),
     deletedMarkIds: Set<String> = emptySet(),
 ) {
-    public val attributes: Map<String, AttributeOp> = attributes.toSortedMap()
-    public val children: List<ChildOp> = children.toList()
-    public val marks: List<DeltaMark> = marks.sortedBy(DeltaMark::id)
-    public val deletedMarkIds: Set<String> = deletedMarkIds.toSortedSet()
+    private var attributesValue: Map<String, AttributeOp> = attributes.toSortedMap()
+    private var childrenValue: List<ChildOp> = children.toList()
+    private var marksValue: List<DeltaMark> = marks.sortedBy(DeltaMark::id)
+    private var deletedMarkIdsValue: Set<String> = deletedMarkIds.toSortedSet()
+
+    public val attributes: Map<String, AttributeOp> get() = attributesValue
+    public val children: List<ChildOp> get() = childrenValue
+    public val marks: List<DeltaMark> get() = marksValue
+    public val deletedMarkIds: Set<String> get() = deletedMarkIdsValue
 
     public val isEmpty: Boolean
         get() = attributes.isEmpty() && children.isEmpty() && marks.isEmpty() && deletedMarkIds.isEmpty()
@@ -302,6 +340,15 @@ public class Delta internal constructor(
 
     override fun toString(): String =
         "Delta(name=$name, attributes=$attributes, children=$children, marks=$marks, deletedMarkIds=$deletedMarkIds)"
+
+    /** Mutate only the maintained live-cache object; public deltas remain externally read-only. */
+    internal fun replaceContents(other: Delta) {
+        require(name == other.name) { "live delta node name cannot change" }
+        attributesValue = other.attributes.toSortedMap()
+        childrenValue = other.children.toList()
+        marksValue = other.marks.sortedBy(DeltaMark::id)
+        deletedMarkIdsValue = other.deletedMarkIds.toSortedSet()
+    }
 }
 
 /**
@@ -640,6 +687,16 @@ public class DeltaBuilder(public val name: String? = null) {
     }
 }
 
+/** RDT-style event emitted by the experimental unified type facade. */
+@ExperimentalYjs14Api
+public data class TypeEvent(
+    val name: String,
+    val target: Type,
+    val delta: Delta? = null,
+    val origin: Any? = null,
+    val transaction: YTransactionEvent? = null,
+)
+
 /**
  * A v14-shaped view over an existing YKS shared type.
  *
@@ -683,17 +740,19 @@ public class Type(public val delegate: AbstractYType) {
 
     public val change: DeltaBuilder get() = DeltaBuilder()
 
-    /** A stable renderer-aware snapshot using the delegate's active renderer. */
-    public val delta: Delta get() = toDelta(delegate.activeRenderer)
+    /** A live renderer-aware cache. A held reference is updated in place until [clearCache]. */
+    public val delta: Delta get() = state().liveDelta()
 
-    public fun toDelta(): Delta = toDelta(delegate.activeRenderer)
+    public fun toDelta(): Delta = renderSnapshot(delegate.activeRenderer)
 
-    public fun toDelta(renderer: AbstractRenderer): Delta {
+    public fun toDelta(renderer: AbstractRenderer): Delta = renderSnapshot(renderer)
+
+    internal fun renderSnapshot(renderer: AbstractRenderer): Delta {
         val builder = DeltaBuilder(name)
         renderUnifiedAttributes(delegate, renderer).forEach { (key, rendered) ->
             builder.setAttr(
                 key,
-                deltaValueFromAny(rendered.value),
+                deltaValueFromRenderedAny(rendered.value, renderer),
                 rendered.attribution?.toDeltaAttribution(),
             )
         }
@@ -706,6 +765,26 @@ public class Type(public val delegate: AbstractYType) {
             else -> error("unsupported shared type: ${type::class.qualifiedName}")
         }
         return builder.done()
+    }
+
+    public fun on(eventName: String, listener: (TypeEvent) -> Unit): Subscription =
+        state().on(eventName, listener)
+
+    public fun once(eventName: String, listener: (TypeEvent) -> Unit): Subscription {
+        lateinit var subscription: Subscription
+        subscription = on(eventName) { event ->
+            subscription.close()
+            listener(event)
+        }
+        return subscription
+    }
+
+    public fun off(eventName: String, listener: (TypeEvent) -> Unit) {
+        state().off(eventName, listener)
+    }
+
+    public fun useRenderer(renderer: AbstractRenderer): Type = apply {
+        delegate.useRenderer(renderer)
     }
 
     public fun applyDelta(delta: Delta, origin: Any? = null) {
@@ -793,11 +872,14 @@ public class Type(public val delegate: AbstractYType) {
     public fun toJson(): Any? = delegate.toJson()
 
     public fun clearCache() {
+        state().clearCache()
         delegate.clearCache()
     }
 
     public fun destroy() {
+        state().destroy(this)
         delegate.destroy()
+        delegate.experimentalV14State = null
     }
 
     override fun equals(other: Any?): Boolean = other is Type && delegate === other.delegate
@@ -805,6 +887,116 @@ public class Type(public val delegate: AbstractYType) {
     override fun hashCode(): Int = System.identityHashCode(delegate)
 
     override fun toString(): String = "Type(kind=$kind, name=$name, storageName=$storageName)"
+
+    private fun state(): UnifiedTypeState {
+        val existing = delegate.experimentalV14State
+        if (existing is UnifiedTypeState) return existing
+        return UnifiedTypeState(delegate).also { created -> delegate.experimentalV14State = created }
+    }
+}
+
+private class UnifiedTypeState(private val delegate: AbstractYType) {
+    private var cache: Delta? = null
+    private var listenerBaseline: Delta? = null
+    private var deltaSubscription: Subscription? = null
+    private var destroySubscription: Subscription? = null
+    private val listeners = linkedMapOf<String, MutableList<(TypeEvent) -> Unit>>()
+    private var destroying = false
+
+    fun liveDelta(): Delta {
+        val current = cache
+        if (current != null) return current
+        return Type(delegate).renderSnapshot(delegate.activeRenderer).also { rendered ->
+            cache = rendered
+            listenerBaseline = null
+            ensureSubscriptions()
+        }
+    }
+
+    fun on(eventName: String, listener: (TypeEvent) -> Unit): Subscription {
+        listeners.getOrPut(eventName) { mutableListOf() }.add(listener)
+        if (eventName == "delta" && cache == null && listenerBaseline == null) {
+            listenerBaseline = Type(delegate).renderSnapshot(delegate.activeRenderer)
+        }
+        ensureSubscriptions()
+        return Subscription { off(eventName, listener) }
+    }
+
+    fun off(eventName: String, listener: (TypeEvent) -> Unit) {
+        val eventListeners = listeners[eventName] ?: return
+        eventListeners.remove(listener)
+        if (eventListeners.isEmpty()) listeners.remove(eventName)
+        if (eventName == "delta" && listeners["delta"].orEmpty().isEmpty()) listenerBaseline = null
+        releaseSubscriptionsIfIdle()
+    }
+
+    fun clearCache() {
+        cache = null
+        listenerBaseline = if (listeners["delta"].orEmpty().isNotEmpty()) {
+            Type(delegate).renderSnapshot(delegate.activeRenderer)
+        } else {
+            null
+        }
+        releaseSubscriptionsIfIdle()
+    }
+
+    fun destroy(target: Type = Type(delegate)) {
+        if (destroying) return
+        destroying = true
+        val callbacks = listeners["destroy"].orEmpty().toList()
+        callbacks.forEach { listener -> listener(TypeEvent(name = "destroy", target = target)) }
+        listeners.clear()
+        cache = null
+        listenerBaseline = null
+        deltaSubscription?.close()
+        destroySubscription?.close()
+        deltaSubscription = null
+        destroySubscription = null
+        delegate.experimentalV14State = null
+    }
+
+    private fun ensureSubscriptions() {
+        if (deltaSubscription == null && (cache != null || listenerBaseline != null)) {
+            deltaSubscription = delegate.on("delta") { event ->
+                refresh(event.origin, event.transaction)
+            }
+        }
+        if (destroySubscription == null && (cache != null || listenerBaseline != null || listeners.isNotEmpty())) {
+            destroySubscription = delegate.on("destroy") { destroy() }
+        }
+    }
+
+    private fun releaseSubscriptionsIfIdle() {
+        if (cache == null && listenerBaseline == null) {
+            deltaSubscription?.close()
+            deltaSubscription = null
+        }
+        if (cache == null && listenerBaseline == null && listeners.isEmpty()) {
+            destroySubscription?.close()
+            destroySubscription = null
+        }
+    }
+
+    private fun refresh(origin: Any?, transaction: YTransactionEvent?) {
+        val live = cache
+        val current = live ?: listenerBaseline ?: return
+        val next = Type(delegate).renderSnapshot(delegate.activeRenderer)
+        val change = diffSettledDelta(current, next)
+        if (live != null) {
+            live.replaceContents(next)
+        } else {
+            listenerBaseline = next
+        }
+        if (change.isEmpty) return
+        val event = TypeEvent(
+            name = "delta",
+            target = Type(delegate),
+            delta = change,
+            origin = origin,
+            transaction = transaction,
+        )
+        listeners["delta"].orEmpty().toList().forEach { listener -> listener(event) }
+    }
 }
 
 /** Open a root with an explicit legacy projection, then expose the experimental unified facade. */
@@ -933,12 +1125,35 @@ private fun Map<String, Any?>.toDeltaAttribution(): DeltaAttribution =
 private fun DeltaValue.toAny(): Any? = when (this) {
     is DeltaValue.Data -> value.toAny()
     is DeltaValue.SharedType -> value
+    is DeltaValue.SharedTypeState -> value
     is DeltaValue.Subdocument -> value
+    is DeltaValue.ListData -> values.map(DeltaValue::toAny)
+    is DeltaValue.MapData -> values.mapValues { (_, value) -> value.toAny() }
 }
+
+private fun DeltaValue.sharedTypeOrNull(): AbstractYType? = when (this) {
+    is DeltaValue.SharedType -> value
+    is DeltaValue.SharedTypeState -> value
+    else -> null
+}
+
+private fun DeltaValue.sharedDeltaOrNull(): Delta? = (this as? DeltaValue.SharedTypeState)?.delta
 
 private fun deltaValueFromAny(value: Any?): DeltaValue = when (value) {
     is AbstractYType -> DeltaValue.SharedType(value)
     is YDoc -> DeltaValue.Subdocument(value)
+    else -> DeltaValue.Data(YValue.from(value))
+}
+
+private fun deltaValueFromRenderedAny(value: Any?, renderer: AbstractRenderer): DeltaValue = when (value) {
+    is AbstractYType -> DeltaValue.SharedTypeState(value, Type(value).renderSnapshot(renderer))
+    is YDoc -> DeltaValue.Subdocument(value)
+    is List<*> -> DeltaValue.ListData(value.map { nested -> deltaValueFromRenderedAny(nested, renderer) })
+    is Array<*> -> DeltaValue.ListData(value.map { nested -> deltaValueFromRenderedAny(nested, renderer) })
+    is Map<*, *> -> DeltaValue.MapData(value.entries.associate { (key, nested) ->
+        require(key is String) { "delta map keys must be strings" }
+        key to deltaValueFromRenderedAny(nested, renderer)
+    }.toSortedMap())
     else -> DeltaValue.Data(YValue.from(value))
 }
 
@@ -962,7 +1177,11 @@ private fun appendUnifiedSequenceDelta(
         if (rendered.text != null) {
             builder.insert(rendered.text, formats, attribution)
         } else {
-            builder.insertValues(rendered.values.map(::deltaValueFromAny), formats, attribution)
+            builder.insertValues(
+                rendered.values.map { value -> deltaValueFromRenderedAny(value, renderer) },
+                formats,
+                attribution,
+            )
         }
     }
 }
@@ -1018,12 +1237,13 @@ private fun insertUnifiedValues(target: AbstractYType, index: Int, values: List<
             values.zip(rawValues).forEach { (value, raw) ->
                 val stored = target.doc.storeValue(raw, parent = target.name)
                 when {
-                    value is DeltaValue.SharedType -> {
+                    value is DeltaValue.SharedType || value is DeltaValue.SharedTypeState -> {
                         flushPacked()
                         add(
                             ItemContent.XmlType(
                                 stored as YValue.TypeRef,
-                                value.value.let { shared ->
+                                (if (value is DeltaValue.SharedType) value.value else (value as DeltaValue.SharedTypeState).value)
+                                    .let { shared ->
                                     when (shared) {
                                         is YXmlElementType -> shared.nodeName
                                         is YXmlHook -> shared.hookName
@@ -1663,6 +1883,99 @@ private fun DeltaBuilder.insertSettledSlot(slot: SettledDeltaSlot) {
     }
 }
 
+private fun DeltaValue.sameSettledContent(other: DeltaValue): Boolean {
+    val shared = sharedTypeOrNull()
+    val otherShared = other.sharedTypeOrNull()
+    return if (shared != null || otherShared != null) {
+        shared != null && shared === otherShared
+    } else {
+        this == other
+    }
+}
+
+private fun SettledDeltaSlot.sameContent(other: SettledDeltaSlot): Boolean = when {
+    text != null || other.text != null -> text == other.text
+    value != null && other.value != null -> value.sameSettledContent(other.value)
+    else -> false
+}
+
+private fun DeltaBuilder.appendAlignedChange(
+    before: SettledDeltaSlot,
+    after: SettledDeltaSlot,
+) {
+    val formats = diffFormats(before.formats, after.formats)
+    val attribution = diffAttribution(before.attribution, after.attribution)
+    val beforeShared = before.value?.sharedTypeOrNull()
+    val afterShared = after.value?.sharedTypeOrNull()
+    if (beforeShared != null && beforeShared === afterShared) {
+        val beforeDelta = before.value?.sharedDeltaOrNull() ?: DeltaBuilder().done()
+        val afterDelta = after.value?.sharedDeltaOrNull() ?: DeltaBuilder().done()
+        val nested = diffSettledDelta(beforeDelta, afterDelta)
+        if (!nested.isEmpty) {
+            modifyChanges(nested, formats, attribution)
+            return
+        }
+    }
+    retainChanges(1, formats, attribution)
+}
+
+/** Produce a valid, deterministic change between two settled deep snapshots. */
+private fun diffSettledDelta(before: Delta, after: Delta): Delta {
+    val change = DeltaBuilder(if (before.name == after.name) before.name else null)
+    (before.attributes.keys + after.attributes.keys).sorted().forEach { key ->
+        val old = before.attributes[key] as? AttributeOp.Set
+        val next = after.attributes[key] as? AttributeOp.Set
+        when {
+            next == null && old != null -> change.deleteAttr(key)
+            old == null && next != null -> change.setAttr(key, next.value, next.attribution)
+            old != null && next != null -> {
+                val oldShared = old.value.sharedTypeOrNull()
+                val nextShared = next.value.sharedTypeOrNull()
+                if (oldShared != null && oldShared === nextShared) {
+                    val nested = diffSettledDelta(
+                        old.value.sharedDeltaOrNull() ?: DeltaBuilder().done(),
+                        next.value.sharedDeltaOrNull() ?: DeltaBuilder().done(),
+                    )
+                    val attribution = diffAttribution(old.attribution, next.attribution)
+                    if (!nested.isEmpty || attribution != AttributionChange.Unchanged) {
+                        change.modifyAttr(key, nested, attribution)
+                    }
+                } else if (old.value != next.value || old.attribution != next.attribution) {
+                    change.setAttr(key, next.value, next.attribution)
+                }
+            }
+        }
+    }
+
+    val oldSlots = before.settledSlots()
+    val newSlots = after.settledSlots()
+    var prefix = 0
+    while (prefix < oldSlots.size && prefix < newSlots.size && oldSlots[prefix].sameContent(newSlots[prefix])) {
+        prefix++
+    }
+    var suffix = 0
+    while (
+        suffix < oldSlots.size - prefix &&
+        suffix < newSlots.size - prefix &&
+        oldSlots[oldSlots.lastIndex - suffix].sameContent(newSlots[newSlots.lastIndex - suffix])
+    ) {
+        suffix++
+    }
+
+    repeat(prefix) { index -> change.appendAlignedChange(oldSlots[index], newSlots[index]) }
+    val oldMiddleLength = oldSlots.size - prefix - suffix
+    if (oldMiddleLength > 0) change.delete(oldMiddleLength)
+    val newMiddleEnd = newSlots.size - suffix
+    for (index in prefix until newMiddleEnd) change.insertSettledSlot(newSlots[index])
+    for (offset in 0 until suffix) {
+        change.appendAlignedChange(
+            oldSlots[oldSlots.size - suffix + offset],
+            newSlots[newSlots.size - suffix + offset],
+        )
+    }
+    return change.done()
+}
+
 /** Port of lib0/delta inverse for the typed subset represented by this adapter. */
 private fun inverseDelta(
     change: Delta,
@@ -1673,9 +1986,10 @@ private fun inverseDelta(
 
     change.attributes.forEach { (key, op) ->
         val baseOp = base.attributes[key] as? AttributeOp.Set
+        val baseShared = baseOp?.value?.sharedTypeOrNull()
         when {
-            op is AttributeOp.Modify && baseOp?.value is DeltaValue.SharedType -> {
-                val nestedBase = Type(baseOp.value.value).toDelta(renderer)
+            op is AttributeOp.Modify && baseOp != null && baseShared != null -> {
+                val nestedBase = baseOp.value.sharedDeltaOrNull() ?: Type(baseShared).toDelta(renderer)
                 inverse.modifyAttr(
                     key,
                     inverseDelta(op.delta, nestedBase, renderer),
@@ -1707,12 +2021,16 @@ private fun inverseDelta(
             }
             is ChildOp.Modify -> {
                 val slot = baseSlots.getOrNull(baseIndex++)
-                val shared = slot?.value as? DeltaValue.SharedType
+                val shared = slot?.value?.sharedTypeOrNull()
                 if (slot == null || shared == null) {
                     inverse.retain(1)
                 } else {
                     inverse.modifyChanges(
-                        inverseDelta(op.delta, Type(shared.value).toDelta(renderer), renderer),
+                        inverseDelta(
+                            op.delta,
+                            slot.value?.sharedDeltaOrNull() ?: Type(shared).toDelta(renderer),
+                            renderer,
+                        ),
                         inverseFormatChange(slot.formats, op.formats),
                         inverseAttributionChange(slot.attribution, op.attribution),
                     )
