@@ -15,6 +15,8 @@ YKS의 안정 기준은 Yjs `13.6.32`이다. `@y/y` `14.0.0-rc.24`는 정식 API
   subdocument, transaction/observer, snapshot, relative position, UndoManager, GC와 update
   transform을 구현한다.
 - XML 타입은 JVM W3C DOM 기반 `toDOM`과 hook/binding association을 제공한다.
+- `dev.yks.awareness`는 `y-protocols` 1.0.7의 JSON wire, client clock, change/update
+  구분, 30초 timeout과 15초 heartbeat를 구현한다.
 
 Yjs V1 decoder가 V2 바이트를 빈 업데이트로 받아들이는 동작, V2의 예약 feature 값을
 무시하는 동작, lib0 V2 substream의 잘린 typed-array 동작과 zero-length
@@ -73,7 +75,7 @@ CI와 로컬 gate는 설치된 oracle 버전을 실행 전에 exact pin과 대�
 - 100 seed XML/subdocument/relative-position/V2/UndoManager;
 - 200 seed formatted text/embed, complex nested type, direct/deep event, snapshot, GC;
 - V1과 V2 각각 1,000 malformed seed의 accept/reject, 결과 text, state vector 비교;
-- root `XmlText`/`XmlHook`, W3C DOM, standard/private 경계와 v14 양방향 matrix;
+- root `XmlText`/`XmlHook`, W3C DOM, Awareness, standard/private 경계와 v14 양방향 matrix;
 - Yrs `0.27.2` UTF-16 mode 양방향 fixture와 publication consumer smoke test.
 
 ## 플랫폼·생태계 경계
@@ -83,8 +85,7 @@ typed getter 또는 immutable `YRootSchemaRegistry`가 schema를 줄 때 materia
 clone/snapshot은 로컬에서 아는 root metadata를 보존한다. Registry는 wire를 바꾸지 않고
 root별 결과를 캐시하며, 기존 concrete type·XML 이름과 충돌하면 적용 전에 거절한다.
 
-Awareness, WebSocket/WebRTC provider, ProseMirror/Tiptap/CodeMirror binding은 Yjs core
-패키지 자체가 아니라 별도 JavaScript 생태계 모듈이다. YKS가 그 모듈을 JVM에서
-재구현한다고 주장하지 않는다. `YDoc`과 attached type은 기본적으로 thread-confined이며,
-서버/coroutine 환경은 `EXTERNALLY_SERIALIZED` 정책으로 중첩·동시 접근을 fail-fast하게
-검사할 수 있다.
+Awareness state는 immutable `AwarenessState`와 JSON 가능 `YValue`로 제한한다. WebSocket/
+WebRTC provider와 ProseMirror/Tiptap/CodeMirror binding은 여전히 별도 생태계 범위다.
+`YDoc`과 attached type은 기본적으로 thread-confined이며, 서버/coroutine 환경은
+`EXTERNALLY_SERIALIZED` 정책으로 중첩·동시 접근을 fail-fast하게 검사할 수 있다.

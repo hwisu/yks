@@ -1,6 +1,11 @@
 import dev.yks.YDoc
 import dev.yks.YMap
+import dev.yks.YValue
 import dev.yks.applyUpdate
+import dev.yks.awareness.Awareness
+import dev.yks.awareness.AwarenessOptions
+import dev.yks.awareness.AwarenessOrigin
+import dev.yks.awareness.AwarenessState
 import dev.yks.encodeStateAsUpdate
 import java.io.File
 import java.util.zip.ZipFile
@@ -32,6 +37,16 @@ fun main() {
         "Published YKS artifact failed a Tiptap-shaped XML roundtrip."
     }
 
+    val sourceAwareness = Awareness(source, AwarenessOptions(autoStart = false))
+    val targetAwareness = Awareness(target, AwarenessOptions(autoStart = false))
+    sourceAwareness.setLocalState(AwarenessState("name" to YValue.StringValue("사용자-😀")))
+    targetAwareness.applyUpdate(sourceAwareness.encodeUpdate(), object : AwarenessOrigin {})
+    check(targetAwareness.getStates().getValue(1)["name"] == YValue.StringValue("사용자-😀")) {
+        "Published YKS artifact failed an Awareness wire roundtrip."
+    }
+    sourceAwareness.close()
+    targetAwareness.close()
+
     val artifact = File(YDoc::class.java.protectionDomain.codeSource.location.toURI())
     check(artifact.isFile && artifact.extension == "jar") {
         "YKS must be consumed from a published JAR, got: $artifact"
@@ -53,10 +68,11 @@ fun main() {
             "Yjs" in noticesText &&
                 "Copyright (c) 2023" in noticesText &&
                 "lib0" in noticesText &&
+                "y-protocols" in noticesText &&
                 "Copyright (c) 2019 Kevin Jahns" in noticesText &&
                 "MIT" in noticesText,
         ) {
-            "Published YKS JAR is missing the upstream Yjs/lib0 attribution."
+            "Published YKS JAR is missing the upstream Yjs/lib0/y-protocols attribution."
         }
     }
 }

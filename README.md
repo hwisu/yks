@@ -4,6 +4,7 @@ YKS는 Yjs 문서 모델과 업데이트 프로토콜을 구현한 순수 Kotlin
 
 - `YArray`, `YMap`, `YText`, live XML, 서브도큐먼트
 - 트랜잭션·옵저버, 스냅샷, 상대 위치, `UndoManager`
+- `y-protocols` 호환 Awareness
 - Yjs update V1/V2 적용·병합·diff·변환 및 state vector
 - 스레드 접근 정책과 외부 업데이트 자원 제한
 
@@ -55,7 +56,7 @@ V2 연결에는 `encodeStateAsUpdateV2`와 `applyUpdateV2`를 사용합니다.
 
 ## 호환성
 
-일반 API는 실제 Yjs V1/V2 바이트만 반환하며 Kotlin 전용 상태는 거절합니다. `*Lossless` API는 JavaScript Yjs가 읽지 못하는 `YKS` envelope를 쓸 수 있으므로 YKS 피어 사이에서만 사용하세요. 원격 root는 wire에 타입 정보가 없어 typed getter나 `YRootSchemaRegistry`가 필요할 수 있습니다. XML `toDOM`은 W3C DOM으로 제공하며 Awareness·provider·editor binding은 별도 생태계 범위입니다. 자세한 내용은 [호환성 문서](YJS_COMPATIBILITY.md)를 참고하세요.
+일반 API는 실제 Yjs V1/V2 바이트만 반환하며 Kotlin 전용 상태는 거절합니다. `*Lossless` API는 JavaScript Yjs가 읽지 못하는 `YKS` envelope를 쓸 수 있으므로 YKS 피어 사이에서만 사용하세요. 원격 root는 wire에 타입 정보가 없어 typed getter나 `YRootSchemaRegistry`가 필요할 수 있습니다. XML `toDOM`은 W3C DOM이며 provider·editor binding은 별도 범위입니다. 자세한 내용은 [호환성 문서](YJS_COMPATIBILITY.md)를 참고하세요.
 
 ## 빌드와 검증
 
