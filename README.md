@@ -5,7 +5,7 @@ YKS는 Yjs 문서 모델과 업데이트 프로토콜의 Kotlin/JVM CRDT 라이�
 - `YArray`, `YMap`, `YText`, live XML, 서브도큐먼트
 - 트랜잭션·옵저버, 스냅샷, 상대 위치, `UndoManager`
 - `y-protocols` 호환 Awareness
-- opt-in v14 typed `Type`/`DeltaBuilder` facade
+- typed schema와 opt-in v14 `Type`/`DeltaBuilder`
 - Yjs update V1/V2 적용·병합·diff·변환 및 state vector
 - 스레드 접근 정책과 외부 업데이트 자원 제한
 
