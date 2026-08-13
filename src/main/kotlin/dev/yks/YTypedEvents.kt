@@ -37,18 +37,153 @@ public sealed class YTypedEvent<out T : AbstractYType> protected constructor(
  * and deleted in the same transaction. Upstream text events intentionally leave both sets
  * empty and expose edits through [delta]. [keys] carries map/attribute changes for every type.
  */
+public interface YEventChangesIdSetView {
+    public val added: IdSet
+    public val deleted: IdSet
+
+    public operator fun component1(): IdSet
+    public operator fun component2(): IdSet
+}
+
+public interface YEventChangesItemSetView {
+    public val added: Set<Item>
+    public val deleted: Set<Item>
+
+    public operator fun component1(): Set<Item>
+    public operator fun component2(): Set<Item>
+}
+
+/**
+ * A dual view used to retain the pre-0.2.9 [IdSet] JVM ABI while exposing Yjs-compatible items.
+ */
+public class YEventItemSet internal constructor(
+    items: Set<Item>,
+    ids: IdSet,
+) : IdSet(ids.clients), Set<Item> {
+    private val items: Set<Item> = items.toCollection(linkedSetOf())
+
+    override val size: Int get() = items.size
+
+    override fun contains(element: Item): Boolean = items.contains(element)
+
+    override fun containsAll(elements: Collection<Item>): Boolean = items.containsAll(elements)
+
+    override fun isEmpty(): Boolean = items.isEmpty() && super.isEmpty()
+
+    override fun iterator(): Iterator<Item> = items.iterator()
+
+    override fun equals(other: Any?): Boolean = items == other
+
+    override fun hashCode(): Int = items.hashCode()
+
+    override fun toString(): String = items.toString()
+}
+
 public data class YEventChanges<out D>(
-    val added: Set<Item>,
-    val deleted: Set<Item>,
+    override val added: YEventItemSet,
+    override val deleted: YEventItemSet,
     val delta: D,
     val keys: Map<String, YMapChange>,
-) {
-    /** Range-oriented YKS view retained for callers that need compact ID membership tests. */
-    public val addedIds: IdSet get() = added.toIdSet()
+) : YEventChangesIdSetView, YEventChangesItemSetView {
+    public constructor(
+        added: Set<Item>,
+        deleted: Set<Item>,
+        delta: D,
+        keys: Map<String, YMapChange>,
+    ) : this(
+        added = YEventItemSet(added, added.toIdSet()),
+        deleted = YEventItemSet(deleted, deleted.toIdSet()),
+        delta = delta,
+        keys = keys,
+    )
+
+    public constructor(
+        added: IdSet,
+        deleted: IdSet,
+        delta: D,
+        keys: Map<String, YMapChange>,
+    ) : this(
+        added = YEventItemSet(emptySet(), added),
+        deleted = YEventItemSet(emptySet(), deleted),
+        delta = delta,
+        keys = keys,
+    )
 
     /** Range-oriented YKS view retained for callers that need compact ID membership tests. */
-    public val deletedIds: IdSet get() = deleted.toIdSet()
+    public val addedIds: IdSet get() = added
+
+    /** Range-oriented YKS view retained for callers that need compact ID membership tests. */
+    public val deletedIds: IdSet get() = deleted
+
+    public fun copy(
+        added: Set<Item>,
+        deleted: Set<Item>,
+        delta: @UnsafeVariance D,
+        keys: Map<String, YMapChange>,
+    ): YEventChanges<D> = YEventChanges(added, deleted, delta, keys)
+
+    public fun copy(
+        added: IdSet,
+        deleted: IdSet,
+        delta: @UnsafeVariance D,
+        keys: Map<String, YMapChange>,
+    ): YEventChanges<D> = YEventChanges(added, deleted, delta, keys)
+
+    @Suppress("UNCHECKED_CAST", "UNUSED_PARAMETER")
+    public companion object {
+        @JvmStatic
+        @JvmSynthetic
+        @JvmName("copy\$default")
+        public fun <D> copySetDefault(
+            self: YEventChanges<D>,
+            added: Set<Item>?,
+            deleted: Set<Item>?,
+            delta: D?,
+            keys: Map<String, YMapChange>?,
+            mask: Int,
+            marker: Any?,
+        ): YEventChanges<D> = self.copy(
+            added = if (mask and 1 != 0) self.added else requireNotNull(added),
+            deleted = if (mask and 2 != 0) self.deleted else requireNotNull(deleted),
+            delta = if (mask and 4 != 0) self.delta else delta as D,
+            keys = if (mask and 8 != 0) self.keys else requireNotNull(keys),
+        )
+
+        @JvmStatic
+        @JvmSynthetic
+        @JvmName("copy\$default")
+        public fun <D> copyIdSetDefault(
+            self: YEventChanges<D>,
+            added: IdSet?,
+            deleted: IdSet?,
+            delta: D?,
+            keys: Map<String, YMapChange>?,
+            mask: Int,
+            marker: Any?,
+        ): YEventChanges<D> = self.copy(
+            added = if (mask and 1 != 0) self.added else requireNotNull(added),
+            deleted = if (mask and 2 != 0) self.deleted else requireNotNull(deleted),
+            delta = if (mask and 4 != 0) self.delta else delta as D,
+            keys = if (mask and 8 != 0) self.keys else requireNotNull(keys),
+        )
+    }
 }
+
+/** Source-compatible copy overload for the Yjs item-set view. */
+public fun <D> YEventChanges<D>.copy(
+    added: Set<Item> = this.added,
+    deleted: Set<Item> = this.deleted,
+    delta: D = this.delta,
+    keys: Map<String, YMapChange> = this.keys,
+): YEventChanges<D> = YEventChanges(added, deleted, delta, keys)
+
+/** Source-compatible copy overload for the pre-0.2.9 ID-range view. */
+public fun <D> YEventChanges<D>.copy(
+    added: IdSet = this.added,
+    deleted: IdSet = this.deleted,
+    delta: D = this.delta,
+    keys: Map<String, YMapChange> = this.keys,
+): YEventChanges<D> = YEventChanges(added, deleted, delta, keys)
 
 internal fun <D> YEvent.toTypedChanges(
     delta: D,

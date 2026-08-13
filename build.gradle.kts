@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "dev.yks"
-version = providers.gradleProperty("releaseVersion").getOrElse("0.2.9-SNAPSHOT")
+version = providers.gradleProperty("releaseVersion").getOrElse("0.2.10-SNAPSHOT")
 
 dependencyLocking {
     lockAllConfigurations()
@@ -74,6 +74,51 @@ tasks.register<Test>("interopTest") {
 
 tasks.named("check") {
     dependsOn("interopTest")
+}
+
+fun registerReleaseAbiConsumer(
+    version: String,
+    mainClassName: String,
+): TaskProvider<JavaExec> {
+    val sourceName = "releaseAbiV${version.replace(".", "")}"
+    val outputDirectory = layout.buildDirectory.dir("classes/$sourceName")
+    val compileConsumer = tasks.register<JavaCompile>("compile${sourceName.replaceFirstChar { it.uppercase() }}") {
+        dependsOn("classes")
+        source = fileTree("src/$sourceName/java") { include("**/*.java") }
+        classpath = sourceSets["main"].output
+        destinationDirectory.set(outputDirectory)
+        options.release.set(21)
+    }
+    return tasks.register<JavaExec>("${sourceName}Test") {
+        description = "Runs a consumer compiled against the YKS $version JVM ABI on the current classes."
+        group = LifecycleBasePlugin.VERIFICATION_GROUP
+        dependsOn(compileConsumer)
+        classpath = sourceSets["main"].output + files(outputDirectory) + sourceSets["main"].runtimeClasspath
+        mainClass.set(mainClassName)
+    }
+}
+
+val releaseAbiV028Test = registerReleaseAbiConsumer("0.2.8", "compat.v028.LegacyConsumer")
+val releaseAbiV029Test = registerReleaseAbiConsumer("0.2.9", "compat.v029.CurrentConsumer")
+
+val releaseAbiCheck = tasks.register<Exec>("releaseAbiCheck") {
+    description = "Checks that the current public ABI retains every callable from supported releases."
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    dependsOn("dumpLegacyAbi")
+    inputs.file("scripts/check-release-abi.mjs")
+    inputs.file("build/kotlin/abi-legacy/yks.api")
+    inputs.property("releaseAbiBaselines", listOf("v0.2.8", "v0.2.9"))
+    commandLine(
+        "node",
+        rootProject.file("scripts/check-release-abi.mjs").absolutePath,
+        "v0.2.8",
+        "v0.2.9",
+        layout.buildDirectory.file("kotlin/abi-legacy/yks.api").get().asFile.absolutePath,
+    )
+}
+
+tasks.named("check") {
+    dependsOn(releaseAbiCheck, releaseAbiV028Test, releaseAbiV029Test)
 }
 
 val consumerSmokeTest = tasks.register<GradleBuild>("consumerSmokeTest") {

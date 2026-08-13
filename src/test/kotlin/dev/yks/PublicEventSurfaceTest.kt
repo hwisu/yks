@@ -206,6 +206,24 @@ class PublicEventSurfaceTest {
     }
 
     @Test
+    fun commonChangesRetainItemAndLegacyIdViewsWithoutAmbiguousCopies() {
+        val doc = YDoc(clientId = 1)
+        val array = doc.getArray("items")
+        lateinit var changes: YEventChanges<List<YArrayDeltaOp>>
+        array.observeTyped { event -> changes = event.changes }
+
+        array.push("value")
+
+        val itemView: Set<Item> = changes.added
+        val idView: IdSet = changes.added
+        assertEquals(Id(1, 0), itemView.single().id)
+        assertTrue(idView.has(1, 0))
+        assertEquals(itemView, changes.copy().added)
+        assertTrue(changes.copy(added = changes.addedIds).addedIds.has(1, 0))
+        assertEquals(itemView, changes.copy(added = itemView).added)
+    }
+
+    @Test
     fun losingConcurrentMapWriteKeepsChangedKeyButNotAVisibleKeyChange() {
         val winner = YDoc(clientId = 2)
         val loser = YDoc(clientId = 1)

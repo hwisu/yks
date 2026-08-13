@@ -820,7 +820,7 @@ public final class dev/yks/IdRanges {
 	public final fun getIds ()Ljava/util/List;
 }
 
-public final class dev/yks/IdSet {
+public class dev/yks/IdSet {
 	public fun <init> ()V
 	public fun <init> (Ljava/util/Map;)V
 	public synthetic fun <init> (Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
@@ -835,7 +835,7 @@ public final class dev/yks/IdSet {
 	public final fun intersects (JJJ)Z
 	public final fun intersects (Ldev/yks/Id;J)Z
 	public static synthetic fun intersects$default (Ldev/yks/IdSet;Ldev/yks/Id;JILjava/lang/Object;)Z
-	public final fun isEmpty ()Z
+	public fun isEmpty ()Z
 	public final fun ranges ()Ljava/util/List;
 	public final fun ranges (J)Ljava/util/List;
 	public final fun slice (JJJ)Ljava/util/List;
@@ -2292,22 +2292,78 @@ public final class dev/yks/YEvent {
 	public final fun getValue ()Ljava/lang/Object;
 }
 
-public final class dev/yks/YEventChanges {
+public final class dev/yks/YEventChanges : dev/yks/YEventChangesIdSetView, dev/yks/YEventChangesItemSetView {
+	public static final field Companion Ldev/yks/YEventChanges$Companion;
+	public fun <init> (Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/util/Map;)V
+	public fun <init> (Ldev/yks/YEventItemSet;Ldev/yks/YEventItemSet;Ljava/lang/Object;Ljava/util/Map;)V
 	public fun <init> (Ljava/util/Set;Ljava/util/Set;Ljava/lang/Object;Ljava/util/Map;)V
-	public final fun component1 ()Ljava/util/Set;
-	public final fun component2 ()Ljava/util/Set;
+	public synthetic fun component1 ()Ldev/yks/IdSet;
+	public final fun component1 ()Ldev/yks/YEventItemSet;
+	public synthetic fun component1 ()Ljava/util/Set;
+	public synthetic fun component2 ()Ldev/yks/IdSet;
+	public final fun component2 ()Ldev/yks/YEventItemSet;
+	public synthetic fun component2 ()Ljava/util/Set;
 	public final fun component3 ()Ljava/lang/Object;
 	public final fun component4 ()Ljava/util/Map;
+	public final fun copy (Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/util/Map;)Ldev/yks/YEventChanges;
+	public final fun copy (Ldev/yks/YEventItemSet;Ldev/yks/YEventItemSet;Ljava/lang/Object;Ljava/util/Map;)Ldev/yks/YEventChanges;
 	public final fun copy (Ljava/util/Set;Ljava/util/Set;Ljava/lang/Object;Ljava/util/Map;)Ldev/yks/YEventChanges;
-	public static synthetic fun copy$default (Ldev/yks/YEventChanges;Ljava/util/Set;Ljava/util/Set;Ljava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YEventChanges;
+	public static final synthetic fun copy$default (Ldev/yks/YEventChanges;Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YEventChanges;
+	public static synthetic fun copy$default (Ldev/yks/YEventChanges;Ldev/yks/YEventItemSet;Ldev/yks/YEventItemSet;Ljava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YEventChanges;
+	public static final synthetic fun copy$default (Ldev/yks/YEventChanges;Ljava/util/Set;Ljava/util/Set;Ljava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YEventChanges;
 	public fun equals (Ljava/lang/Object;)Z
-	public final fun getAdded ()Ljava/util/Set;
+	public synthetic fun getAdded ()Ldev/yks/IdSet;
+	public fun getAdded ()Ldev/yks/YEventItemSet;
+	public synthetic fun getAdded ()Ljava/util/Set;
 	public final fun getAddedIds ()Ldev/yks/IdSet;
-	public final fun getDeleted ()Ljava/util/Set;
+	public synthetic fun getDeleted ()Ldev/yks/IdSet;
+	public fun getDeleted ()Ldev/yks/YEventItemSet;
+	public synthetic fun getDeleted ()Ljava/util/Set;
 	public final fun getDeletedIds ()Ldev/yks/IdSet;
 	public final fun getDelta ()Ljava/lang/Object;
 	public final fun getKeys ()Ljava/util/Map;
 	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YEventChanges$Companion {
+	public final synthetic fun copy$default (Ldev/yks/YEventChanges;Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YEventChanges;
+	public final synthetic fun copy$default (Ldev/yks/YEventChanges;Ljava/util/Set;Ljava/util/Set;Ljava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YEventChanges;
+}
+
+public abstract interface class dev/yks/YEventChangesIdSetView {
+	public abstract fun component1 ()Ldev/yks/IdSet;
+	public abstract fun component2 ()Ldev/yks/IdSet;
+	public abstract fun getAdded ()Ldev/yks/IdSet;
+	public abstract fun getDeleted ()Ldev/yks/IdSet;
+}
+
+public abstract interface class dev/yks/YEventChangesItemSetView {
+	public abstract fun component1 ()Ljava/util/Set;
+	public abstract fun component2 ()Ljava/util/Set;
+	public abstract fun getAdded ()Ljava/util/Set;
+	public abstract fun getDeleted ()Ljava/util/Set;
+}
+
+public final class dev/yks/YEventItemSet : dev/yks/IdSet, java/util/Set, kotlin/jvm/internal/markers/KMappedMarker {
+	public fun add (Ldev/yks/ItemStruct;)Z
+	public synthetic fun add (Ljava/lang/Object;)Z
+	public fun addAll (Ljava/util/Collection;)Z
+	public fun clear ()V
+	public fun contains (Ldev/yks/ItemStruct;)Z
+	public final fun contains (Ljava/lang/Object;)Z
+	public fun containsAll (Ljava/util/Collection;)Z
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getSize ()I
+	public fun hashCode ()I
+	public fun isEmpty ()Z
+	public fun iterator ()Ljava/util/Iterator;
+	public fun remove (Ljava/lang/Object;)Z
+	public fun removeAll (Ljava/util/Collection;)Z
+	public fun retainAll (Ljava/util/Collection;)Z
+	public final fun size ()I
+	public fun toArray ()[Ljava/lang/Object;
+	public fun toArray ([Ljava/lang/Object;)[Ljava/lang/Object;
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -2957,6 +3013,10 @@ public final class dev/yks/YTypedEventsKt {
 	public static final fun asTextEvent (Ldev/yks/YEvent;)Ldev/yks/YTextEvent;
 	public static final fun asTypedEvent (Ldev/yks/YEvent;)Ldev/yks/YTypedEvent;
 	public static final fun asXmlEvent (Ldev/yks/YEvent;)Ldev/yks/YXmlEvent;
+	public static final fun copy (Ldev/yks/YEventChanges;Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/util/Map;)Ldev/yks/YEventChanges;
+	public static final fun copy (Ldev/yks/YEventChanges;Ljava/util/Set;Ljava/util/Set;Ljava/lang/Object;Ljava/util/Map;)Ldev/yks/YEventChanges;
+	public static synthetic fun copy$default (Ldev/yks/YEventChanges;Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YEventChanges;
+	public static synthetic fun copy$default (Ldev/yks/YEventChanges;Ljava/util/Set;Ljava/util/Set;Ljava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YEventChanges;
 	public static final fun getChanges (Ldev/yks/YEvent;)Ldev/yks/YEventChanges;
 	public static final fun getKeys (Ldev/yks/YEvent;)Ljava/util/Map;
 	public static final fun observeDeepTyped (Ldev/yks/AbstractYType;Lkotlin/jvm/functions/Function2;)Ldev/yks/Subscription;

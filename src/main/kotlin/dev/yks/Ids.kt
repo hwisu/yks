@@ -82,7 +82,7 @@ public fun findRangeStartInIdRanges(ranges: List<IdRange>, clock: Long): Int? {
     return if (left < ranges.size) left else null
 }
 
-public class IdSet(
+public open class IdSet(
     clients: Map<Long, List<IdRange>> = emptyMap(),
 ) {
     private val clientRanges: MutableMap<Long, MutableList<IdRange>> = linkedMapOf()
@@ -96,7 +96,7 @@ public class IdSet(
     public val clients: Map<Long, List<IdRange>>
         get() = clientRanges.mapValues { (_, ranges) -> ranges.toList() }
 
-    public fun isEmpty(): Boolean = clientRanges.values.all { it.isEmpty() }
+    public open fun isEmpty(): Boolean = clientRanges.values.all { it.isEmpty() }
 
     public fun forEach(action: (range: IdRange, client: Long) -> Unit) {
         ranges().forEach { (client, range) -> action(range, client) }
