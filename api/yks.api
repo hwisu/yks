@@ -3520,3 +3520,149 @@ public final class dev/yks/YksUpdateLimitException : dev/yks/YksException {
 	public final fun getMaximum ()J
 }
 
+public final class dev/yks/awareness/Awareness : java/lang/AutoCloseable {
+	public fun <init> (Ldev/yks/YDoc;Ldev/yks/awareness/AwarenessOptions;)V
+	public synthetic fun <init> (Ldev/yks/YDoc;Ldev/yks/awareness/AwarenessOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun applyUpdate ([BLdev/yks/awareness/AwarenessOrigin;)V
+	public fun close ()V
+	public final fun destroy ()V
+	public final fun encodeUpdate (Ljava/util/Collection;)[B
+	public static synthetic fun encodeUpdate$default (Ldev/yks/awareness/Awareness;Ljava/util/Collection;ILjava/lang/Object;)[B
+	public final fun getClientID ()J
+	public final fun getClientId ()J
+	public final fun getDoc ()Ldev/yks/YDoc;
+	public final fun getLocalState ()Ldev/yks/awareness/AwarenessState;
+	public final fun getMeta ()Ljava/util/Map;
+	public final fun getOptions ()Ldev/yks/awareness/AwarenessOptions;
+	public final fun getStates ()Ljava/util/Map;
+	public final fun onChange (Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun onDestroy (Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun onUpdate (Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun removeLocalStateField (Ljava/lang/String;)V
+	public final fun removeStates (Ljava/util/Collection;Ldev/yks/awareness/AwarenessOrigin;)V
+	public final fun setLocalState (Ldev/yks/awareness/AwarenessState;)V
+	public final fun setLocalStateField (Ljava/lang/String;Ldev/yks/YValue;)V
+}
+
+public final class dev/yks/awareness/AwarenessClientChanges {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/List;Ljava/util/List;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/util/List;Ljava/util/List;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;Ljava/util/List;Ljava/util/List;)Ldev/yks/awareness/AwarenessClientChanges;
+	public static synthetic fun copy$default (Ldev/yks/awareness/AwarenessClientChanges;Ljava/util/List;Ljava/util/List;Ljava/util/List;ILjava/lang/Object;)Ldev/yks/awareness/AwarenessClientChanges;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAdded ()Ljava/util/List;
+	public final fun getRemoved ()Ljava/util/List;
+	public final fun getUpdated ()Ljava/util/List;
+	public fun hashCode ()I
+	public final fun isEmpty ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/awareness/AwarenessClientMeta {
+	public fun <init> (JJ)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun copy (JJ)Ldev/yks/awareness/AwarenessClientMeta;
+	public static synthetic fun copy$default (Ldev/yks/awareness/AwarenessClientMeta;JJILjava/lang/Object;)Ldev/yks/awareness/AwarenessClientMeta;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getClock ()J
+	public final fun getLastUpdatedMillis ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class dev/yks/awareness/AwarenessClock {
+	public static final field Companion Ldev/yks/awareness/AwarenessClock$Companion;
+	public static final field SYSTEM Ldev/yks/awareness/AwarenessClock;
+	public abstract fun nowMillis ()J
+}
+
+public final class dev/yks/awareness/AwarenessClock$Companion {
+}
+
+public final class dev/yks/awareness/AwarenessEvent {
+	public fun <init> (Ldev/yks/awareness/AwarenessClientChanges;Ldev/yks/awareness/AwarenessOrigin;)V
+	public final fun component1 ()Ldev/yks/awareness/AwarenessClientChanges;
+	public final fun component2 ()Ldev/yks/awareness/AwarenessOrigin;
+	public final fun copy (Ldev/yks/awareness/AwarenessClientChanges;Ldev/yks/awareness/AwarenessOrigin;)Ldev/yks/awareness/AwarenessEvent;
+	public static synthetic fun copy$default (Ldev/yks/awareness/AwarenessEvent;Ldev/yks/awareness/AwarenessClientChanges;Ldev/yks/awareness/AwarenessOrigin;ILjava/lang/Object;)Ldev/yks/awareness/AwarenessEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getChanges ()Ldev/yks/awareness/AwarenessClientChanges;
+	public final fun getOrigin ()Ldev/yks/awareness/AwarenessOrigin;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/awareness/AwarenessKt {
+	public static final field AWARENESS_OUTDATED_TIMEOUT_MILLIS J
+	public static final field outdatedTimeout J
+	public static final fun applyAwarenessUpdate (Ldev/yks/awareness/Awareness;[BLdev/yks/awareness/AwarenessOrigin;)V
+	public static final fun encodeAwarenessUpdate (Ldev/yks/awareness/Awareness;Ljava/util/Collection;Ljava/util/Map;)[B
+	public static synthetic fun encodeAwarenessUpdate$default (Ldev/yks/awareness/Awareness;Ljava/util/Collection;Ljava/util/Map;ILjava/lang/Object;)[B
+	public static final fun modifyAwarenessUpdate ([BLkotlin/jvm/functions/Function1;)[B
+	public static final fun removeAwarenessStates (Ldev/yks/awareness/Awareness;Ljava/util/Collection;Ldev/yks/awareness/AwarenessOrigin;)V
+}
+
+public final class dev/yks/awareness/AwarenessOptions {
+	public fun <init> ()V
+	public fun <init> (JJJLdev/yks/awareness/AwarenessClock;Z)V
+	public synthetic fun <init> (JJJLdev/yks/awareness/AwarenessClock;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun component4 ()Ldev/yks/awareness/AwarenessClock;
+	public final fun component5 ()Z
+	public final fun copy (JJJLdev/yks/awareness/AwarenessClock;Z)Ldev/yks/awareness/AwarenessOptions;
+	public static synthetic fun copy$default (Ldev/yks/awareness/AwarenessOptions;JJJLdev/yks/awareness/AwarenessClock;ZILjava/lang/Object;)Ldev/yks/awareness/AwarenessOptions;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAutoStart ()Z
+	public final fun getCheckIntervalMillis ()J
+	public final fun getClock ()Ldev/yks/awareness/AwarenessClock;
+	public final fun getHeartbeatMillis ()J
+	public final fun getOutdatedTimeoutMillis ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class dev/yks/awareness/AwarenessOrigin {
+}
+
+public final class dev/yks/awareness/AwarenessOrigin$Local : dev/yks/awareness/AwarenessOrigin {
+	public static final field INSTANCE Ldev/yks/awareness/AwarenessOrigin$Local;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/awareness/AwarenessOrigin$Timeout : dev/yks/awareness/AwarenessOrigin {
+	public static final field INSTANCE Ldev/yks/awareness/AwarenessOrigin$Timeout;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/awareness/AwarenessState {
+	public static final field Companion Ldev/yks/awareness/AwarenessState$Companion;
+	public static final field EMPTY Ldev/yks/awareness/AwarenessState;
+	public fun <init> ()V
+	public fun <init> (Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> ([Lkotlin/Pair;)V
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun get (Ljava/lang/String;)Ldev/yks/YValue;
+	public final fun getFields ()Ljava/util/Map;
+	public fun hashCode ()I
+	public final fun toJSON ()Ljava/util/Map;
+	public final fun toMap ()Ljava/util/Map;
+	public fun toString ()Ljava/lang/String;
+	public final fun withField (Ljava/lang/String;Ldev/yks/YValue;)Ldev/yks/awareness/AwarenessState;
+	public final fun withoutField (Ljava/lang/String;)Ldev/yks/awareness/AwarenessState;
+}
+
+public final class dev/yks/awareness/AwarenessState$Companion {
+}
+
