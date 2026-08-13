@@ -140,7 +140,7 @@ class JsonAndCloneTest {
         )
 
         val created = createDocFromUpdate(source.encodeStateAsUpdate(), options)
-        val createdV2 = createDocFromUpdateV2(source.encodeStateAsUpdate(), options.copy(clientId = 8, guid = "created-v2"))
+        val createdV2 = createDocFromUpdateV2(source.encodeStateAsUpdateV2(), options.copy(clientId = 8, guid = "created-v2"))
         val cloned = cloneDoc(source, options.copy(clientId = 9, guid = "cloned-doc"))
 
         listOf(created, createdV2, cloned).forEach { doc ->

@@ -4,7 +4,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Base64
 import kotlin.io.path.absolutePathString
-import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
@@ -161,33 +160,137 @@ class YjsDifferentialFuzzTest {
 
     @Test
     @Timeout(30)
-    fun malformedV1AndV2UpdatesFailAtTheStablePublicBoundaryAcross1000Seeds() {
-        val source = YDoc(clientId = 1, gc = false)
-        source.getText("body").insert(0, "malformed-fuzz-baseline")
-        val validUpdates = listOf(source.encodeStateAsUpdate(), source.encodeStateAsUpdateV2())
-
-        repeat(1_000) { seed ->
-            val random = Random(seed)
-            validUpdates.forEachIndexed { formatIndex, valid ->
-                val payload = when (seed % 3) {
-                    0 -> valid.copyOf(random.nextInt(valid.size + 1))
-                    1 -> valid.copyOf().also { mutated ->
-                        repeat(1 + random.nextInt(3)) {
-                            val index = random.nextInt(mutated.size)
-                            mutated[index] = (mutated[index].toInt() xor (1 shl random.nextInt(8))).toByte()
-                        }
-                    }
-                    else -> random.nextBytes(random.nextInt(1, 129))
+    fun richTextNestedEventsSnapshotsAndGcMatchUpstreamAcross200Seeds() {
+        val corpus = generateCorpus("generate-rich-event-fuzz.mjs", 200)
+        try {
+            Files.readAllLines(corpus).forEach { line ->
+                val columns = line.split('\t')
+                assertEquals(17, columns.size, "invalid rich corpus row: $line")
+                val seed = columns[0]
+                val doc = YDoc(clientId = 800_000, gc = false)
+                val body = doc.getText("body")
+                val root = doc.getMap("root")
+                doc.applyUpdate(base64Decoder.decode(columns[1]))
+                val section = assertIs<YMap>(root.get("section"))
+                val list = assertIs<YArray>(section.get("list"))
+                val note = assertIs<YText>(section.get("note"))
+                var bodyEventDelta = ""
+                var bodyAdded = -1
+                var bodyDeleted = -1
+                var sectionChanges = ""
+                val deepPaths = mutableListOf<String>()
+                body.observeTyped { event ->
+                    bodyEventDelta = deltaSignature(event.delta)
+                    bodyAdded = event.changes.added.size
+                    bodyDeleted = event.changes.deleted.size
                 }
-                val failure = runCatching {
-                    val target = YDoc(clientId = 10_000L + seed * 2L + formatIndex, gc = false)
-                    if (formatIndex == 0) target.applyUpdate(payload) else target.applyUpdateV2(payload)
-                }.exceptionOrNull()
+                section.observeTyped { event ->
+                    sectionChanges = event.changes.keys.entries
+                        .map { (key, change) ->
+                            "$key:${change.action.name.lowercase()}:${canonical(change.oldValue)}"
+                        }
+                        .sorted()
+                        .joinToString("|")
+                }
+                root.observeDeepEvents { events, _ ->
+                    events.forEach { event -> deepPaths.add(canonical(event.path)) }
+                }
 
+                doc.applyUpdate(base64Decoder.decode(columns[2]))
+
+                assertEquals(decodeText(columns[3]), body.toString(), "body diverged at seed $seed")
+                assertEquals(decodeText(columns[4]), deltaSignature(body.toDelta()), "body delta diverged at seed $seed")
+                assertEquals(decodeText(columns[5]), bodyEventDelta, "body event diverged at seed $seed")
+                assertEquals(columns[6].toInt(), bodyAdded, "body additions diverged at seed $seed")
+                assertEquals(columns[7].toInt(), bodyDeleted, "body deletions diverged at seed $seed")
+                assertEquals(decodeText(columns[8]), sectionChanges, "map event diverged at seed $seed")
+                assertEquals(
+                    decodeText(columns[9]),
+                    deepPaths.sorted().joinToString("|"),
+                    "deep paths diverged at seed $seed",
+                )
+                assertEquals(decodeText(columns[10]), note.toString(), "nested text diverged at seed $seed")
+                assertEquals(decodeText(columns[11]), deltaSignature(note.toDelta()), "nested delta diverged at seed $seed")
+                assertEquals(decodeText(columns[12]), canonical(list.toArray()), "nested array diverged at seed $seed")
+
+                val baseSnapshot = decodeSnapshot(base64Decoder.decode(columns[13]))
+                val snapshotDoc = createDocFromSnapshot(doc, baseSnapshot)
+                assertEquals(decodeText(columns[14]), snapshotDoc.getText("body").toString(), "snapshot diverged at seed $seed")
+
+                val gcDoc = YDoc(clientId = 800_001)
+                val gcMap = gcDoc.getMap("gc")
+                gcDoc.applyUpdate(base64Decoder.decode(columns[15]))
+                assertEquals(decodeText(columns[16]), canonical(gcMap.toMap()), "GC map diverged at seed $seed")
+            }
+        } finally {
+            Files.deleteIfExists(corpus)
+        }
+    }
+
+    @Test
+    @Timeout(30)
+    fun malformedV1AndV2AcceptanceAndResultMatchUpstreamAcross1000Seeds() {
+        val corpus = generateCorpus("generate-malformed-differential-fuzz.mjs", 1_000)
+        try {
+            Files.readAllLines(corpus).forEach { line ->
+                val columns = line.split('\t')
+                assertEquals(6, columns.size, "invalid malformed corpus row: $line")
+                val seed = columns[0]
+                val format = columns[1].toInt()
+                val payload = base64Decoder.decode(columns[2])
+                val target = YDoc(clientId = 10_000L + seed.toLong() * 2L + format, gc = false)
+                val text = target.getText("body")
+                val failure = runCatching {
+                    if (format == 0) target.applyUpdate(payload) else target.applyUpdateV2(payload)
+                }.exceptionOrNull()
+                val upstreamAccepted = columns[3] == "1"
+
+                assertEquals(
+                    upstreamAccepted,
+                    failure == null,
+                    "acceptance diverged at seed=$seed format=$format localFailure=${failure?.stackTraceToString()}",
+                )
                 if (failure != null) {
-                    assertIs<YksException>(failure, "unstable exception at seed=$seed format=$formatIndex")
+                    assertIs<YksException>(
+                        failure,
+                        "unstable exception at seed=$seed format=$format: ${failure.stackTraceToString()}",
+                    )
+                } else {
+                    assertEquals(decodeText(columns[4]), text.toString(), "text diverged at seed=$seed format=$format")
+                    assertEquals(
+                        columns[5],
+                        Base64.getEncoder().encodeToString(target.encodeStateVector()),
+                        "state vector diverged at seed=$seed format=$format",
+                    )
                 }
             }
+        } finally {
+            Files.deleteIfExists(corpus)
         }
+    }
+
+    private fun deltaSignature(delta: YTextDelta): String = delta.ops.joinToString("|") { operation ->
+        val attributes = canonical(operation.attributes)
+        when {
+            operation.insert != null -> "I:${canonical(operation.insert)}:$attributes"
+            operation.retain != null -> "R:${operation.retain}:$attributes"
+            else -> "D:${operation.delete}"
+        }
+    }
+
+    private fun canonical(value: Any?): String = when (value) {
+        null -> "null"
+        is ByteArray -> canonical(value.map(Byte::toInt))
+        is List<*> -> value.joinToString(",", "[", "]", transform = ::canonical)
+        is Array<*> -> value.joinToString(",", "[", "]", transform = ::canonical)
+        is Map<*, *> -> value.entries
+            .sortedBy { (key, _) -> key.toString() }
+            .joinToString(",", "{", "}") { (key, nested) ->
+                "${toJsonLiteral(key.toString())}:${canonical(nested)}"
+            }
+        is String -> toJsonLiteral(value)
+        is Boolean -> value.toString()
+        is Number -> if (value.toDouble() % 1.0 == 0.0) value.toLong().toString() else value.toString()
+        else -> error("unsupported canonical value: ${value::class.qualifiedName}")
     }
 }

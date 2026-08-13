@@ -38,11 +38,17 @@ public sealed class YTypedEvent<out T : AbstractYType> protected constructor(
  * empty and expose edits through [delta]. [keys] carries map/attribute changes for every type.
  */
 public data class YEventChanges<out D>(
-    val added: IdSet,
-    val deleted: IdSet,
+    val added: Set<Item>,
+    val deleted: Set<Item>,
     val delta: D,
     val keys: Map<String, YMapChange>,
-)
+) {
+    /** Range-oriented YKS view retained for callers that need compact ID membership tests. */
+    public val addedIds: IdSet get() = added.toIdSet()
+
+    /** Range-oriented YKS view retained for callers that need compact ID membership tests. */
+    public val deletedIds: IdSet get() = deleted.toIdSet()
+}
 
 internal fun <D> YEvent.toTypedChanges(
     delta: D,
@@ -66,15 +72,32 @@ internal fun <D> YEvent.toTypedChanges(
             !includeSequenceItems -> createIdSet()
             targetSequenceIds != null -> intersectSets(insertedOnly, targetSequenceIds)
             else -> insertedOnly
-        },
+        }.toEventItems(transactionEvent, target, deleted = false),
         deleted = when {
             !includeSequenceItems -> createIdSet()
             targetSequenceIds != null -> intersectSets(deletedOnly, targetSequenceIds)
             else -> deletedOnly
-        },
+        }.toEventItems(transactionEvent, target, deleted = true),
         delta = delta,
         keys = mapChanges.toMap(),
     )
+}
+
+private fun IdSet.toEventItems(
+    transaction: YTransactionEvent?,
+    target: AbstractYType,
+    deleted: Boolean,
+): Set<Item> {
+    if (transaction == null || isEmpty()) return emptySet()
+    val items = if (deleted) transaction.deletedItems else transaction.addedItems
+    return items.asSequence()
+        .filter { item -> item.parent == target.name && item.parentSub == null && has(item.id.client, item.id.clock) }
+        .map { item -> transaction.itemView(item, deleted) }
+        .toCollection(linkedSetOf())
+}
+
+private fun Set<Item>.toIdSet(): IdSet = createIdSet().also { ids ->
+    forEach { item -> ids.add(item.id, item.length) }
 }
 
 /** Upstream-compatible alias for the common event key-change map. */

@@ -7,9 +7,9 @@ import kotlin.test.assertTrue
 
 class CodecHardeningTest {
     @Test
-    fun rejectsOversizedDecodedCountsBeforeAllocation() {
+    fun rejectsCountsOutsideTheJvmCollectionRangeBeforeAllocation() {
         val stateVector = BinaryEncoder().apply {
-            writeVarUInt(MAX_DECODED_COLLECTION_SIZE.toLong() + 1)
+            writeVarUInt(Int.MAX_VALUE.toLong() + 1)
         }.toByteArray()
 
         val error = assertFailsWith<IllegalStateException> { decodeStateVector(stateVector) }
@@ -18,9 +18,9 @@ class CodecHardeningTest {
     }
 
     @Test
-    fun rejectsOversizedStringAndBufferLengthsBeforeAllocation() {
+    fun rejectsStringAndBufferLengthsLargerThanTheAvailableJvmByteArray() {
         val encodedLength = BinaryEncoder().apply {
-            writeVarUInt(MAX_DECODED_BINARY_SIZE.toLong() + 1)
+            writeVarUInt(Int.MAX_VALUE.toLong())
         }.toByteArray()
 
         assertFailsWith<IllegalStateException> { BinaryDecoder(encodedLength).readString() }
@@ -45,62 +45,18 @@ class CodecHardeningTest {
     }
 
     @Test
-    fun rejectsDeeplyNestedLib0ValuesBeforeTheJvmStackOverflows() {
-        val update = BinaryEncoder().apply {
-            writeVarUInt(1) // clients
-            writeVarUInt(1) // structs
-            writeVarUInt(1) // client
-            writeVarUInt(0) // start clock
-            writeByte(contentAnyRefNumber)
-            writeVarUInt(1) // root parent
-            writeString("values")
-            writeVarUInt(1) // ContentAny length
-            repeat(MAX_DECODED_NESTING_DEPTH + 1) {
-                writeByte(117) // lib0 array
-                writeVarUInt(1)
-            }
-            writeByte(126) // lib0 null
-            writeVarUInt(0) // empty delete set
-        }.toByteArray()
-
-        val error = assertFailsWith<IllegalStateException> { applyUpdate(YDoc(clientId = 2), update) }
-
-        assertTrue(error.message.orEmpty().contains("nesting exceeds limit"))
-    }
-
-    @Test
-    fun rejectsDeeplyNestedLegacyValuesBeforeTheJvmStackOverflows() {
+    fun acceptsValueNestingBeyondTheFormerYksSpecificLimit() {
         val encoded = BinaryEncoder().apply {
-            repeat(MAX_DECODED_NESTING_DEPTH + 1) {
+            repeat(257) {
                 writeByte(7) // YValue.ListValue
                 writeVarUInt(1)
             }
             writeByte(0) // YValue.Null
         }.toByteArray()
 
-        val error = assertFailsWith<IllegalStateException> { readYValue(BinaryDecoder(encoded)) }
-
-        assertTrue(error.message.orEmpty().contains("nesting exceeds limit"))
-    }
-
-    @Test
-    fun rejectsAggregateDecodedPayloadBeyondTheGlobalBudget() {
-        val budget = DecodeBudget()
-        budget.consumePayloadBytes(MAX_DECODED_TOTAL_PAYLOAD_SIZE.toInt())
-
-        val error = assertFailsWith<IllegalStateException> { budget.consumePayloadBytes(1) }
-
-        assertTrue(error.message.orEmpty().contains("payload size exceeds limit"))
-    }
-
-    @Test
-    fun rejectsMoreThanTheGlobalDecodedValueNodeBudget() {
-        val budget = DecodeBudget()
-        repeat(MAX_DECODED_VALUE_NODES) { budget.consumeNode() }
-
-        val error = assertFailsWith<IllegalStateException> { budget.consumeNode() }
-
-        assertTrue(error.message.orEmpty().contains("node count exceeds limit"))
+        var value = readYValue(BinaryDecoder(encoded))
+        repeat(257) { value = (value as YValue.ListValue).value.single() }
+        assertEquals(YValue.Null, value)
     }
 
     @Test

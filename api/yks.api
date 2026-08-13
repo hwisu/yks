@@ -217,6 +217,30 @@ public final class dev/yks/Attributions {
 	public final fun getInserts ()Ldev/yks/IdMap;
 }
 
+public final class dev/yks/AttributionsRenderer : dev/yks/AbstractRenderer {
+	public fun <init> (Ldev/yks/ContentMap;Ldev/yks/AttributionsRendererOptions;)V
+	public synthetic fun <init> (Ldev/yks/ContentMap;Ldev/yks/AttributionsRendererOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun contentLength (Ldev/yks/ItemStruct;)J
+	public fun getAttributed ()Ldev/yks/IdSet;
+	public final fun getRenderAs ()Ldev/yks/IdMap;
+	public final fun getRenderedContent ()Ldev/yks/IdSet;
+	public fun hasItem (Ldev/yks/ItemStruct;)Z
+	public fun readContent (Ljava/util/List;JJZLdev/yks/AbstractContent;I)V
+}
+
+public final class dev/yks/AttributionsRendererOptions {
+	public fun <init> ()V
+	public fun <init> (Ldev/yks/IdSet;)V
+	public synthetic fun <init> (Ldev/yks/IdSet;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ldev/yks/IdSet;
+	public final fun copy (Ldev/yks/IdSet;)Ldev/yks/AttributionsRendererOptions;
+	public static synthetic fun copy$default (Ldev/yks/AttributionsRendererOptions;Ldev/yks/IdSet;ILjava/lang/Object;)Ldev/yks/AttributionsRendererOptions;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getRenderedContent ()Ldev/yks/IdSet;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public class dev/yks/BaseRenderer : dev/yks/AbstractRenderer {
 	public fun <init> ()V
 	public fun contentLength (Ldev/yks/ItemStruct;)J
@@ -550,6 +574,7 @@ public final class dev/yks/DecodedUpdate {
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getDeleteSet ()Ldev/yks/DeleteSet;
 	public final fun getDs ()Ldev/yks/DeleteSet;
+	public final fun getItems ()Ljava/util/List;
 	public final fun getStructs ()Ljava/util/List;
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
@@ -570,15 +595,24 @@ public final class dev/yks/DecodedUpdateStruct {
 	public static synthetic fun copy$default (Ldev/yks/DecodedUpdateStruct;Ldev/yks/Id;Ldev/yks/Id;Ldev/yks/Id;Ljava/lang/String;Ljava/lang/String;Ldev/yks/RootKind;ZJLdev/yks/AbstractContent;ILjava/lang/Object;)Ldev/yks/DecodedUpdateStruct;
 	public fun equals (Ljava/lang/Object;)Z
 	public final fun getContent ()Ldev/yks/AbstractContent;
+	public final fun getCountable ()Z
 	public final fun getDeleted ()Z
 	public final fun getId ()Ldev/yks/Id;
+	public final fun getKeep ()Z
 	public final fun getKind ()Ldev/yks/RootKind;
+	public final fun getLastId ()Ldev/yks/Id;
+	public final fun getLeft ()Ldev/yks/DecodedUpdateStruct;
 	public final fun getLength ()J
+	public final fun getNext ()Ldev/yks/DecodedUpdateStruct;
 	public final fun getOrigin ()Ldev/yks/Id;
 	public final fun getParent ()Ljava/lang/String;
 	public final fun getParentSub ()Ljava/lang/String;
+	public final fun getPrev ()Ldev/yks/DecodedUpdateStruct;
+	public final fun getRedone ()Ldev/yks/Id;
+	public final fun getRight ()Ldev/yks/DecodedUpdateStruct;
 	public final fun getRightOrigin ()Ldev/yks/Id;
 	public fun hashCode ()I
+	public final fun isItem ()Z
 	public fun toString ()Ljava/lang/String;
 }
 
@@ -911,14 +945,23 @@ public final class dev/yks/ItemStruct : dev/yks/AbstractStruct {
 	public final fun getCountable ()Z
 	public fun getDeleted ()Z
 	public fun getId ()Ldev/yks/Id;
+	public final fun getKeep ()Z
 	public final fun getKind ()Ldev/yks/RootKind;
+	public final fun getLastId ()Ldev/yks/Id;
+	public final fun getLeft ()Ldev/yks/ItemStruct;
 	public fun getLength ()J
+	public final fun getNext ()Ldev/yks/ItemStruct;
 	public final fun getOrigin ()Ldev/yks/Id;
 	public final fun getParent ()Ljava/lang/String;
 	public final fun getParentSub ()Ljava/lang/String;
+	public final fun getParentType ()Ldev/yks/AbstractYType;
+	public final fun getPrev ()Ldev/yks/ItemStruct;
+	public final fun getRedone ()Ldev/yks/Id;
+	public final fun getRight ()Ldev/yks/ItemStruct;
 	public final fun getRightOrigin ()Ldev/yks/Id;
 	public fun hashCode ()I
 	public fun isItem ()Z
+	public final fun setKeep (Z)V
 	public fun setLength (J)V
 	public fun toString ()Ljava/lang/String;
 }
@@ -1159,14 +1202,23 @@ public final class dev/yks/RendererEvent {
 }
 
 public final class dev/yks/RendererKt {
+	public static final field attributionManagerType Ljava/lang/String;
 	public static final field rendererType Ljava/lang/String;
+	public static final fun createAttributionManagerFromDiff (Ldev/yks/YDoc;Ldev/yks/YDoc;Ldev/yks/DiffRendererOptions;)Ldev/yks/DiffRenderer;
+	public static synthetic fun createAttributionManagerFromDiff$default (Ldev/yks/YDoc;Ldev/yks/YDoc;Ldev/yks/DiffRendererOptions;ILjava/lang/Object;)Ldev/yks/DiffRenderer;
+	public static final fun createAttributionManagerFromSnapshots (Ldev/yks/Snapshot;Ldev/yks/Snapshot;)Ldev/yks/SnapshotRenderer;
+	public static synthetic fun createAttributionManagerFromSnapshots$default (Ldev/yks/Snapshot;Ldev/yks/Snapshot;ILjava/lang/Object;)Ldev/yks/SnapshotRenderer;
+	public static final fun createAttributionsRenderer (Ldev/yks/ContentMap;Ldev/yks/AttributionsRendererOptions;)Ldev/yks/AttributionsRenderer;
+	public static synthetic fun createAttributionsRenderer$default (Ldev/yks/ContentMap;Ldev/yks/AttributionsRendererOptions;ILjava/lang/Object;)Ldev/yks/AttributionsRenderer;
 	public static final fun createDiffRenderer (Ldev/yks/YDoc;Ldev/yks/YDoc;Ldev/yks/DiffRendererOptions;)Ldev/yks/DiffRenderer;
 	public static synthetic fun createDiffRenderer$default (Ldev/yks/YDoc;Ldev/yks/YDoc;Ldev/yks/DiffRendererOptions;ILjava/lang/Object;)Ldev/yks/DiffRenderer;
 	public static final fun createSnapshotRenderer (Ldev/yks/Snapshot;Ldev/yks/Snapshot;)Ldev/yks/SnapshotRenderer;
 	public static synthetic fun createSnapshotRenderer$default (Ldev/yks/Snapshot;Ldev/yks/Snapshot;ILjava/lang/Object;)Ldev/yks/SnapshotRenderer;
+	public static final fun get$attributionManager ()Lkotlin/jvm/functions/Function1;
 	public static final fun get$renderer ()Ljava/lang/String;
 	public static final fun getAttributionJsonSchema ()Ldev/yks/AttributionJsonSchema;
 	public static final fun getBaseRenderer ()Ldev/yks/BaseRenderer;
+	public static final fun getNoAttributionsManager ()Ldev/yks/BaseRenderer;
 	public static final fun rendererContentLength (Ldev/yks/AbstractRenderer;Ldev/yks/ItemStruct;)J
 }
 
@@ -1229,7 +1281,9 @@ public final class dev/yks/SnapshotKt {
 	public static final fun getEmptySnapshot ()Ldev/yks/Snapshot;
 	public static final fun snapshot (Ldev/yks/YDoc;)Ldev/yks/Snapshot;
 	public static final fun snapshotContainsUpdate (Ldev/yks/Snapshot;[B)Z
+	public static final fun snapshotContainsUpdateLossless (Ldev/yks/Snapshot;[B)Z
 	public static final fun snapshotContainsUpdateV2 (Ldev/yks/Snapshot;[B)Z
+	public static final fun snapshotContainsUpdateV2Lossless (Ldev/yks/Snapshot;[B)Z
 	public static final fun splitSnapshotAffectedStructs (Ldev/yks/YTransaction;Ldev/yks/Snapshot;)V
 }
 
@@ -1615,14 +1669,20 @@ public final class dev/yks/UpdateMeta {
 
 public final class dev/yks/UpdateMetaKt {
 	public static final fun parseUpdateMeta ([B)Ldev/yks/UpdateMeta;
+	public static final fun parseUpdateMetaLossless ([B)Ldev/yks/UpdateMeta;
 	public static final fun parseUpdateMetaV2 ([B)Ldev/yks/UpdateMeta;
+	public static final fun parseUpdateMetaV2Lossless ([B)Ldev/yks/UpdateMeta;
 }
 
 public final class dev/yks/UpdatesKt {
 	public static final fun applyUpdate (Ldev/yks/YDoc;[BLjava/lang/Object;)V
 	public static synthetic fun applyUpdate$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
+	public static final fun applyUpdateLossless (Ldev/yks/YDoc;[BLjava/lang/Object;)V
+	public static synthetic fun applyUpdateLossless$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
 	public static final fun applyUpdateV2 (Ldev/yks/YDoc;[BLjava/lang/Object;)V
 	public static synthetic fun applyUpdateV2$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
+	public static final fun applyUpdateV2Lossless (Ldev/yks/YDoc;[BLjava/lang/Object;)V
+	public static synthetic fun applyUpdateV2Lossless$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
 	public static final fun cloneDoc (Ldev/yks/YDoc;)Ldev/yks/YDoc;
 	public static final fun cloneDoc (Ldev/yks/YDoc;Ldev/yks/YDocOptions;)Ldev/yks/YDoc;
 	public static final fun convertUpdateFormat ([BLkotlin/jvm/functions/Function1;)[B
@@ -1639,7 +1699,9 @@ public final class dev/yks/UpdatesKt {
 	public static final fun createContentIdsFromDoc (Ldev/yks/YDoc;)Ldev/yks/ContentIds;
 	public static final fun createContentIdsFromDocDiff (Ldev/yks/YDoc;Ldev/yks/YDoc;)Ldev/yks/ContentIds;
 	public static final fun createContentIdsFromUpdate ([B)Ldev/yks/ContentIds;
+	public static final fun createContentIdsFromUpdateLossless ([B)Ldev/yks/ContentIds;
 	public static final fun createContentIdsFromUpdateV2 ([B)Ldev/yks/ContentIds;
+	public static final fun createContentIdsFromUpdateV2Lossless ([B)Ldev/yks/ContentIds;
 	public static final fun createContentMap (Ldev/yks/IdMap;Ldev/yks/IdMap;)Ldev/yks/ContentMap;
 	public static synthetic fun createContentMap$default (Ldev/yks/IdMap;Ldev/yks/IdMap;ILjava/lang/Object;)Ldev/yks/ContentMap;
 	public static final fun createContentMapFromContentIds (Ldev/yks/ContentIds;Ljava/util/List;Ljava/util/List;)Ldev/yks/ContentMap;
@@ -1648,19 +1710,31 @@ public final class dev/yks/UpdatesKt {
 	public static final fun createDocFromUpdate ([BLdev/yks/YDoc;)Ldev/yks/YDoc;
 	public static final fun createDocFromUpdate ([BLdev/yks/YDocOptions;)Ldev/yks/YDoc;
 	public static synthetic fun createDocFromUpdate$default ([BLdev/yks/YDoc;ILjava/lang/Object;)Ldev/yks/YDoc;
+	public static final fun createDocFromUpdateLossless ([BLdev/yks/YDoc;)Ldev/yks/YDoc;
+	public static final fun createDocFromUpdateLossless ([BLdev/yks/YDocOptions;)Ldev/yks/YDoc;
+	public static synthetic fun createDocFromUpdateLossless$default ([BLdev/yks/YDoc;ILjava/lang/Object;)Ldev/yks/YDoc;
 	public static final fun createDocFromUpdateV2 ([BLdev/yks/YDoc;)Ldev/yks/YDoc;
 	public static final fun createDocFromUpdateV2 ([BLdev/yks/YDocOptions;)Ldev/yks/YDoc;
 	public static synthetic fun createDocFromUpdateV2$default ([BLdev/yks/YDoc;ILjava/lang/Object;)Ldev/yks/YDoc;
+	public static final fun createDocFromUpdateV2Lossless ([BLdev/yks/YDoc;)Ldev/yks/YDoc;
+	public static final fun createDocFromUpdateV2Lossless ([BLdev/yks/YDocOptions;)Ldev/yks/YDoc;
+	public static synthetic fun createDocFromUpdateV2Lossless$default ([BLdev/yks/YDoc;ILjava/lang/Object;)Ldev/yks/YDoc;
 	public static final fun createInsertSetFromDoc (Ldev/yks/YDoc;Z)Ldev/yks/IdSet;
 	public static synthetic fun createInsertSetFromDoc$default (Ldev/yks/YDoc;ZILjava/lang/Object;)Ldev/yks/IdSet;
 	public static final fun createInsertSetFromStructStore (Ldev/yks/StructStore;Z)Ldev/yks/IdSet;
 	public static final fun createInsertSetFromStructStore (Ldev/yks/YDoc;Z)Ldev/yks/IdSet;
 	public static synthetic fun createInsertSetFromStructStore$default (Ldev/yks/StructStore;ZILjava/lang/Object;)Ldev/yks/IdSet;
 	public static synthetic fun createInsertSetFromStructStore$default (Ldev/yks/YDoc;ZILjava/lang/Object;)Ldev/yks/IdSet;
+	public static final fun createLazyStructReaderLossless ([BZ)Ldev/yks/LazyStructReader;
+	public static synthetic fun createLazyStructReaderLossless$default ([BZILjava/lang/Object;)Ldev/yks/LazyStructReader;
+	public static final fun createLazyStructReaderV2Lossless ([BZ)Ldev/yks/LazyStructReader;
+	public static synthetic fun createLazyStructReaderV2Lossless$default ([BZILjava/lang/Object;)Ldev/yks/LazyStructReader;
 	public static final fun decodeContentIds ([B)Ldev/yks/ContentIds;
 	public static final fun decodeContentMap ([B)Ldev/yks/ContentMap;
 	public static final fun decodeUpdate ([B)Ldev/yks/DecodedUpdate;
+	public static final fun decodeUpdateLossless ([B)Ldev/yks/DecodedUpdate;
 	public static final fun decodeUpdateV2 ([B)Ldev/yks/DecodedUpdate;
+	public static final fun decodeUpdateV2Lossless ([B)Ldev/yks/DecodedUpdate;
 	public static final fun diffUpdate ([B[B)[B
 	public static final fun diffUpdateLossless ([B[B)[B
 	public static final fun diffUpdateV2 ([B[B)[B
@@ -1677,7 +1751,9 @@ public final class dev/yks/UpdatesKt {
 	public static synthetic fun encodeStateAsUpdateV2Lossless$default (Ldev/yks/YDoc;[BILjava/lang/Object;)[B
 	public static final fun encodeStateVector (Ldev/yks/YDoc;)[B
 	public static final fun encodeStateVectorFromUpdate ([B)[B
+	public static final fun encodeStateVectorFromUpdateLossless ([B)[B
 	public static final fun encodeStateVectorFromUpdateV2 ([B)[B
+	public static final fun encodeStateVectorFromUpdateV2Lossless ([B)[B
 	public static final fun encodeStructsFromIdSet (Ldev/yks/YDoc;Ldev/yks/IdSet;)[B
 	public static final fun encodeStructsFromIdSetLossless (Ldev/yks/YDoc;Ldev/yks/IdSet;)[B
 	public static final fun encodeStructsFromIdSetV2 (Ldev/yks/YDoc;Ldev/yks/IdSet;)[B
@@ -1754,8 +1830,10 @@ public final class dev/yks/UpdatesKt {
 	public static final fun writeContentMap (Ldev/yks/IdSetEncoderV1;Ldev/yks/ContentMap;)V
 	public static final fun writeStateAsUpdate (Ldev/yks/BinaryEncoder;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/BinaryEncoder;
 	public static final fun writeStateAsUpdate (Ldev/yks/IdSetEncoderV1;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/IdSetEncoderV1;
+	public static final fun writeStateAsUpdate (Ldev/yks/UpdateEncoderV2;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/UpdateEncoderV2;
 	public static synthetic fun writeStateAsUpdate$default (Ldev/yks/BinaryEncoder;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/BinaryEncoder;
 	public static synthetic fun writeStateAsUpdate$default (Ldev/yks/IdSetEncoderV1;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/IdSetEncoderV1;
+	public static synthetic fun writeStateAsUpdate$default (Ldev/yks/UpdateEncoderV2;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/UpdateEncoderV2;
 	public static final fun writeStateAsUpdateLossless (Ldev/yks/BinaryEncoder;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/BinaryEncoder;
 	public static final fun writeStateAsUpdateLossless (Ldev/yks/IdSetEncoderV1;Ldev/yks/YDoc;Ljava/util/Map;)Ldev/yks/IdSetEncoderV1;
 	public static synthetic fun writeStateAsUpdateLossless$default (Ldev/yks/BinaryEncoder;Ldev/yks/YDoc;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/BinaryEncoder;
@@ -1943,8 +2021,12 @@ public final class dev/yks/YDoc {
 	public fun <init> (Ldev/yks/YDocOptions;Ldev/yks/YDocRuntimeOptions;)V
 	public final fun applyUpdate ([BLjava/lang/Object;)V
 	public static synthetic fun applyUpdate$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
+	public final fun applyUpdateLossless ([BLjava/lang/Object;)V
+	public static synthetic fun applyUpdateLossless$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
 	public final fun applyUpdateV2 ([BLjava/lang/Object;)V
 	public static synthetic fun applyUpdateV2$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
+	public final fun applyUpdateV2Lossless ([BLjava/lang/Object;)V
+	public static synthetic fun applyUpdateV2Lossless$default (Ldev/yks/YDoc;[BLjava/lang/Object;ILjava/lang/Object;)V
 	public final fun createArray ()Ldev/yks/YArray;
 	public final fun createMap ()Ldev/yks/YMap;
 	public final fun createText ()Ldev/yks/YText;
@@ -1998,6 +2080,10 @@ public final class dev/yks/YDoc {
 	public static synthetic fun getXmlElement$default (Ldev/yks/YDoc;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YXmlElementType;
 	public final fun getXmlFragment (Ljava/lang/String;)Ldev/yks/YXmlFragment;
 	public static synthetic fun getXmlFragment$default (Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YXmlFragment;
+	public final fun getXmlHook (Ljava/lang/String;Ljava/lang/String;)Ldev/yks/YXmlHook;
+	public static synthetic fun getXmlHook$default (Ldev/yks/YDoc;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YXmlHook;
+	public final fun getXmlText (Ljava/lang/String;)Ldev/yks/YXmlTextType;
+	public static synthetic fun getXmlText$default (Ldev/yks/YDoc;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YXmlTextType;
 	public final fun isDestroyed ()Z
 	public final fun isLoaded ()Z
 	public final fun isRootEmpty (Ljava/lang/String;)Z
@@ -2192,16 +2278,18 @@ public final class dev/yks/YEvent {
 }
 
 public final class dev/yks/YEventChanges {
-	public fun <init> (Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/util/Map;)V
-	public final fun component1 ()Ldev/yks/IdSet;
-	public final fun component2 ()Ldev/yks/IdSet;
+	public fun <init> (Ljava/util/Set;Ljava/util/Set;Ljava/lang/Object;Ljava/util/Map;)V
+	public final fun component1 ()Ljava/util/Set;
+	public final fun component2 ()Ljava/util/Set;
 	public final fun component3 ()Ljava/lang/Object;
 	public final fun component4 ()Ljava/util/Map;
-	public final fun copy (Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/util/Map;)Ldev/yks/YEventChanges;
-	public static synthetic fun copy$default (Ldev/yks/YEventChanges;Ldev/yks/IdSet;Ldev/yks/IdSet;Ljava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YEventChanges;
+	public final fun copy (Ljava/util/Set;Ljava/util/Set;Ljava/lang/Object;Ljava/util/Map;)Ldev/yks/YEventChanges;
+	public static synthetic fun copy$default (Ldev/yks/YEventChanges;Ljava/util/Set;Ljava/util/Set;Ljava/lang/Object;Ljava/util/Map;ILjava/lang/Object;)Ldev/yks/YEventChanges;
 	public fun equals (Ljava/lang/Object;)Z
-	public final fun getAdded ()Ldev/yks/IdSet;
-	public final fun getDeleted ()Ldev/yks/IdSet;
+	public final fun getAdded ()Ljava/util/Set;
+	public final fun getAddedIds ()Ldev/yks/IdSet;
+	public final fun getDeleted ()Ljava/util/Set;
+	public final fun getDeletedIds ()Ldev/yks/IdSet;
 	public final fun getDelta ()Ljava/lang/Object;
 	public final fun getKeys ()Ljava/util/Map;
 	public fun hashCode ()I
@@ -2565,6 +2653,7 @@ public final class dev/yks/YTransaction {
 	public final fun getAddedItemCount ()I
 	public final fun getAfterState ()Ljava/util/Map;
 	public final fun getBeforeState ()Ljava/util/Map;
+	public final fun getChanged ()Ljava/util/Map;
 	public final fun getChangedParents ()Ljava/util/Set;
 	public final fun getChangedTypes ()Ljava/util/Set;
 	public final fun getCleanUps ()Ldev/yks/IdSet;
@@ -2575,6 +2664,9 @@ public final class dev/yks/YTransaction {
 	public final fun getLocal ()Z
 	public final fun getMeta ()Ljava/util/Map;
 	public final fun getOrigin ()Ljava/lang/Object;
+	public final fun getSubdocsAdded ()Ljava/util/Set;
+	public final fun getSubdocsLoaded ()Ljava/util/Set;
+	public final fun getSubdocsRemoved ()Ljava/util/Set;
 	public final fun getUpdate ()[B
 }
 
@@ -2942,6 +3034,14 @@ public final class dev/yks/YValueKt {
 	public static final fun writeYValue (Ldev/yks/BinaryEncoder;Ldev/yks/YValue;)V
 }
 
+public abstract interface class dev/yks/YXmlDomBinding {
+	public abstract fun _createAssociation (Lorg/w3c/dom/Node;Ldev/yks/AbstractYType;)V
+}
+
+public abstract interface class dev/yks/YXmlDomHook {
+	public abstract fun createDom (Ldev/yks/YXmlHook;)Lorg/w3c/dom/Element;
+}
+
 public final class dev/yks/YXmlElement : dev/yks/YXmlNode, java/lang/Iterable, kotlin/jvm/internal/markers/KMappedMarker {
 	public static final field Companion Ldev/yks/YXmlElement$Companion;
 	public fun <init> (Ljava/lang/String;)V
@@ -2996,6 +3096,8 @@ public final class dev/yks/YXmlElement : dev/yks/YXmlNode, java/lang/Iterable, k
 	public final fun slice (II)Ljava/util/List;
 	public static synthetic fun slice$default (Ldev/yks/YXmlElement;IIILjava/lang/Object;)Ljava/util/List;
 	public final fun toArray ()Ljava/util/List;
+	public final fun toDOM (Lorg/w3c/dom/Document;Ljava/util/Map;)Lorg/w3c/dom/Node;
+	public static synthetic fun toDOM$default (Ldev/yks/YXmlElement;Lorg/w3c/dom/Document;Ljava/util/Map;ILjava/lang/Object;)Lorg/w3c/dom/Node;
 	public final fun toDelta ()Ljava/util/List;
 	public final fun toDeltaDeep ()Ldev/yks/YXmlElementDeepDelta;
 	public synthetic fun toJSON ()Ljava/lang/Object;
@@ -3099,6 +3201,8 @@ public final class dev/yks/YXmlElementType : dev/yks/YXmlSharedType, java/lang/I
 	public final fun slice (II)Ljava/util/List;
 	public static synthetic fun slice$default (Ldev/yks/YXmlElementType;IIILjava/lang/Object;)Ljava/util/List;
 	public final fun toArray ()Ljava/util/List;
+	public final fun toDOM (Lorg/w3c/dom/Document;Ljava/util/Map;Ldev/yks/YXmlDomBinding;)Lorg/w3c/dom/Node;
+	public static synthetic fun toDOM$default (Ldev/yks/YXmlElementType;Lorg/w3c/dom/Document;Ljava/util/Map;Ldev/yks/YXmlDomBinding;ILjava/lang/Object;)Lorg/w3c/dom/Node;
 	public final fun toDelta ()Ljava/util/List;
 	public final fun toDeltaDeep (Ldev/yks/AbstractRenderer;)Ldev/yks/YXmlElementDeepDelta;
 	public static synthetic fun toDeltaDeep$default (Ldev/yks/YXmlElementType;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)Ldev/yks/YXmlElementDeepDelta;
@@ -3192,6 +3296,8 @@ public final class dev/yks/YXmlFragment : dev/yks/YXmlSharedType, java/lang/Iter
 	public final fun slice (II)Ljava/util/List;
 	public static synthetic fun slice$default (Ldev/yks/YXmlFragment;IIILjava/lang/Object;)Ljava/util/List;
 	public final fun toArray ()Ljava/util/List;
+	public final fun toDOM (Lorg/w3c/dom/Document;Ljava/util/Map;Ldev/yks/YXmlDomBinding;)Lorg/w3c/dom/Node;
+	public static synthetic fun toDOM$default (Ldev/yks/YXmlFragment;Lorg/w3c/dom/Document;Ljava/util/Map;Ldev/yks/YXmlDomBinding;ILjava/lang/Object;)Lorg/w3c/dom/Node;
 	public final fun toDelta ()Ljava/util/List;
 	public final fun toDeltaDeep (Ldev/yks/AbstractRenderer;)Ldev/yks/YXmlFragmentDeepDelta;
 	public static synthetic fun toDeltaDeep$default (Ldev/yks/YXmlFragment;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)Ldev/yks/YXmlFragmentDeepDelta;
@@ -3237,7 +3343,13 @@ public final class dev/yks/YXmlHook : dev/yks/YMap {
 	public synthetic fun clone (Ldev/yks/YDoc;)Ldev/yks/YMap;
 	public fun clone (Ldev/yks/YDoc;)Ldev/yks/YXmlHook;
 	public final fun getHookName ()Ljava/lang/String;
+	public final fun toDOM (Lorg/w3c/dom/Document;Ljava/util/Map;Ldev/yks/YXmlDomBinding;)Lorg/w3c/dom/Element;
+	public static synthetic fun toDOM$default (Ldev/yks/YXmlHook;Lorg/w3c/dom/Document;Ljava/util/Map;Ldev/yks/YXmlDomBinding;ILjava/lang/Object;)Lorg/w3c/dom/Element;
 	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/yks/YXmlKt {
+	public static final fun createXmlDomDocument ()Lorg/w3c/dom/Document;
 }
 
 public abstract class dev/yks/YXmlNode {
@@ -3259,6 +3371,8 @@ public final class dev/yks/YXmlText : dev/yks/YXmlNode {
 	public final fun getLegacyTypeRef ()I
 	public final fun getLength ()I
 	public final fun getTypeRef ()I
+	public final fun toDOM (Lorg/w3c/dom/Document;)Lorg/w3c/dom/Node;
+	public static synthetic fun toDOM$default (Ldev/yks/YXmlText;Lorg/w3c/dom/Document;ILjava/lang/Object;)Lorg/w3c/dom/Node;
 	public final fun toDeltaDeep ()Ljava/lang/String;
 	public synthetic fun toJson ()Ljava/lang/Object;
 	public fun toJson ()Ljava/lang/String;
@@ -3274,6 +3388,8 @@ public final class dev/yks/YXmlTextType : dev/yks/YText {
 	public fun clone (Ldev/yks/YDoc;)Ldev/yks/YXmlTextType;
 	public final fun getNextSibling ()Ljava/lang/Object;
 	public final fun getPrevSibling ()Ljava/lang/Object;
+	public final fun toDOM (Lorg/w3c/dom/Document;Ljava/util/Map;Ldev/yks/YXmlDomBinding;)Lorg/w3c/dom/Node;
+	public static synthetic fun toDOM$default (Ldev/yks/YXmlTextType;Lorg/w3c/dom/Document;Ljava/util/Map;Ldev/yks/YXmlDomBinding;ILjava/lang/Object;)Lorg/w3c/dom/Node;
 	public fun toString ()Ljava/lang/String;
 }
 

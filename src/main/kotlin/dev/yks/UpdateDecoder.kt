@@ -88,7 +88,6 @@ public open class UpdateDecoderV1(
 }
 
 private data class V2DecoderStreams(
-    val legacy: Boolean,
     val rest: BinaryDecoder,
     val keyClocks: Lib0IntDiffOptRleDecoder,
     val clients: Lib0UintOptRleDecoder,
@@ -103,27 +102,12 @@ private data class V2DecoderStreams(
 
 private fun readV2DecoderStreams(bytes: ByteArray): V2DecoderStreams {
     val decoder = BinaryDecoder(bytes)
-    val feature = decoder.readVarUInt()
-    if (feature != 0L) {
-        val empty = ByteArray(0)
-        return V2DecoderStreams(
-            legacy = true,
-            rest = BinaryDecoder(bytes),
-            keyClocks = Lib0IntDiffOptRleDecoder(empty),
-            clients = Lib0UintOptRleDecoder(empty),
-            leftClocks = Lib0IntDiffOptRleDecoder(empty),
-            rightClocks = Lib0IntDiffOptRleDecoder(empty),
-            infos = Lib0ByteRleDecoder(empty),
-            strings = Lib0StringDecoder(byteArrayOf(0)),
-            parentInfos = Lib0ByteRleDecoder(empty),
-            typeRefs = Lib0UintOptRleDecoder(empty),
-            lengths = Lib0UintOptRleDecoder(empty),
-        )
-    }
-    val encoded = List(9) { decoder.readBytes() }
+    // Yjs currently emits zero, but UpdateDecoderV2 deliberately reads and ignores this feature
+    // field. Preserve that forward-compatible acceptance behavior for non-zero values.
+    decoder.readVarUInt()
+    val encoded = List(9) { decoder.readDecoderView() }
     return V2DecoderStreams(
-        legacy = false,
-        rest = BinaryDecoder(decoder.readRemainingBytes()),
+        rest = decoder.readRemainingDecoderView(),
         keyClocks = Lib0IntDiffOptRleDecoder(encoded[0]),
         clients = Lib0UintOptRleDecoder(encoded[1]),
         leftClocks = Lib0IntDiffOptRleDecoder(encoded[2]),
@@ -139,7 +123,7 @@ private fun readV2DecoderStreams(bytes: ByteArray): V2DecoderStreams {
 public open class UpdateDecoderV2 private constructor(
     private val streams: V2DecoderStreams,
 ) : IdSetDecoderV2(streams.rest), UpdateContentDecoder {
-    internal val usesLegacyRest: Boolean get() = streams.legacy
+    internal val usesLegacyRest: Boolean get() = false
     private val keys = mutableListOf<String>()
     public constructor(bytes: ByteArray) : this(readV2DecoderStreams(bytes))
 

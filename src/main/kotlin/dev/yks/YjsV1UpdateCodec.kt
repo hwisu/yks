@@ -162,8 +162,29 @@ internal object UpdateCodec {
         else decodeV1(BinaryDecoder(bytes), budget = budget)
     }
 
+    /** Decode only the genuine V1 envelope accepted by Yjs' `applyUpdate`. */
+    fun decodeStandard(
+        bytes: ByteArray,
+        maxStructs: Int = MAX_DECODED_COLLECTION_SIZE,
+        maxDeleteRanges: Int = MAX_DECODED_COLLECTION_SIZE,
+    ): DocumentUpdate = decodeBoundary("Yjs update V1") {
+        requireStandardYjsUpdateInput(bytes, "V1")
+        decodeV1(
+            BinaryDecoder(bytes),
+            budget = DecodedUpdateBudget(maxStructs, maxDeleteRanges),
+        )
+    }
+
     fun parseMeta(bytes: ByteArray): UpdateMeta = decodeBoundary("Yjs update V1 metadata") {
         if (bytes.hasLegacyMagic()) return@decodeBoundary LegacyUpdateCodec.decode(bytes).toUpdateMeta()
+        val from = linkedMapOf<Long, Long>()
+        val to = linkedMapOf<Long, Long>()
+        decodeV1(BinaryDecoder(bytes), from, to)
+        UpdateMeta(from, to)
+    }
+
+    fun parseStandardMeta(bytes: ByteArray): UpdateMeta = decodeBoundary("Yjs update V1 metadata") {
+        requireStandardYjsUpdateInput(bytes, "V1")
         val from = linkedMapOf<Long, Long>()
         val to = linkedMapOf<Long, Long>()
         decodeV1(BinaryDecoder(bytes), from, to)
@@ -196,6 +217,18 @@ internal object UpdateCodec {
         )
     }
 
+    /** Decode only the genuine V2 envelope accepted by Yjs' `applyUpdateV2`. */
+    fun decodeStandardV2(
+        bytes: ByteArray,
+        maxStructs: Int = MAX_DECODED_COLLECTION_SIZE,
+        maxDeleteRanges: Int = MAX_DECODED_COLLECTION_SIZE,
+    ): DocumentUpdate = decodeBoundary("Yjs update V2") {
+        requireStandardYjsUpdateInput(bytes, "V2")
+        val decoder = UpdateDecoderV2(bytes)
+        check(!decoder.usesLegacyRest) { "expected a Yjs V2 update envelope" }
+        decodeV2(decoder, maxStructs = maxStructs, maxDeleteRanges = maxDeleteRanges)
+    }
+
     fun parseMetaV2(bytes: ByteArray): UpdateMeta = decodeBoundary("Yjs update V2 metadata") {
         if (bytes.isNotEmpty() && bytes[0] != 0.toByte()) return@decodeBoundary parseMeta(bytes)
         decodeZeroPrefixedV2OrV1(
@@ -207,6 +240,16 @@ internal object UpdateCodec {
             },
             decodeV1 = { parseMeta(bytes) },
         )
+    }
+
+    fun parseStandardMetaV2(bytes: ByteArray): UpdateMeta = decodeBoundary("Yjs update V2 metadata") {
+        requireStandardYjsUpdateInput(bytes, "V2")
+        val decoder = UpdateDecoderV2(bytes)
+        check(!decoder.usesLegacyRest) { "expected a Yjs V2 update envelope" }
+        val from = linkedMapOf<Long, Long>()
+        val to = linkedMapOf<Long, Long>()
+        decodeV2(decoder, from, to)
+        UpdateMeta(from, to)
     }
 
     /**
@@ -330,7 +373,6 @@ internal object UpdateCodec {
                 deleteSet.add(Id(client, decoder.readDsClock()), decoder.readDsLen())
             }
         }
-        check(!decoder.hasRemaining()) { "V2 update has trailing rest-stream bytes" }
         return WireDocumentUpdate(structs, deleteSet)
     }
 
@@ -441,21 +483,19 @@ internal object UpdateCodec {
         decodeStandardWireV2(update).toContentIds()
     }
 
-    private fun decodeStandardWireV1(update: ByteArray): WireDocumentUpdate = decodeWireV1(
-        decoder = BinaryDecoder(update),
-        budget = DecodedUpdateBudget(MAX_DECODED_COLLECTION_SIZE, MAX_DECODED_COLLECTION_SIZE),
-    )
+    private fun decodeStandardWireV1(update: ByteArray): WireDocumentUpdate {
+        requireStandardYjsUpdateInput(update, "V1")
+        return decodeWireV1(
+            decoder = BinaryDecoder(update),
+            budget = DecodedUpdateBudget(MAX_DECODED_COLLECTION_SIZE, MAX_DECODED_COLLECTION_SIZE),
+        )
+    }
 
     private fun decodeStandardWireV2(update: ByteArray): WireDocumentUpdate {
-        if (update.isNotEmpty() && update[0] != 0.toByte()) return decodeStandardWireV1(update)
-        return decodeZeroPrefixedV2OrV1(
-            decodeV2 = {
-                decodeWireV2(
-                    decoder = UpdateDecoderV2(update),
-                    budget = DecodedUpdateBudget(MAX_DECODED_COLLECTION_SIZE, MAX_DECODED_COLLECTION_SIZE),
-                )
-            },
-            decodeV1 = { decodeStandardWireV1(update) },
+        requireStandardYjsUpdateInput(update, "V2")
+        return decodeWireV2(
+            decoder = UpdateDecoderV2(update),
+            budget = DecodedUpdateBudget(MAX_DECODED_COLLECTION_SIZE, MAX_DECODED_COLLECTION_SIZE),
         )
     }
 
@@ -534,7 +574,6 @@ internal object UpdateCodec {
             recordMetaEnd(metaTo, client, clock)
         }
         val deleteSet = readDeleteSet(decoder, budget.deleteRanges)
-        check(!decoder.hasRemaining()) { "update has trailing bytes" }
         return WireDocumentUpdate(structs, deleteSet)
     }
 
@@ -957,7 +996,7 @@ internal object UpdateCodec {
     private fun readWireContent(decoder: BinaryDecoder, ref: Int, id: Id): WireContent = when (ref) {
         contentDeletedRefNumber -> WireContent.Deleted(decoder.readVarUInt())
         contentJSONRefNumber -> WireContent.Json(
-            List(decoder.readVarUInt().toDecodedCount()) {
+            buildDecodedList(decoder.readVarUInt().toDecodedCount()) {
                 when (val json = decoder.readString()) {
                     "undefined" -> WireJsonUndefined
                     else -> parseJsonLiteral(json)
@@ -974,7 +1013,7 @@ internal object UpdateCodec {
             WireContent.Type(kind, nestedTypeName(id), nodeName)
         }
         contentAnyRefNumber -> WireContent.AnyContent(
-            List(decoder.readVarUInt().toDecodedCount()) { readLib0Any(decoder) },
+            buildDecodedList(decoder.readVarUInt().toDecodedCount()) { readLib0Any(decoder) },
         )
         contentDocRefNumber -> {
             val guid = decoder.readString()
@@ -990,7 +1029,7 @@ internal object UpdateCodec {
     private fun readWireContentV2(decoder: UpdateDecoderV2, ref: Int, id: Id): WireContent = when (ref) {
         contentDeletedRefNumber -> WireContent.Deleted(decoder.readLen())
         contentJSONRefNumber -> WireContent.Json(
-            List(decoder.readLen().toDecodedCount()) {
+            buildDecodedList(decoder.readLen().toDecodedCount()) {
                 when (val json = decoder.readString()) {
                     "undefined" -> WireJsonUndefined
                     else -> parseJsonLiteral(json)
@@ -1006,7 +1045,9 @@ internal object UpdateCodec {
             val nodeName = if (kind == RootKind.XmlElement || kind == RootKind.XmlHook) decoder.readKey() else ""
             WireContent.Type(kind, nestedTypeName(id), nodeName)
         }
-        contentAnyRefNumber -> WireContent.AnyContent(List(decoder.readLen().toDecodedCount()) { decoder.readAny() })
+        contentAnyRefNumber -> WireContent.AnyContent(
+            buildDecodedList(decoder.readLen().toDecodedCount()) { decoder.readAny() },
+        )
         contentDocRefNumber -> WireContent.Doc(
             decoder.readString(),
             decoder.readAny(),
@@ -1402,7 +1443,7 @@ private fun ItemContent.isSupportedStandardContent(isV2: Boolean): Boolean = whe
     is ItemContent.MapEntry -> value.isSupportedAnyValue(topLevel = true)
     is ItemContent.MapEntries -> values.all { value -> value.isSupportedAnyValue(topLevel = true) }
     is ItemContent.Text ->
-        kind in setOf(RootKind.Text, RootKind.XmlText) &&
+        kind in setOf(RootKind.Text, RootKind.XmlText, RootKind.XmlFragment, RootKind.XmlElement) &&
             baseAttributes.isEmpty()
     is ItemContent.TextEmbed ->
         kind in setOf(RootKind.Text, RootKind.XmlText) &&
@@ -2002,13 +2043,25 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
                     ?.resolvedKind
                 is ParentReference.Root -> null
             }
-            candidate.resolvedKind = if (parentSub != null) {
+            candidate.resolvedKind = if (
+                parentSub != null &&
+                candidate.content !is WireContent.StringContent &&
+                candidate.content !is WireContent.Embed &&
+                candidate.content !is WireContent.Format
+            ) {
                 ownerKind?.takeIf { it == RootKind.XmlHook } ?: RootKind.Map
             } else {
-                ownerKind?.takeIf { it == RootKind.XmlText }
+                ownerKind?.takeIf {
+                    it == RootKind.XmlText || it == RootKind.XmlFragment || it == RootKind.XmlElement
+                }
                     ?: candidate.content.definitiveSequenceKindOrNull()
+                    ?: if (parentSub != null) {
+                    ownerKind?.takeIf { it == RootKind.XmlHook } ?: RootKind.Map
+                } else {
+                    ownerKind?.takeIf { it == RootKind.XmlText }
                     ?: ownerKind
                     ?: candidate.content.inferRootKind(parentSub)
+                }
             }
         }
         return checkNotNull(item.resolvedKind) { "failed to resolve Yjs kind for ${item.id}" }
@@ -2189,13 +2242,25 @@ private fun List<DecodedWireItem>.toDenseStoreItems(firstClock: Long): List<Stor
             is ParentReference.Inherit -> kinds[checkNotNull(inheritedIndex)]
             is ParentReference.Root -> null
         }
-        val kind = if (parentSub != null) {
+        val kind = if (
+            parentSub != null &&
+            item.content !is WireContent.StringContent &&
+            item.content !is WireContent.Embed &&
+            item.content !is WireContent.Format
+        ) {
             ownerKind?.takeIf { it == RootKind.XmlHook } ?: RootKind.Map
         } else {
-            ownerKind?.takeIf { it == RootKind.XmlText }
+            ownerKind?.takeIf {
+                it == RootKind.XmlText || it == RootKind.XmlFragment || it == RootKind.XmlElement
+            }
                 ?: item.content.definitiveSequenceKindOrNull()
+                ?: if (parentSub != null) {
+                ownerKind?.takeIf { it == RootKind.XmlHook } ?: RootKind.Map
+            } else {
+                ownerKind?.takeIf { it == RootKind.XmlText }
                 ?: ownerKind
                 ?: item.content.inferRootKind(parentSub)
+            }
         }
         val content = item.content.toSingleItemContentOrNull(kind) ?: return null
         parents[index] = parent

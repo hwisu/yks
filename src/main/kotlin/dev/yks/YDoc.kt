@@ -297,8 +297,8 @@ public class YDoc(
         RootKind.Text -> getText(name)
         RootKind.XmlFragment -> getXmlFragment(name)
         RootKind.XmlElement -> getXmlElement(name)
-        RootKind.XmlHook,
-        RootKind.XmlText -> error("XML node type refs cannot be document roots")
+        RootKind.XmlHook -> getXmlHook(name)
+        RootKind.XmlText -> getXmlText(name)
     }
 
     public fun get(name: String, typeRef: Int): AbstractYType = get(name, rootKindFromTypeRefId(typeRef))
@@ -321,6 +321,12 @@ public class YDoc(
 
     public fun getXmlElement(name: String = "", nodeName: String = "UNDEFINED"): YXmlElementType =
         getOrCreate(name, RootKind.XmlElement) { YXmlElementType(this, name, nodeName) }
+
+    public fun getXmlHook(name: String = "", hookName: String = "UNDEFINED"): YXmlHook =
+        getOrCreate(name, RootKind.XmlHook) { YXmlHook(this, name, hookName) }
+
+    public fun getXmlText(name: String = ""): YXmlTextType =
+        getOrCreate(name, RootKind.XmlText) { YXmlTextType(this, name) }
 
     public fun createArray(): YArray = createNestedType(RootKind.Array) { nestedName -> YArray(this, nestedName) }
 
@@ -1172,7 +1178,7 @@ public class YDoc(
     public fun applyUpdate(update: ByteArray, origin: Any? = null) {
         withDocumentAccess {
             updateLimits.requireEncodedSize(update.size)
-            val decoded = UpdateCodec.decode(
+            val decoded = UpdateCodec.decodeStandard(
                 update,
                 updateLimits.maxStructs,
                 updateLimits.maxDeleteRanges,
@@ -1185,11 +1191,33 @@ public class YDoc(
         withDocumentAccess {
             updateLimits.requireEncodedSize(update.size)
             applyUpdate(
-                UpdateCodec.decodeV2(
+                UpdateCodec.decodeStandardV2(
                     update,
                     updateLimits.maxStructs,
                     updateLimits.maxDeleteRanges,
                 ),
+                origin,
+            )
+        }
+    }
+
+    /** Apply either a standard V1 update or YKS' explicit lossless envelope. */
+    public fun applyUpdateLossless(update: ByteArray, origin: Any? = null) {
+        withDocumentAccess {
+            updateLimits.requireEncodedSize(update.size)
+            applyUpdate(
+                UpdateCodec.decode(update, updateLimits.maxStructs, updateLimits.maxDeleteRanges),
+                origin,
+            )
+        }
+    }
+
+    /** Apply a standard V2/V1 update or YKS' explicit lossless envelope. */
+    public fun applyUpdateV2Lossless(update: ByteArray, origin: Any? = null) {
+        withDocumentAccess {
+            updateLimits.requireEncodedSize(update.size)
+            applyUpdate(
+                UpdateCodec.decodeV2(update, updateLimits.maxStructs, updateLimits.maxDeleteRanges),
                 origin,
             )
         }
@@ -1420,6 +1448,26 @@ public class YDoc(
                     restoredEnd.takeIf { id.clock - clock < original.length }
                 }
         return end?.let(::followRedone)
+    }
+
+    internal fun directRedone(id: Id): Id? = redoneByOriginal[id]
+
+    internal fun itemLinks(id: Id): Pair<Item?, Item?> {
+        val item = store.getStoreItem(id) ?: return null to null
+        val links = if (item.parentSub == null) {
+            store.sequenceNeighbors(item)
+        } else {
+            val order = mapItemOrder(item.parent, item.parentSub)
+            val index = order.indexOfFirst { candidate -> candidate.id == item.id }
+            order.getOrNull(index - 1) to order.getOrNull(index + 1)
+        }
+        return links.first?.toItemStruct(this) to links.second?.toItemStruct(this)
+    }
+
+    internal fun visibleItemNeighbor(id: Id, previous: Boolean): Item? {
+        var current = if (previous) itemLinks(id).first else itemLinks(id).second
+        while (current?.deleted == true) current = if (previous) current.left else current.right
+        return current
     }
 
     private fun rememberRedone(original: Id, restored: Id) {
@@ -3606,6 +3654,10 @@ public class YDoc(
         previous: StoreItem,
         right: StoreItem,
     ): Boolean {
+        // Yjs can retain malformed-but-decodable zero-length ContentString items. Its Item
+        // cleanup keeps them as separate structs, and there is no valid last clock to anchor a
+        // merge to.
+        if (previous.length == 0L || length == 0L || right.length == 0L) return false
         val previousLastId = Id(
             previous.id.client,
             checkedClockAdd(previous.id.clock, previous.length - 1, "virtual merged item last id"),
@@ -4241,7 +4293,7 @@ public class YDoc(
                     changed = true
                 }
             }
-        if (kind == RootKind.Text && changed) {
+        if (kind in setOf(RootKind.Text, RootKind.XmlText) && changed) {
             reapplyTextFormats(name)
         }
     }
@@ -4928,6 +4980,13 @@ public class YTransaction internal constructor(
     public val meta: MutableMap<Any?, Any?> get() = transaction.meta
     public val changedParents: Set<String> get() = doc.changedParentsFor(transaction)
     public val changedTypes: Set<AbstractYType> get() = changedParents.mapNotNull { doc.typeForParent(it) }.toSet()
+    public val changed: Map<AbstractYType, Set<String?>>
+        get() = transaction.changedParentSubs.mapNotNull { (parent, parentSubs) ->
+            doc.typeForParent(parent)?.let { type -> type to parentSubs.toSet() }
+        }.toMap()
+    public val subdocsAdded: Set<YDoc> get() = transaction.addedSubdocs
+    public val subdocsRemoved: Set<YDoc> get() = transaction.removedSubdocs
+    public val subdocsLoaded: Set<YDoc> get() = transaction.loadedSubdocs
     public val addedItemCount: Int get() = transaction.addedItems.logicalEventItemCount()
     public val deletedItemCount: Int get() = transaction.deletedItems.logicalEventItemCount()
     public val update: ByteArray get() = transaction.update
@@ -5218,10 +5277,15 @@ private fun ItemContent.withRemoteParentKind(kind: RootKind): ItemContent = when
         }
         this
     }
-    is ItemContent.Text -> copy(kind = kind)
-    is ItemContent.TextEmbed -> copy(kind = kind)
-    is ItemContent.TextFormat -> copy(kind = kind)
-    is ItemContent.NativeTextFormat -> copy(kind = kind)
+    is ItemContent.Text -> if (
+        kind == RootKind.Text ||
+        kind == RootKind.XmlText ||
+        kind == RootKind.XmlFragment ||
+        kind == RootKind.XmlElement
+    ) copy(kind = kind) else this
+    is ItemContent.TextEmbed -> if (kind == RootKind.Text || kind == RootKind.XmlText) copy(kind = kind) else this
+    is ItemContent.TextFormat -> if (kind == RootKind.Text || kind == RootKind.XmlText) copy(kind = kind) else this
+    is ItemContent.NativeTextFormat -> if (kind == RootKind.Text || kind == RootKind.XmlText) copy(kind = kind) else this
     is ItemContent.XmlNode -> copy(kind = kind)
     is ItemContent.XmlType -> copy(kind = kind)
     is ItemContent.Deleted -> copy(kind = kind)
@@ -5394,6 +5458,7 @@ public class YTransactionEvent internal constructor(
     public val subdocsRemoved: Set<YDoc> = emptySet(),
     public val subdocsLoaded: Set<YDoc> = emptySet(),
 ) {
+    private val itemViewCache = mutableMapOf<Pair<Id, Boolean>, ItemStruct>()
     private val eagerUpdate = update
     private val eagerInsertSet = insertSet
     private val eagerDeleteIdSet = deleteIdSet
@@ -5412,11 +5477,11 @@ public class YTransactionEvent internal constructor(
         eagerDeleteIdSet ?: deleteSet.toIdSet()
     }
     public val addedStructs: List<ItemStruct> by lazy(LazyThreadSafetyMode.NONE) {
-        eagerAddedStructs ?: eventItems?.added.orEmpty().map { item -> item.toItemStruct(doc) }
+        eagerAddedStructs ?: eventItems?.added.orEmpty().map { item -> itemView(item, deleted = false) }
     }
     public val deletedStructs: List<ItemStruct> by lazy(LazyThreadSafetyMode.NONE) {
         eagerDeletedStructs
-            ?: eventItems?.deleted.orEmpty().map { item -> item.copy(deleted = true).toItemStruct(doc) }
+            ?: eventItems?.deleted.orEmpty().map { item -> itemView(item, deleted = true) }
     }
     internal val addedItems: List<StoreItem> by lazy(LazyThreadSafetyMode.NONE) {
         eagerAddedItems ?: eventItems?.added.orEmpty()
@@ -5443,6 +5508,11 @@ public class YTransactionEvent internal constructor(
     public fun deletes(client: Long, clock: Long): Boolean = deletes(Id(client, clock))
 
     public fun deletes(struct: AbstractStruct): Boolean = deletes(struct.id)
+
+    internal fun itemView(item: StoreItem, deleted: Boolean): ItemStruct =
+        itemViewCache.getOrPut(item.id to deleted) {
+            (if (item.deleted == deleted) item else item.copy(deleted = deleted)).toItemStruct(doc)
+        }
 
     internal fun subdocEvent(): YSubdocEvent? {
         if (subdocsAdded.isEmpty() && subdocsRemoved.isEmpty() && subdocsLoaded.isEmpty()) return null

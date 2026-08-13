@@ -7,9 +7,15 @@ public data class UpdateMeta(
 )
 
 public fun parseUpdateMeta(update: ByteArray): UpdateMeta =
-    UpdateCodec.parseMeta(update)
+    UpdateCodec.parseStandardMeta(update)
 
 public fun parseUpdateMetaV2(update: ByteArray): UpdateMeta =
+    UpdateCodec.parseStandardMetaV2(update)
+
+public fun parseUpdateMetaLossless(update: ByteArray): UpdateMeta =
+    UpdateCodec.parseMeta(update)
+
+public fun parseUpdateMetaV2Lossless(update: ByteArray): UpdateMeta =
     UpdateCodec.parseMetaV2(update)
 
 internal fun DocumentUpdate.toUpdateMeta(): UpdateMeta {

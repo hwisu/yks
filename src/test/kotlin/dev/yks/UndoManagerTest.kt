@@ -472,8 +472,8 @@ class UndoManagerTest {
     fun undoSkipsNoopStackItemsUntilChangeIsPerformedLikeUpstream() {
         val doc = YDoc(clientId = 1)
         val doc2 = YDoc(clientId = 2)
-        doc.observeUpdatesLossless { update, _ -> doc2.applyUpdate(update) }
-        doc2.observeUpdatesLossless { update, _ -> doc.applyUpdate(update) }
+        doc.observeUpdatesLossless { update, _ -> doc2.applyUpdateLossless(update) }
+        doc2.observeUpdatesLossless { update, _ -> doc.applyUpdateLossless(update) }
         val array = doc.getArray("array")
         val array2 = doc2.getArray("array")
         val map = doc.createMap()
@@ -522,7 +522,7 @@ class UndoManagerTest {
         child.set("leaf", "value")
         parent.set("child", child)
         root.push(parent)
-        remote.applyUpdate(local.encodeStateAsUpdateLossless(), origin = "sync")
+        remote.applyUpdateLossless(local.encodeStateAsUpdateLossless(), origin = "sync")
         val undoManager = UndoManager(
             root,
             UndoManagerOptions(captureTimeoutMillis = 0, trackedOrigins = setOf("local")),
@@ -531,9 +531,9 @@ class UndoManagerTest {
         local.transact(origin = "local") {
             parent.delete("child")
         }
-        remote.applyUpdate(local.encodeStateAsUpdateLossless(), origin = "sync")
+        remote.applyUpdateLossless(local.encodeStateAsUpdateLossless(), origin = "sync")
         remoteRoot.delete(0)
-        local.applyUpdate(remote.encodeStateAsUpdateLossless(), origin = "sync")
+        local.applyUpdateLossless(remote.encodeStateAsUpdateLossless(), origin = "sync")
 
         assertEquals(emptyList(), root.toList())
         assertTrue(undoManager.canUndo)

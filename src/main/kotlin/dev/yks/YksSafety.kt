@@ -40,20 +40,14 @@ public class YksConcurrentAccessException(
 
 /** Immutable, per-document limits applied before integrating an update. */
 public data class YUpdateLimits(
-    val maxEncodedBytes: Int = 16 * 1024 * 1024,
-    val maxStructs: Int = 50_000,
-    val maxDeleteRanges: Int = 50_000,
+    val maxEncodedBytes: Int = Int.MAX_VALUE,
+    val maxStructs: Int = Int.MAX_VALUE,
+    val maxDeleteRanges: Int = Int.MAX_VALUE,
 ) {
     init {
         require(maxEncodedBytes > 0) { "maxEncodedBytes must be positive" }
         require(maxStructs > 0) { "maxStructs must be positive" }
-        require(maxStructs <= MAX_DECODED_COLLECTION_SIZE) {
-            "maxStructs cannot exceed decoder maximum $MAX_DECODED_COLLECTION_SIZE"
-        }
         require(maxDeleteRanges > 0) { "maxDeleteRanges must be positive" }
-        require(maxDeleteRanges <= MAX_DECODED_COLLECTION_SIZE) {
-            "maxDeleteRanges cannot exceed decoder maximum $MAX_DECODED_COLLECTION_SIZE"
-        }
     }
 
     internal fun requireEncodedSize(size: Int) {

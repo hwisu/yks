@@ -114,12 +114,9 @@ class YksSafetyTest {
         assertFailsWith<IllegalArgumentException> { YUpdateLimits(maxEncodedBytes = 0) }
         assertFailsWith<IllegalArgumentException> { YUpdateLimits(maxStructs = 0) }
         assertFailsWith<IllegalArgumentException> { YUpdateLimits(maxDeleteRanges = 0) }
-        assertFailsWith<IllegalArgumentException> {
-            YUpdateLimits(maxStructs = MAX_DECODED_COLLECTION_SIZE + 1)
-        }
-        assertFailsWith<IllegalArgumentException> {
-            YUpdateLimits(maxDeleteRanges = MAX_DECODED_COLLECTION_SIZE + 1)
-        }
+        assertEquals(Int.MAX_VALUE, YUpdateLimits.DEFAULT.maxEncodedBytes)
+        assertEquals(Int.MAX_VALUE, YUpdateLimits.DEFAULT.maxStructs)
+        assertEquals(Int.MAX_VALUE, YUpdateLimits.DEFAULT.maxDeleteRanges)
     }
 
     @Test

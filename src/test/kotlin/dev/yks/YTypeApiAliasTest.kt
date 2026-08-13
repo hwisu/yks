@@ -260,7 +260,7 @@ class YTypeApiAliasTest {
         assertEquals(xml.toDeltaDeep(), xmlCopy.toDeltaDeep())
 
         val remote = YDoc(clientId = 3)
-        remote.applyUpdate(target.encodeStateAsUpdateLossless())
+        remote.applyUpdateLossless(target.encodeStateAsUpdateLossless())
 
         assertEquals(arrayCopy.toDeltaDeep(), remote.getArray("items").toDeltaDeep())
         assertEquals(textCopy.toDeltaDeep(), remote.getText("body").toDeltaDeep())
@@ -289,7 +289,7 @@ class YTypeApiAliasTest {
         insertedText.insert(insertedText.length, "!")
         insertedXml.push(YXmlText("tail"))
 
-        target.applyUpdate(source.encodeStateAsUpdateLossless())
+        target.applyUpdateLossless(source.encodeStateAsUpdateLossless())
         val remoteRoot = target.getMap("root")
 
         assertEquals(mapOf("after" to "insert", "number" to 1L, "string" to "hello"), (remoteRoot.getAttr("m1") as YMap).toMap())

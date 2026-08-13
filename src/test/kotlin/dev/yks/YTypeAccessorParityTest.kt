@@ -49,7 +49,7 @@ class YTypeAccessorParityTest {
         assertEquals("xml-value", xml.setAttr("", "xml-value"))
         typeMapSet(text, "", "helper-value")
 
-        right.applyUpdate(left.encodeStateAsUpdateLossless())
+        right.applyUpdateLossless(left.encodeStateAsUpdateLossless())
 
         assertEquals("map-value", map.get(""))
         assertEquals("helper-value", text.getAttr(""))
@@ -112,7 +112,7 @@ class YTypeAccessorParityTest {
         assertEquals(listOf("lang"), xml.attrEntries().map { it.key })
 
         val right = YDoc(clientId = 2)
-        right.applyUpdate(left.encodeStateAsUpdateLossless())
+        right.applyUpdateLossless(left.encodeStateAsUpdateLossless())
 
         assertEquals(42L, right.getText("text").getAttr("test"))
         assertEquals("list", right.getArray("array").getAttr("role"))

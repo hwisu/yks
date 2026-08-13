@@ -8,14 +8,14 @@ public open class AbstractStruct(
     private var initialLength: Long,
 ) {
     init {
-        require(initialLength > 0) { "struct length must be positive" }
+        require(initialLength >= 0) { "struct length must be non-negative" }
     }
 
     public open val id: Id get() = initialId
     public open var length: Long
         get() = initialLength
         set(value) {
-            require(value > 0) { "struct length must be positive" }
+            require(value >= 0) { "struct length must be non-negative" }
             initialLength = value
         }
     public open val deleted: Boolean get() = false
@@ -84,7 +84,38 @@ public data class ItemStruct(
     val content: AbstractContent,
     val countable: Boolean = content.isCountable(),
 ) : AbstractStruct(id, length) {
+    @Transient
+    internal var ownerDoc: YDoc? = null
+
     override val isItem: Boolean get() = true
+
+    /** Current structural neighbor, matching Yjs Item.left. */
+    public val left: Item? get() = ownerDoc?.itemLinks(id)?.first
+
+    /** Current structural neighbor, matching Yjs Item.right. */
+    public val right: Item? get() = ownerDoc?.itemLinks(id)?.second
+
+    /** Previous non-deleted structural neighbor. */
+    public val prev: Item? get() = ownerDoc?.visibleItemNeighbor(id, previous = true)
+
+    /** Next non-deleted structural neighbor. */
+    public val next: Item? get() = ownerDoc?.visibleItemNeighbor(id, previous = false)
+
+    public val lastId: Id
+        get() {
+            require(length > 0) { "zero-length malformed Item has no non-negative lastId" }
+            return Id(id.client, checkedClockAdd(id.clock, length - 1, "item last id"))
+        }
+
+    public val redone: Id? get() = ownerDoc?.directRedone(id)
+
+    public var keep: Boolean
+        get() = ownerDoc?.isItemKept(id) == true
+        set(value) {
+            checkNotNull(ownerDoc) { "detached Item cannot change keep" }.setItemKeep(id, value)
+        }
+
+    public val parentType: AbstractYType? get() = ownerDoc?.typeForParent(parent)
 }
 
 public typealias Item = ItemStruct
@@ -535,4 +566,4 @@ internal fun StoreItem.toItemStruct(doc: YDoc): ItemStruct =
         kind = content.kind,
         content = content.toContent(doc),
         countable = countable,
-    )
+    ).also { item -> item.ownerDoc = doc }

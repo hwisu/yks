@@ -5,6 +5,7 @@ import java.nio.file.Path
 import kotlin.io.path.absolutePathString
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
@@ -88,6 +89,50 @@ class YjsV1InteropTest {
         assertEquals("Widget", hook.hookName)
         assertEquals(mapOf("x" to 1L, "nested" to mapOf("ok" to true)), hook.toJSON())
         assertEquals("[object Object]", doc.getXmlFragment("xml").toString())
+    }
+
+    @Test
+    fun appliesRootXmlTextProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 2, gc = false)
+
+        applyUpdate(doc, fixture("xml-root-text-v1"))
+        val text = doc.getXmlText("root-xml-text")
+
+        assertEquals(
+            YTextDelta().insert("hello", mapOf("strong" to mapOf("level" to "1"))),
+            text.toDelta(),
+        )
+        assertSame(text, doc.get("root-xml-text", YXmlTextRefID))
+    }
+
+    @Test
+    fun appliesRootXmlHookProducedByUpstreamYjs() {
+        val doc = YDoc(clientId = 2, gc = false)
+
+        applyUpdate(doc, fixture("xml-root-hook-v1"))
+        val hook = doc.getXmlHook("root-xml-hook", "Widget")
+
+        assertEquals("Widget", hook.hookName)
+        assertEquals(mapOf("count" to 1L, "nested" to mapOf("ok" to true)), hook.toJSON())
+        assertSame(hook, doc.get("root-xml-hook", YXmlHookRefID))
+    }
+
+    @Test
+    fun upstreamYjsAppliesRootXmlTextAndHookAuthoredByKotlin() {
+        val textDoc = YDoc(clientId = 1, gc = false)
+        textDoc.getXmlText("root-xml-text").insert(
+            0,
+            "hello",
+            mapOf("strong" to mapOf("level" to "1")),
+        )
+        val hookDoc = YDoc(clientId = 1, gc = false)
+        hookDoc.getXmlHook("root-xml-hook", "Widget").apply {
+            set("count", 1)
+            set("nested", mapOf("ok" to true))
+        }
+
+        assertUpstreamAppliesUpdate(textDoc.encodeStateAsUpdate(), "xml-root-text")
+        assertUpstreamAppliesUpdate(hookDoc.encodeStateAsUpdate(), "xml-root-hook")
     }
 
     @Test

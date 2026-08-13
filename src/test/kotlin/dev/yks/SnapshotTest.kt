@@ -255,6 +255,20 @@ class SnapshotTest {
     }
 
     @Test
+    fun snapshotUpdateChecksKeepStandardAndLosslessWireBoundariesSeparate() {
+        val doc = YDoc(clientId = 1, gc = false)
+        doc.getXmlFragment("xml").push(YXmlElement("p"))
+        val privateV1 = doc.encodeStateAsUpdateLossless()
+        val privateV2 = doc.encodeStateAsUpdateV2Lossless()
+        val snap = snapshot(doc)
+
+        assertFailsWith<YksDecodingException> { snapshotContainsUpdate(snap, privateV1) }
+        assertFailsWith<YksDecodingException> { snapshotContainsUpdateV2(snap, privateV2) }
+        assertTrue(snapshotContainsUpdateLossless(snap, privateV1))
+        assertTrue(snapshotContainsUpdateV2Lossless(snap, privateV2))
+    }
+
+    @Test
     fun createDocFromSnapshotRestoresDependentChangesFromEitherReplica() {
         val left = YDoc(clientId = 1, gc = false)
         val right = YDoc(clientId = 2, gc = false)

@@ -2,6 +2,8 @@ import fs from 'node:fs'
 
 import * as Y from 'yjs'
 
+import { installedYjsVersion } from './assert-yjs-version.mjs'
+
 import {
   createHelloDocument,
   describeDocument,
@@ -15,7 +17,7 @@ const doc = createHelloDocument()
 const update = Y.encodeStateAsUpdate(doc)
 const expected = {
   fixture: 'hello-text-v1',
-  yjsVersion: '13.6.31',
+  yjsVersion: installedYjsVersion,
   clientId: 1,
   updateBase64: Buffer.from(update).toString('base64'),
   ...describeDocument(doc),
@@ -314,6 +316,19 @@ const articleText = new Y.XmlText()
 article.insert(0, [articleText])
 articleText.insert(0, 'hi')
 writeFixture('xml-root-element-v1', Y.encodeStateAsUpdate(rootXmlElement))
+
+const rootXmlText = new Y.Doc({ gc: false })
+rootXmlText.clientID = 1
+const rootXmlTextType = rootXmlText.get('root-xml-text', Y.XmlText)
+rootXmlTextType.insert(0, 'hello', { strong: { level: '1' } })
+writeFixture('xml-root-text-v1', Y.encodeStateAsUpdate(rootXmlText))
+
+const rootXmlHook = new Y.Doc({ gc: false })
+rootXmlHook.clientID = 1
+const rootXmlHookType = rootXmlHook.get('root-xml-hook', Y.XmlHook)
+rootXmlHookType.set('count', 1)
+rootXmlHookType.set('nested', { ok: true })
+writeFixture('xml-root-hook-v1', Y.encodeStateAsUpdate(rootXmlHook))
 
 const subdocMap = new Y.Doc({ gc: false })
 subdocMap.clientID = 1

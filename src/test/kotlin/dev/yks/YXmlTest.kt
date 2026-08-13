@@ -9,6 +9,41 @@ import kotlin.test.assertTrue
 
 class YXmlTest {
     @Test
+    fun toDOMBuildsW3cNodesWithHooksAndBindingAssociations() {
+        val doc = YDoc(clientId = 1)
+        val fragment = doc.getXmlFragment("xml")
+        val section = doc.createXmlElement("section").also { element ->
+            element.setAttribute("class", "intro")
+            element.setAttribute("ignored-number", 7)
+        }
+        val text = doc.createXmlText().also { value ->
+            value.insert(0, "hello", mapOf("strong" to emptyMap<String, Any?>()))
+        }
+        val hook = doc.createXmlHook("Widget")
+        section.push(text)
+        fragment.push(section, hook)
+        val domDocument = createXmlDomDocument()
+        val associations = mutableListOf<Pair<String, AbstractYType>>()
+
+        val dom = fragment.toDOM(
+            document = domDocument,
+            hooks = mapOf("Widget" to YXmlDomHook { domDocument.createElement("custom-widget") }),
+            binding = YXmlDomBinding { node, type -> associations.add(node.nodeName to type) },
+        )
+
+        assertEquals(org.w3c.dom.Node.DOCUMENT_FRAGMENT_NODE, dom.nodeType)
+        val sectionDom = assertIs<org.w3c.dom.Element>(dom.firstChild)
+        assertEquals("section", sectionDom.nodeName)
+        assertEquals("intro", sectionDom.getAttribute("class"))
+        assertFalse(sectionDom.hasAttribute("ignored-number"))
+        assertEquals("<strong>hello</strong>", sectionDom.firstChild.nodeValue)
+        val hookDom = assertIs<org.w3c.dom.Element>(sectionDom.nextSibling)
+        assertEquals("custom-widget", hookDom.nodeName)
+        assertEquals("Widget", hookDom.getAttribute("data-yjs-hook"))
+        assertEquals(listOf(fragment, section, text, hook).toSet(), associations.map { it.second }.toSet())
+    }
+
+    @Test
     fun xmlFragmentRendersElementsTextAndAttributes() {
         val doc = YDoc(clientId = 1)
         val fragment = doc.getXmlFragment("xml")
@@ -251,11 +286,11 @@ class YXmlTest {
         paragraph.push(listOf(YXmlText("hello")))
         fragment.push(listOf(paragraph))
 
-        right.applyUpdate(left.encodeStateAsUpdateLossless())
+        right.applyUpdateLossless(left.encodeStateAsUpdateLossless())
         assertEquals(left.getXmlFragment("xml").toString(), right.getXmlFragment("xml").toString())
 
         left.getXmlFragment("xml").push(listOf(YXmlElement("br")))
-        right.applyUpdate(left.encodeStateAsUpdateLossless(right.encodeStateVector()))
+        right.applyUpdateLossless(left.encodeStateAsUpdateLossless(right.encodeStateVector()))
 
         assertEquals("<p id=\"one\">hello</p><br></br>", right.getXmlFragment("xml").toString())
         assertEquals(left.toJson(), right.toJson())
@@ -334,7 +369,7 @@ class YXmlTest {
         )
 
         fragment.applyDelta(delta)
-        val remote = createDocFromUpdate(doc.encodeStateAsUpdateLossless())
+        val remote = createDocFromUpdateLossless(doc.encodeStateAsUpdateLossless())
 
         assertEquals("<em><strong>A</strong></em><em>B</em><em><strong>C</strong></em>", fragment.toString())
         assertEquals(delta, fragment.toDelta())
@@ -392,7 +427,7 @@ class YXmlTest {
 
         fragment.push(YXmlElement("b"), YXmlElement("c"))
         fragment.unshift(listOf(YXmlElement("a")))
-        right.applyUpdate(left.encodeStateAsUpdateLossless())
+        right.applyUpdateLossless(left.encodeStateAsUpdateLossless())
 
         assertEquals("<a></a><b></b><c></c>", fragment.toString())
         assertEquals(fragment.toString(), right.getXmlFragment("xml").toString())
@@ -423,7 +458,7 @@ class YXmlTest {
 
         fragment.applyDelta(listOf(YArrayDeltaOp(insert = listOf(YXmlElement("a"), YXmlElement("b")))))
         fragment.applyDelta(listOf(YArrayDeltaOp(retain = 1), YArrayDeltaOp(insert = listOf("tail"))))
-        right.applyUpdate(left.encodeStateAsUpdateLossless())
+        right.applyUpdateLossless(left.encodeStateAsUpdateLossless())
 
         assertEquals("<a></a>tail<b></b>", right.getXmlFragment("xml").toString())
 
@@ -503,7 +538,7 @@ class YXmlTest {
         source.getXmlFragment("xml").push(listOf(YXmlElement("root").also { it.push(listOf(YXmlText("x"))) }))
 
         val clone = cloneDoc(source)
-        val fromUpdate = createDocFromUpdate(source.encodeStateAsUpdateLossless())
+        val fromUpdate = createDocFromUpdateLossless(source.encodeStateAsUpdateLossless())
 
         assertEquals(source.toJson(), clone.toJson())
         assertEquals(emptyMap(), fromUpdate.toJson())

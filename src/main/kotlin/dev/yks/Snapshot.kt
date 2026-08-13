@@ -2,6 +2,7 @@ package dev.yks
 
 public data class SnapshotRootType(
     val kind: RootKind,
+    /** Node name for XmlElement, or hook name for XmlHook. */
     val xmlElementNodeName: String? = null,
 )
 
@@ -64,7 +65,7 @@ private fun identitySnapshotSet(): MutableSet<Snapshot> =
 public fun createDocFromSnapshot(originDoc: YDoc, snapshot: Snapshot, newDoc: YDoc = YDoc()): YDoc {
     check(!originDoc.gc) { "Garbage-collection must be disabled in `originDoc`!" }
     newDoc.preMaterializeRoots(snapshot.roots)
-    newDoc.applyUpdate(originDoc.encodeSnapshotAsUpdate(snapshot), origin = "snapshot")
+    newDoc.applyUpdateLossless(originDoc.encodeSnapshotAsUpdate(snapshot), origin = "snapshot")
     return newDoc
 }
 
@@ -103,9 +104,15 @@ private fun decodeSnapshotWithDecoder(decoder: IdSetDecoderV1): Snapshot {
 }
 
 public fun snapshotContainsUpdate(snapshot: Snapshot, update: ByteArray): Boolean =
-    snapshotContainsDecodedUpdate(snapshot, UpdateCodec.decode(update))
+    snapshotContainsDecodedUpdate(snapshot, UpdateCodec.decodeStandard(update))
 
 public fun snapshotContainsUpdateV2(snapshot: Snapshot, update: ByteArray): Boolean =
+    snapshotContainsDecodedUpdate(snapshot, UpdateCodec.decodeStandardV2(update))
+
+public fun snapshotContainsUpdateLossless(snapshot: Snapshot, update: ByteArray): Boolean =
+    snapshotContainsDecodedUpdate(snapshot, UpdateCodec.decode(update))
+
+public fun snapshotContainsUpdateV2Lossless(snapshot: Snapshot, update: ByteArray): Boolean =
     snapshotContainsDecodedUpdate(snapshot, UpdateCodec.decodeV2(update))
 
 private fun snapshotContainsDecodedUpdate(snapshot: Snapshot, decoded: DocumentUpdate): Boolean {

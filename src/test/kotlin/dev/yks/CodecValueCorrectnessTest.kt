@@ -130,7 +130,7 @@ class CodecValueCorrectnessTest {
         doc.getText("body").insert(0, "x", mapOf("__yks_text_format" to true))
 
         val update = encodeStateAsUpdate(doc)
-        val target = createDocFromUpdate(update)
+        val target = createDocFromUpdateLossless(update)
 
         assertEquals(
             YTextDelta().insert("x", mapOf("__yks_text_format" to true)),
@@ -148,7 +148,7 @@ class CodecValueCorrectnessTest {
         val update = encodeStateAsUpdateLossless(parent)
         assertTrue(update.hasYksMagic())
 
-        val target = createDocFromUpdate(update)
+        val target = createDocFromUpdateLossless(update)
         assertEquals(setOf("child"), target.getSubdocGuids())
         val nested = (target.getArray("items").get(0) as List<*>).single()
         assertIs<YDoc>(nested)
@@ -199,7 +199,7 @@ class CodecValueCorrectnessTest {
         assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdate(rangeDoc) }
         val rangeRelay = encodeStateAsUpdateLossless(rangeDoc)
         assertTrue(rangeRelay.hasYksMagic())
-        assertEquals(unsafe, decodeUpdate(rangeRelay).structs.single().length)
+        assertEquals(unsafe, decodeUpdateLossless(rangeRelay).structs.single().length)
 
         val deleteSet = DeleteSet.empty().also { set -> set.add(Id(1, unsafe), 1) }
         assertFailsWith<UnsupportedYjsStandardUpdateException> {
@@ -216,7 +216,7 @@ class CodecValueCorrectnessTest {
         assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdate(valueDoc) }
         val valueUpdate = encodeStateAsUpdateLossless(valueDoc)
         assertTrue(valueUpdate.hasYksMagic())
-        assertEquals(Long.MAX_VALUE, createDocFromUpdate(valueUpdate).getText("body").toDelta().ops.single().insert)
+        assertEquals(Long.MAX_VALUE, createDocFromUpdateLossless(valueUpdate).getText("body").toDelta().ops.single().insert)
     }
 
     private fun contentDeletedUpdate(length: Long): ByteArray = BinaryEncoder().also { encoder ->
