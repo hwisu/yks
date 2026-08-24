@@ -2041,6 +2041,17 @@ public open class YText internal constructor(
     }
 
     private fun findNativeTextPosition(index: Int): NativeTextCursor {
+        // Without a live format marker the walk below only counts visible units, so the indexed
+        // sequence can jump straight to the stopping position instead of stepping struct by struct.
+        if (!doc.hasVisibleNativeTextFormat(name)) {
+            val seeked = doc.sequenceCursorAtVisiblePrefix(name, kind, index.toLong())
+            require(seeked != null) { "text format index is out of bounds" }
+            return NativeTextCursor(
+                left = seeked.previous,
+                sequence = seeked,
+                currentAttributes = linkedMapOf(),
+            )
+        }
         var remaining = index.toLong()
         val sequence = doc.sequenceCursorAtFirstUndeleted(name)
         val cursor = NativeTextCursor(
