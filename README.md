@@ -49,15 +49,22 @@ val source = YDoc(clientId = 1, gc = false)
 source.getText("body").insert(0, "hello")
 
 val target = YDoc(clientId = 2, gc = false)
-applyUpdate(target, encodeStateAsUpdate(source))
+val update = encodeStateAsUpdate(source, target.encodeStateVector())
+applyUpdate(target, update)
 check(target.getText("body").toString() == "hello")
 ```
 
 V2 연결에는 `encodeStateAsUpdateV2`와 `applyUpdateV2`를 사용합니다.
 
+## 운영 시 주의사항
+
+- `YDoc`은 기본적으로 단일 스레드에 귀속됩니다. coroutine/server에서는 호출을 직렬화하고 `YThreadAccessPolicy.EXTERNALLY_SERIALIZED`를 사용하세요.
+- 신뢰하지 않는 업데이트에는 애플리케이션 크기에 맞는 `YUpdateLimits`를 설정하세요. 기본값은 호환성을 위해 별도 상한을 두지 않습니다.
+- JavaScript Yjs와 통신할 때는 표준 API만 사용하세요. `*Lossless` 바이트는 YKS 피어 전용입니다.
+
 ## 호환성
 
-일반 API는 실제 Yjs V1/V2 바이트만 반환하며 Kotlin 전용 상태는 거절합니다. `*Lossless` API는 JavaScript Yjs가 읽지 못하는 `YKS` envelope를 쓸 수 있으므로 YKS 피어 사이에서만 사용하세요. 원격 root는 wire에 타입 정보가 없어 typed getter나 `YRootSchemaRegistry`가 필요할 수 있습니다. XML `toDOM`은 W3C DOM이며 provider·editor binding은 별도 범위입니다. 자세한 내용은 [호환성 문서](YJS_COMPATIBILITY.md)를 참고하세요.
+지원 버전과 wire 경계는 [호환성 문서](YJS_COMPATIBILITY.md)를 참고하세요. 변경 내역은 [CHANGELOG](CHANGELOG.md)에 기록합니다.
 
 ## 빌드와 검증
 
