@@ -19,6 +19,43 @@ private val docOnlyEventNames = setOf(
     "beforeAllTransactions",
 )
 
+private inline fun <T> List<T>.allAdjacentPairs(predicate: (T, T) -> Boolean): Boolean {
+    for (index in 1 until size) {
+        if (!predicate(this[index - 1], this[index])) return false
+    }
+    return true
+}
+
+private inline fun <T> List<T>.forEachAdjacentPair(action: (T, T) -> Unit) {
+    for (index in 1 until size) action(this[index - 1], this[index])
+}
+
+private class ParentKeySet {
+    // A String value is the singleton case; only parents with multiple changed keys allocate a set.
+    private val byParent = linkedMapOf<String, Any>()
+
+    fun add(parent: String, key: String) {
+        when (val keys = byParent[parent]) {
+            null -> byParent[parent] = key
+            is String -> if (keys != key) byParent[parent] = linkedSetOf(keys, key)
+            else -> {
+                @Suppress("UNCHECKED_CAST")
+                (keys as MutableSet<String>).add(key)
+            }
+        }
+    }
+
+    fun forEach(action: (String, String) -> Unit) {
+        byParent.forEach { (parent, keys) ->
+            if (keys is String) {
+                action(parent, keys)
+            } else {
+                (keys as Set<*>).forEach { key -> action(parent, key as String) }
+            }
+        }
+    }
+}
+
 internal data class YTransactionMutationSummary(
     val deletedItems: List<StoreItem>,
     val changedParentTypes: Set<AbstractYType>,
@@ -210,9 +247,11 @@ public class YDoc(
         val keptItems: Set<Id>,
         val nestedTypeCounter: Long,
         val cachedFullV1Update: CachedFullUpdate?,
+        val cachedFullV2Update: CachedFullUpdate?,
         val typeStates: Map<AbstractYType, YTypeMutableState>,
     )
     private var cachedFullV1Update: CachedFullUpdate? = null
+    private var cachedFullV2Update: CachedFullUpdate? = null
     private val rootTypes = linkedMapOf<String, AbstractYType>()
     private val unopenedRootEntries = linkedMapOf<String, YUnopenedRoot>()
     private val snapshotInterestedTypes = linkedMapOf<String, AbstractYType>()
@@ -898,6 +937,9 @@ public class YDoc(
             cachedFullV1Update = cachedFullV1Update?.let { cached ->
                 cached.copy(parentKinds = cached.parentKinds.toMap(), bytes = cached.bytes.copyOf())
             },
+            cachedFullV2Update = cachedFullV2Update?.let { cached ->
+                cached.copy(parentKinds = cached.parentKinds.toMap(), bytes = cached.bytes.copyOf())
+            },
             typeStates = typeStates,
         )
     }
@@ -955,6 +997,9 @@ public class YDoc(
         }
         nestedTypeCounter = snapshot.nestedTypeCounter
         cachedFullV1Update = snapshot.cachedFullV1Update?.let { cached ->
+            cached.copy(parentKinds = cached.parentKinds.toMap(), bytes = cached.bytes.copyOf())
+        }
+        cachedFullV2Update = snapshot.cachedFullV2Update?.let { cached ->
             cached.copy(parentKinds = cached.parentKinds.toMap(), bytes = cached.bytes.copyOf())
         }
         store.restoreSnapshot(snapshot.store)
@@ -1154,6 +1199,13 @@ public class YDoc(
     }
 
     internal fun encodeStateAsUpdateV2(encodedStateVector: ByteArray = ByteArray(0)): ByteArray = withDocumentAccess {
+        val cacheEligible = encodedStateVector.isEmpty() && pendingItems.isEmpty() && pendingDeletes.isEmpty
+        val parentKinds = if (cacheEligible) store.parentKinds() else emptyMap()
+        if (cacheEligible) {
+            cachedFullV2Update
+                ?.takeIf { cached -> cached.storeVersion == store.version && cached.parentKinds == parentKinds }
+                ?.let { cached -> return@withDocumentAccess cached.bytes.copyOf() }
+        }
         val stateVector = decodeStateVector(encodedStateVector)
         val updates = mutableListOf(
             UpdateCodec.encodeV2(
@@ -1174,7 +1226,11 @@ public class YDoc(
             ?.let(UpdateCodec::decode)
             ?.let(UpdateCodec::encodeV2)
             ?.let(updates::add)
-        if (updates.size == 1) updates.single() else mergeUpdatesV2(updates)
+        val encoded = if (updates.size == 1) updates.single() else mergeUpdatesV2(updates)
+        if (cacheEligible) {
+            cachedFullV2Update = CachedFullUpdate(store.version, parentKinds.toMap(), encoded.copyOf())
+        }
+        encoded
     }
 
     internal fun encodeStateAsUpdateV2Lossless(encodedStateVector: ByteArray = ByteArray(0)): ByteArray = withDocumentAccess {
@@ -1783,8 +1839,8 @@ public class YDoc(
         is YValue.LongNumber,
         is YValue.DoubleNumber,
         is YValue.BigIntNumber,
-        is YValue.StringValue,
-        is YValue.BinaryValue -> value as YValue
+        is YValue.StringValue -> value as YValue
+        is YValue.BinaryValue -> value.copyForStorage()
         is Boolean -> YValue.Bool(value)
         is Byte -> YValue.LongNumber(value.toLong())
         is Short -> YValue.LongNumber(value.toLong())
@@ -1794,7 +1850,7 @@ public class YDoc(
         is Float -> YValue.DoubleNumber(value.toDouble())
         is Double -> YValue.DoubleNumber(value)
         is String -> YValue.StringValue(value)
-        is ByteArray -> YValue.BinaryValue(value.copyOf())
+        is ByteArray -> YValue.BinaryValue(value)
         else -> storeValue(value, parent)
     }
 
@@ -1877,7 +1933,7 @@ public class YDoc(
     private fun storeAnyValue(value: Any?): YValue = when (value) {
         null -> YValue.Null
         is YValue.TypeRef -> registerNestedTypeRefValue(value)
-        is YValue -> value
+        is YValue -> value.copyForStorage()
         is AbstractYType -> registerNestedTypeValue(value).let { nested ->
             YValue.TypeRef(nested.kind, nested.name)
         }
@@ -1891,7 +1947,7 @@ public class YDoc(
         is Float -> YValue.DoubleNumber(value.toDouble())
         is Double -> YValue.DoubleNumber(value)
         is String -> YValue.StringValue(value)
-        is ByteArray -> YValue.BinaryValue(value.copyOf())
+        is ByteArray -> YValue.BinaryValue(value)
         is List<*> -> YValue.ListValue(value.map(::storeAnyValue))
         is Array<*> -> YValue.ListValue(value.map(::storeAnyValue))
         is Map<*, *> -> YValue.MapValue(value.entries.associate { (key, nested) ->
@@ -2128,7 +2184,7 @@ public class YDoc(
     private fun buildMapItemOrder(parent: String, key: String): List<StoreItem> {
         val entries = store.mapEntries(parent, key)
         if (entries.size < 2) return entries
-        if (entries.zipWithNext().all { (left, right) -> right.origin == left.lastId }) {
+        if (entries.allAdjacentPairs { left, right -> right.origin == left.lastId }) {
             return entries
         }
         val sharedOrigin = entries.first().origin
@@ -2789,7 +2845,7 @@ public class YDoc(
             .distinct()
             .forEach { (parent, parentSub) ->
             val logicalItems = mapItemOrder(parent, parentSub)
-            logicalItems.zipWithNext().forEach { (left, right) ->
+            logicalItems.forEachAdjacentPair { left, right ->
                 val leftWillBeDeleted = !left.deleted && deleteSet.contains(left.id)
                 val rightWillBeDeleted = !right.deleted && deleteSet.contains(right.id)
                 if (
@@ -2855,7 +2911,7 @@ public class YDoc(
     private fun integrateRemote(items: List<StoreItem>) {
         val storeInitiallyEmpty = currentTransaction?.beforeState?.isEmpty() == true
         val textFormatParents = linkedSetOf<String>()
-        val changedMapKeys = linkedSetOf<Pair<String, String>>()
+        val changedMapKeys = ParentKeySet()
         store.prepareBulkSequenceIntegration(items)
         if (pendingItems.isEmpty() && storeInitiallyEmpty) {
             items.forEach { item -> pendingItems.add(resolveRemoteParentAlias(item, checkStoreAnchors = false)) }
@@ -2900,7 +2956,9 @@ public class YDoc(
                 if (captureSnapshots) captureParentBefore(item.parent, item.content.kind, item.parentSub)
                 if (store.add(item)) {
                     rememberMapKey(item)
-                    item.parentSub?.let { key -> changedMapKeys.add(item.parent to key) }
+                    item.parentSub?.let { key ->
+                        changedMapKeys.add(item.parent, key)
+                    }
                     if (shouldReapplyTextFormatsAfter(item)) {
                         textFormatParents.add(item.parent)
                     }
@@ -2918,7 +2976,7 @@ public class YDoc(
             if (pendingItems.isEmpty()) break
         } while (madeProgress)
         val supersededMapItems = DeleteSet.empty()
-        changedMapKeys.forEach { (parent, key) ->
+        changedMapKeys.forEach { parent, key ->
             val order = mapItemOrder(parent, key)
             val current = order.lastOrNull()
             store.cacheCurrentMapItem(parent, key, current)

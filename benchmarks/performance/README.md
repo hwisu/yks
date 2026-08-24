@@ -17,11 +17,11 @@ profiling pass:
 BENCH_WARMUP=3 BENCH_SAMPLES=5 npm run benchmark:performance
 ```
 
-The 37 scenarios cover:
+The 38 scenarios cover:
 
 - 5,000-struct remote apply into unopened and already-open roots, repeated
   append, GC/non-GC/batched middle edits, cached length, rendering, full-state
-  encoding, and empty transactions;
+  V1/V2 encoding, and empty transactions;
 - a 5,004-struct formatted update, deletion of 3,000 nested types, a 5,000-key
   map update, a packed 5,000-replacement single-key map history, a packed
   5,000-value array update/local batch insert, 5,000 same-key local map sets,
@@ -46,3 +46,9 @@ the authoritative CPU/allocation benchmark.
 `benchmark:performance:advanced` enforces the same gate for the four advanced
 paths. Cross-runtime performance is intentionally separate from Gradle
 `check`; CI performance gates should run on a dedicated stable runner.
+
+JMH additionally measures direct mixed-string encoding, cached V2 full-state
+encoding, first-time middle formatting in an unformatted fragmented text, and
+remote apply for 5,000 nested maps with one key each so allocation-sensitive
+shape regressions remain visible without adding unstable cross-runtime ratio
+gates.

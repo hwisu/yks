@@ -41,7 +41,10 @@ internal object LegacyUpdateCodec {
         updateMagicPrefix.forEach { encoder.writeByte(it.toInt()) }
         encoder.writeByte(version)
         encoder.writeVarUInt(items.size.toLong())
-        items.sortedWith(compareBy<StoreItem> { it.id.client }.thenBy { it.id.clock }).forEach { item ->
+        items.sortedWith { left, right ->
+            val clientOrder = left.id.client.compareTo(right.id.client)
+            if (clientOrder != 0) clientOrder else left.id.clock.compareTo(right.id.clock)
+        }.forEach { item ->
             writeItem(encoder, item, version)
         }
         writeDeleteSet(encoder, update.deleteSet)

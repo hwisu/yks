@@ -46,6 +46,7 @@ public class YksCoreBenchmark {
     private byte[] formattedUpdate;
     private byte[] mapUpdate;
     private byte[] mapHistoryUpdate;
+    private byte[] nestedMapSingleKeyUpdate;
     private byte[] arrayUpdate;
     private byte[] nestedUpdate;
     private byte[] fragmentedUpdate;
@@ -70,6 +71,22 @@ public class YksCoreBenchmark {
             document.setGc(false);
             text = document.getText("body");
             for (int index = 0; index < 50_000; index++) {
+                text.insert(0, "x", Map.of());
+            }
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class MiddleFormatState {
+        private YText text;
+        private int value;
+
+        @Setup(Level.Invocation)
+        public void prepareDocument() {
+            YDoc document = new YDoc();
+            document.setGc(false);
+            text = document.getText("body");
+            for (int index = 0; index < 20_000; index++) {
                 text.insert(0, "x", Map.of());
             }
         }
@@ -322,6 +339,17 @@ public class YksCoreBenchmark {
             alternatingClockRangeText.delete(index * 2, 1);
         }
         alternatingClockRangeAfter = SnapshotKt.snapshot(alternatingClockRangeDocument);
+
+        YDoc nestedMapSingleKeyDocument = new YDoc();
+        nestedMapSingleKeyDocument.setClientId(10L);
+        nestedMapSingleKeyDocument.setGc(false);
+        dev.yks.YArray nestedMapRoot = nestedMapSingleKeyDocument.getArray("root");
+        for (int index = 0; index < 5_000; index++) {
+            dev.yks.YMap child = nestedMapSingleKeyDocument.createMap();
+            nestedMapRoot.push(child);
+            child.set("key", index);
+        }
+        nestedMapSingleKeyUpdate = nestedMapSingleKeyDocument.encodeStateAsUpdate(new byte[0]);
     }
 
     @Benchmark
@@ -330,6 +358,17 @@ public class YksCoreBenchmark {
         YText text = doc.getText("body");
         text.insert(0, "x".repeat(20_000), Map.of());
         return text.getLength();
+    }
+
+    @Benchmark
+    public int encodeTwentyThousandMixedStrings() {
+        dev.yks.BinaryEncoder encoder = new dev.yks.BinaryEncoder();
+        String[] values = {"ascii-value", "한글-값", "emoji-😀", "lone-\uD800-end"};
+        for (int index = 0; index < 20_000; index++) {
+            encoder.writeVarUInt(index);
+            encoder.writeString(values[index & 3]);
+        }
+        return encoder.toByteArray().length;
     }
 
     @Benchmark
@@ -374,6 +413,11 @@ public class YksCoreBenchmark {
     @Benchmark
     public int encodeUnchangedFiveThousandStructState() {
         return encodeDocument.encodeStateAsUpdate(new byte[0]).length;
+    }
+
+    @Benchmark
+    public int encodeUnchangedFiveThousandStructStateV2() {
+        return dev.yks.UpdatesKt.encodeStateAsUpdateV2(encodeDocument, new byte[0]).length;
     }
 
     @Benchmark
@@ -442,6 +486,16 @@ public class YksCoreBenchmark {
         doc.setGc(false);
         doc.applyUpdate(nestedUpdate, null);
         return doc.getArray("root").getLength();
+    }
+
+    @Benchmark
+    public long applyFiveThousandSingleKeyNestedMaps() {
+        YDoc doc = new YDoc();
+        doc.setGc(false);
+        doc.applyUpdate(nestedMapSingleKeyUpdate, null);
+        dev.yks.YArray root = doc.getArray("root");
+        dev.yks.YMap child = (dev.yks.YMap) root.get(2_500);
+        return root.getLength() + ((Number) child.get("key")).longValue();
     }
 
     @Benchmark
@@ -606,6 +660,12 @@ public class YksCoreBenchmark {
     @Benchmark
     public int formatFirstCharacterOfFragmentedText(LocalFormatState state) {
         state.text.format(0, 1, Map.of("bold", (++state.value & 1) == 0));
+        return state.text.getLength() + state.value;
+    }
+
+    @Benchmark
+    public int formatMiddleOfUnformattedFragmentedText(MiddleFormatState state) {
+        state.text.format(10_000, 1, Map.of("audit", ++state.value));
         return state.text.getLength() + state.value;
     }
 

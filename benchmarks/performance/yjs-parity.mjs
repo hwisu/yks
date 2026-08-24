@@ -336,6 +336,7 @@ const yjsScenarios = {
     return sum
   },
   encode_5000_structs: () => Y.encodeStateAsUpdate(encodeDoc).length,
+  encode_v2_5000_structs: () => Y.encodeStateAsUpdateV2(encodeDoc).length,
   standard_empty_tx_5000: () => {
     for (let index = 0; index < 1_000; index += 1) standardTransactionDoc.transact(() => {})
     return standardTransactionDoc.store.clients.size
@@ -539,6 +540,7 @@ const repeatCounts = {
   length_read_200000: 80,
   string_read_50000: 50,
   encode_5000_structs: 16,
+  encode_v2_5000_structs: 16,
   standard_empty_tx_5000: 6,
   formatted_apply_5004: 6,
   nested_delete_3000: 32,

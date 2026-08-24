@@ -9,6 +9,7 @@ import dev.yks.UndoManagerOptions
 import dev.yks.createAbsolutePositionFromRelativePosition
 import dev.yks.createRelativePositionFromTypeIndex
 import dev.yks.diffUpdateV2
+import dev.yks.encodeStateAsUpdateV2
 import dev.yks.encodeStateVectorFromUpdateV2
 import dev.yks.mergeUpdatesV2
 import dev.yks.snapshot
@@ -314,6 +315,9 @@ fun main(args: Array<String>) {
         },
         "encode_5000_structs" measures {
             encodeDoc.encodeStateAsUpdate().size.toLong()
+        },
+        "encode_v2_5000_structs" measures {
+            encodeStateAsUpdateV2(encodeDoc).size.toLong()
         },
         "standard_empty_tx_5000" measures {
             repeat(1_000) { standardTransactionDoc.transact { Unit } }
