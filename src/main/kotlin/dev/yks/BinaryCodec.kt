@@ -89,6 +89,22 @@ internal fun boundedIntRangeEnd(start: Int, length: Long, size: Int, label: Stri
 private const val ENCODER_INITIAL_CAPACITY: Int = 64
 private const val ENCODER_MAX_CAPACITY: Int = Int.MAX_VALUE - 8
 
+internal fun nextEncoderCapacity(currentCapacity: Int, requiredCapacity: Long): Int {
+    require(currentCapacity in 1..ENCODER_MAX_CAPACITY) { "invalid encoder capacity: $currentCapacity" }
+    check(requiredCapacity in 0..ENCODER_MAX_CAPACITY.toLong()) {
+        "encoded output exceeds the maximum array size"
+    }
+    var capacity = currentCapacity
+    while (capacity.toLong() < requiredCapacity) {
+        capacity = if (capacity > ENCODER_MAX_CAPACITY / 2) {
+            ENCODER_MAX_CAPACITY
+        } else {
+            capacity shl 1
+        }
+    }
+    return capacity
+}
+
 /**
  * Append-only byte sink for the Yjs wire format.
  *
@@ -101,14 +117,10 @@ public class BinaryEncoder {
     private var size = 0
 
     private fun ensureCapacity(additional: Int) {
-        val required = size + additional
-        if (required in 0..buffer.size) return
-        check(required > 0) { "encoded output exceeds the maximum array size" }
-        var capacity = buffer.size
-        while (capacity < required) {
-            capacity = if (capacity > ENCODER_MAX_CAPACITY / 2) ENCODER_MAX_CAPACITY else capacity shl 1
-        }
-        buffer = buffer.copyOf(capacity)
+        require(additional >= 0) { "additional capacity must be non-negative: $additional" }
+        val required = size.toLong() + additional.toLong()
+        if (required <= buffer.size.toLong()) return
+        buffer = buffer.copyOf(nextEncoderCapacity(buffer.size, required))
     }
 
     public fun writeByte(value: Int) {
@@ -257,27 +269,30 @@ public class BinaryEncoder {
         }
 
         fun utf8Length(value: CharSequence): Int {
-            var total = 0
+            var total = 0L
             var index = 0
             val length = value.length
             while (index < length) {
                 val code = value[index].code
                 total += when {
-                    code < 0x80 -> 1
-                    code < 0x800 -> 2
+                    code < 0x80 -> 1L
+                    code < 0x800 -> 2L
                     else -> {
                         val paired = codePointAt(value, index, length)
                         if (paired > 0xffff) {
                             index++
-                            4
+                            4L
                         } else {
-                            3
+                            3L
                         }
                     }
                 }
                 index++
             }
-            return total
+            check(total <= ENCODER_MAX_CAPACITY.toLong()) {
+                "encoded output exceeds the maximum array size"
+            }
+            return total.toInt()
         }
     }
 }

@@ -1879,7 +1879,10 @@ private fun createInsertIdSet(items: List<StoreItem>, filterDeleted: Boolean = f
     val idSet = createIdSet()
     items
         .filterNot { filterDeleted && it.deleted }
-        .sortedWith(compareBy<StoreItem> { it.id.client }.thenBy { it.id.clock })
+        .sortedWith { left, right ->
+            val clientOrder = left.id.client.compareTo(right.id.client)
+            if (clientOrder != 0) clientOrder else left.id.clock.compareTo(right.id.clock)
+        }
         .forEach { item -> idSet.add(item.id, item.length) }
     return idSet
 }

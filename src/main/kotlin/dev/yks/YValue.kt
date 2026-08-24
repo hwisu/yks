@@ -35,7 +35,9 @@ public sealed interface YValue {
         override fun toAny(): Any = value
     }
 
-    public class BinaryValue(private val value: ByteArray) : YValue {
+    public class BinaryValue(value: ByteArray) : YValue {
+        private val value: ByteArray = value.copyOf()
+
         override fun toAny(): Any = value.copyOf()
 
         public fun bytes(): ByteArray = value.copyOf()
@@ -85,7 +87,7 @@ public sealed interface YValue {
         public fun from(value: Any?): YValue = when (value) {
             null -> Null
             Lib0Undefined -> Undefined
-            is YValue -> value
+            is YValue -> value.copyForStorage()
             is AbstractYType -> TypeRef(value.kind, value.name)
             is YDoc -> SubdocRef(
                 guid = value.guid,
@@ -106,7 +108,7 @@ public sealed interface YValue {
             is Float -> DoubleNumber(value.toDouble())
             is Double -> DoubleNumber(value)
             is String -> StringValue(value)
-            is ByteArray -> BinaryValue(value.copyOf())
+            is ByteArray -> BinaryValue(value)
             is List<*> -> ListValue(value.map(::from))
             is Array<*> -> ListValue(value.map(::from))
             is Map<*, *> -> MapValue(value.entries.associate { (key, nested) ->
@@ -116,6 +118,17 @@ public sealed interface YValue {
             else -> error("unsupported YValue type: ${value::class.qualifiedName}")
         }
     }
+}
+
+/** Detaches stored document values from mutable collections supplied through the public YValue API. */
+internal fun YValue.copyForStorage(): YValue = when (this) {
+    is YValue.BinaryValue -> YValue.BinaryValue(bytes())
+    is YValue.ListValue -> YValue.ListValue(value.map(YValue::copyForStorage))
+    is YValue.MapValue -> YValue.MapValue(
+        value.mapValuesTo(linkedMapOf()) { (_, nested) -> nested.copyForStorage() },
+    )
+    is YValue.SubdocRef -> copy(meta = meta.copyForStorage())
+    else -> this
 }
 
 public fun writeYValue(encoder: BinaryEncoder, value: YValue) {

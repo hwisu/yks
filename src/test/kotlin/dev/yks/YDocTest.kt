@@ -7,6 +7,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -146,6 +147,23 @@ class YDocTest {
         assertEquals(emptyList(), target.getArray("items").toList())
         target.applyUpdate(first)
         assertEquals(listOf("a", "b"), target.getArray("items").toList())
+    }
+
+    @Test
+    fun reverseOrderedDependencyChainSurvivesMultiplePendingCompactionPasses() {
+        val source = YDoc(clientId = 1)
+        val target = YDoc(clientId = 2)
+        val array = source.getArray("items")
+        val updates = mutableListOf<ByteArray>()
+        source.observeUpdates { update, _ -> updates.add(update.copyOf()) }
+        array.push("a")
+        array.push("b")
+        array.push("c")
+
+        updates.asReversed().forEach(target::applyUpdate)
+
+        assertEquals(listOf("a", "b", "c"), target.getArray("items").toList())
+        assertNull(target.store.pendingStructs)
     }
 
     @Test
@@ -480,15 +498,79 @@ class YDocTest {
         val text = doc.getText("body")
         text.insert(0, "a")
 
-        val first = doc.encodeStateAsUpdate()
-        val expectedFirst = first.copyOf()
-        first.fill(0)
-        assertContentEquals(expectedFirst, doc.encodeStateAsUpdate())
+        val firstV1 = doc.encodeStateAsUpdate()
+        val expectedFirstV1 = firstV1.copyOf()
+        firstV1.fill(0)
+        assertContentEquals(expectedFirstV1, doc.encodeStateAsUpdate())
+
+        val firstV2 = doc.encodeStateAsUpdateV2()
+        val expectedFirstV2 = firstV2.copyOf()
+        firstV2.fill(0)
+        assertContentEquals(expectedFirstV2, doc.encodeStateAsUpdateV2())
 
         text.insert(1, "b")
-        val updated = doc.encodeStateAsUpdate()
-        assertFalse(expectedFirst.contentEquals(updated))
-        assertEquals("ab", createDocFromUpdate(updated).getText("body").toString())
+        val updatedV1 = doc.encodeStateAsUpdate()
+        val updatedV2 = doc.encodeStateAsUpdateV2()
+        assertFalse(expectedFirstV1.contentEquals(updatedV1))
+        assertFalse(expectedFirstV2.contentEquals(updatedV2))
+        assertEquals("ab", createDocFromUpdate(updatedV1).getText("body").toString())
+        assertEquals("ab", createDocFromUpdateV2(updatedV2).getText("body").toString())
+    }
+
+    @Test
+    fun storedYValuesDetachMutableInputsBeforeCachingFullUpdates() {
+        val list = mutableListOf<YValue>(YValue.StringValue("original"))
+        val map = linkedMapOf<String, YValue>("items" to YValue.ListValue(list))
+        val binary = byteArrayOf(1, 2)
+        val doc = YDoc(clientId = 1)
+        val values = doc.getMap("values")
+        values.set("nested", YValue.MapValue(map))
+        values.set("binary", YValue.BinaryValue(binary))
+
+        val cachedV1 = doc.encodeStateAsUpdate()
+        val cachedV2 = doc.encodeStateAsUpdateV2()
+        list[0] = YValue.StringValue("mutated")
+        map["extra"] = YValue.Bool(true)
+        binary[0] = 9
+
+        assertEquals(mapOf("items" to listOf("original")), values.get("nested"))
+        assertContentEquals(byteArrayOf(1, 2), values.get("binary") as ByteArray)
+        assertContentEquals(cachedV1, doc.encodeStateAsUpdate())
+        assertContentEquals(cachedV2, doc.encodeStateAsUpdateV2())
+    }
+
+    @Test
+    fun cachedFullV2UpdateIsNeverUsedForAnExplicitStateVector() {
+        val doc = YDoc(clientId = 1)
+        doc.getText("body").insert(0, "content")
+        val full = doc.encodeStateAsUpdateV2()
+        val currentState = doc.encodeStateVector()
+
+        val incremental = doc.encodeStateAsUpdateV2(currentState)
+
+        assertFalse(full.contentEquals(incremental))
+        assertTrue(decodeUpdateV2(incremental).structs.isEmpty())
+        assertTrue(decodeUpdateV2(incremental).deleteSet.isEmpty)
+    }
+
+    @Test
+    fun cachedFullV2UpdateIsBypassedWhileStructsArePending() {
+        val source = YDoc(clientId = 1)
+        val text = source.getText("body")
+        text.insert(0, "a")
+        val first = source.encodeStateAsUpdateV2()
+        val stateAfterFirst = source.encodeStateVector()
+        text.insert(1, "b")
+        val second = source.encodeStateAsUpdateV2(stateAfterFirst)
+        val target = YDoc(clientId = 2)
+        val cachedEmpty = target.encodeStateAsUpdateV2()
+
+        target.applyUpdateV2(second)
+
+        assertTrue(target.store.pendingStructs != null)
+        assertFalse(cachedEmpty.contentEquals(target.encodeStateAsUpdateV2()))
+        target.applyUpdateV2(first)
+        assertEquals("ab", target.getText("body").toString())
     }
 
     @Test

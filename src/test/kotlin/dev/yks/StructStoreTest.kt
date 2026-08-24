@@ -167,6 +167,25 @@ class StructStoreTest {
     }
 
     @Test
+    fun cachedMissingMapEntryIsInvalidatedByLaterSetAndDelete() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val map = doc.getMap("map")
+
+        assertNull(map.get("key"))
+        assertNull(map.get("other"))
+        map.set("key", "value")
+        assertEquals("value", map.get("key"))
+        assertNull(map.get("other"))
+        map.set("other", "second")
+        assertEquals("second", map.get("other"))
+        map.delete("key")
+        assertNull(map.get("key"))
+        assertEquals("second", map.get("other"))
+        map.set("key", "restored")
+        assertEquals("restored", map.get("key"))
+    }
+
+    @Test
     fun arrayValuesStayPackedAndSupportInteriorIndexingLikeYjs() {
         assertTimeoutPreemptively(Duration.ofSeconds(2)) {
             val doc = YDoc(clientId = 1, gc = false)

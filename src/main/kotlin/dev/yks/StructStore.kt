@@ -138,27 +138,72 @@ private class ParentItemIndex {
  * Two-level (parent, key) table.
  *
  * A `Pair` key allocated on every probe and rehashed both strings; nesting reuses one parent
- * lookup for all of its keys and lets a parent-wide invalidation drop a single entry. Map-heavy
- * documents probe these caches once per struct, so the composite key showed up as `Pair.hashCode`
- * and `Pair.equals` at the top of integration profiles.
+ * lookup for all of its keys and lets a parent-wide invalidation drop a single entry. Parents
+ * with one key stay in a compact singleton bucket and only allocate an inner map on the second
+ * key, avoiding one `HashMap` per nested single-key map. Map-heavy documents probe these caches
+ * once per struct, so the composite key showed up as `Pair.hashCode` and `Pair.equals` at the top
+ * of integration profiles.
  */
 private class ParentKeyTable<V> {
-    private val byParent = HashMap<String, HashMap<String, V>>()
+    private class Bucket<V>(
+        var singleKey: String,
+        var singleValue: V,
+        var multiple: HashMap<String, V>? = null,
+    )
+
+    private val byParent = HashMap<String, Bucket<V>>()
 
     val isEmpty: Boolean get() = byParent.isEmpty()
 
-    operator fun get(parent: String, key: String): V? = byParent[parent]?.get(key)
+    operator fun get(parent: String, key: String): V? {
+        val bucket = byParent[parent] ?: return null
+        val multiple = bucket.multiple
+        return if (multiple == null) {
+            bucket.singleValue.takeIf { bucket.singleKey == key }
+        } else {
+            multiple[key]
+        }
+    }
 
-    fun contains(parent: String, key: String): Boolean = byParent[parent]?.containsKey(key) == true
+    fun contains(parent: String, key: String): Boolean {
+        val bucket = byParent[parent] ?: return false
+        return bucket.multiple?.containsKey(key) ?: (bucket.singleKey == key)
+    }
 
     fun put(parent: String, key: String, value: V) {
-        byParent.getOrPut(parent) { HashMap() }[key] = value
+        val bucket = byParent[parent]
+        if (bucket == null) {
+            byParent[parent] = Bucket(key, value)
+            return
+        }
+        val multiple = bucket.multiple
+        when {
+            multiple != null -> multiple[key] = value
+            bucket.singleKey == key -> bucket.singleValue = value
+            else -> bucket.multiple = HashMap<String, V>(4).also { values ->
+                values[bucket.singleKey] = bucket.singleValue
+                values[key] = value
+            }
+        }
     }
 
     fun remove(parent: String, key: String) {
-        val keys = byParent[parent] ?: return
-        keys.remove(key)
-        if (keys.isEmpty()) byParent.remove(parent)
+        val bucket = byParent[parent] ?: return
+        val multiple = bucket.multiple
+        if (multiple == null) {
+            if (bucket.singleKey == key) byParent.remove(parent)
+            return
+        }
+        multiple.remove(key)
+        when (multiple.size) {
+            0 -> byParent.remove(parent)
+            1 -> {
+                val remaining = multiple.entries.first()
+                bucket.singleKey = remaining.key
+                bucket.singleValue = remaining.value
+                bucket.multiple = null
+            }
+        }
     }
 
     fun clear() {
