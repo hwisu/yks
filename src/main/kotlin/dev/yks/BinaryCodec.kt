@@ -1,6 +1,5 @@
 package dev.yks
 
-import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 
@@ -87,11 +86,34 @@ internal fun boundedIntRangeEnd(start: Int, length: Long, size: Int, label: Stri
     return start + boundedLength
 }
 
+private const val ENCODER_INITIAL_CAPACITY: Int = 64
+private const val ENCODER_MAX_CAPACITY: Int = Int.MAX_VALUE - 8
+
+/**
+ * Append-only byte sink for the Yjs wire format.
+ *
+ * Every varint digit lands here one byte at a time, and a V2 update fans out over roughly a dozen
+ * concurrent sub-streams, so the sink is deliberately a plain growable array: `ByteArrayOutputStream`
+ * would take an uncontended monitor per byte and copy again on every `toByteArray`.
+ */
 public class BinaryEncoder {
-    private val out = ByteArrayOutputStream()
+    private var buffer = ByteArray(ENCODER_INITIAL_CAPACITY)
+    private var size = 0
+
+    private fun ensureCapacity(additional: Int) {
+        val required = size + additional
+        if (required in 0..buffer.size) return
+        check(required > 0) { "encoded output exceeds the maximum array size" }
+        var capacity = buffer.size
+        while (capacity < required) {
+            capacity = if (capacity > ENCODER_MAX_CAPACITY / 2) ENCODER_MAX_CAPACITY else capacity shl 1
+        }
+        buffer = buffer.copyOf(capacity)
+    }
 
     public fun writeByte(value: Int) {
-        out.write(value and 0xff)
+        if (size == buffer.size) ensureCapacity(1)
+        buffer[size++] = (value and 0xff).toByte()
     }
 
     public fun writeBoolean(value: Boolean) {
@@ -135,24 +157,69 @@ public class BinaryEncoder {
         }
     }
 
-    public fun writeString(value: String) {
-        val encoder = Charsets.UTF_8.newEncoder()
-            .onMalformedInput(CodingErrorAction.REPLACE)
-            .onUnmappableCharacter(CodingErrorAction.REPLACE)
-            .replaceWith(byteArrayOf(0xef.toByte(), 0xbf.toByte(), 0xbd.toByte()))
-        val buffer = encoder.encode(java.nio.CharBuffer.wrap(value))
-        val bytes = ByteArray(buffer.remaining()).also(buffer::get)
-        writeVarUInt(bytes.size.toLong())
-        out.write(bytes)
+    public fun writeString(value: String): Unit = writeCharSequence(value)
+
+    /**
+     * Writes UTF-8 with JavaScript's replacement behavior for lone surrogates.
+     *
+     * `TextEncoder` emits U+FFFD per unpaired surrogate half, which `String.toByteArray` does not
+     * reproduce (it substitutes `?`). Encoding by hand keeps that contract while skipping the
+     * per-call [java.nio.charset.CharsetEncoder] and its intermediate buffers.
+     */
+    internal fun writeCharSequence(value: CharSequence) {
+        val length = value.length
+        var index = 0
+        while (index < length && value[index].code < 0x80) index++
+        val ascii = index == length
+        val byteLength = if (ascii) length else utf8Length(value)
+        writeVarUInt(byteLength.toLong())
+        ensureCapacity(byteLength)
+        var target = size
+        if (ascii) {
+            for (position in 0 until length) buffer[target++] = value[position].code.toByte()
+            size = target
+            return
+        }
+        index = 0
+        while (index < length) {
+            val code = value[index].code
+            when {
+                code < 0x80 -> buffer[target++] = code.toByte()
+                code < 0x800 -> {
+                    buffer[target++] = (0xc0 or (code ushr 6)).toByte()
+                    buffer[target++] = (0x80 or (code and 0x3f)).toByte()
+                }
+                else -> {
+                    val paired = codePointAt(value, index, length)
+                    if (paired > 0xffff) {
+                        buffer[target++] = (0xf0 or (paired ushr 18)).toByte()
+                        buffer[target++] = (0x80 or ((paired ushr 12) and 0x3f)).toByte()
+                        buffer[target++] = (0x80 or ((paired ushr 6) and 0x3f)).toByte()
+                        buffer[target++] = (0x80 or (paired and 0x3f)).toByte()
+                        index++
+                    } else {
+                        // A lone surrogate half is malformed input; lib0 replaces it with U+FFFD.
+                        val encoded = if (paired < 0) 0xfffd else paired
+                        buffer[target++] = (0xe0 or (encoded ushr 12)).toByte()
+                        buffer[target++] = (0x80 or ((encoded ushr 6) and 0x3f)).toByte()
+                        buffer[target++] = (0x80 or (encoded and 0x3f)).toByte()
+                    }
+                }
+            }
+            index++
+        }
+        size = target
     }
 
     public fun writeBytes(value: ByteArray) {
         writeVarUInt(value.size.toLong())
-        out.write(value)
+        writeRawBytes(value)
     }
 
     public fun writeRawBytes(value: ByteArray) {
-        out.write(value)
+        ensureCapacity(value.size)
+        value.copyInto(buffer, size)
+        size += value.size
     }
 
     public fun writeFloat32(value: Float) {
@@ -175,7 +242,44 @@ public class BinaryEncoder {
         }
     }
 
-    public fun toByteArray(): ByteArray = out.toByteArray()
+    public fun toByteArray(): ByteArray = buffer.copyOf(size)
+
+    private companion object {
+        /** Returns the full code point at [index], or -1 for an unpaired surrogate half. */
+        fun codePointAt(value: CharSequence, index: Int, length: Int): Int {
+            val high = value[index]
+            if (!high.isHighSurrogate()) return if (high.isLowSurrogate()) -1 else high.code
+            val next = index + 1
+            if (next >= length) return -1
+            val low = value[next]
+            if (!low.isLowSurrogate()) return -1
+            return Character.toCodePoint(high, low)
+        }
+
+        fun utf8Length(value: CharSequence): Int {
+            var total = 0
+            var index = 0
+            val length = value.length
+            while (index < length) {
+                val code = value[index].code
+                total += when {
+                    code < 0x80 -> 1
+                    code < 0x800 -> 2
+                    else -> {
+                        val paired = codePointAt(value, index, length)
+                        if (paired > 0xffff) {
+                            index++
+                            4
+                        } else {
+                            3
+                        }
+                    }
+                }
+                index++
+            }
+            return total
+        }
+    }
 }
 
 public class BinaryDecoder private constructor(

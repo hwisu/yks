@@ -141,7 +141,8 @@ internal class Lib0StringEncoder {
     }
 
     fun toByteArray(): ByteArray = BinaryEncoder().also { encoder ->
-        encoder.writeString(values.toString())
+        // Encoding the builder directly avoids copying the whole concatenated document text.
+        encoder.writeCharSequence(values)
         encoder.writeRawBytes(lengths.toByteArray())
     }.toByteArray()
 }

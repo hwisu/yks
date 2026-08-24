@@ -1348,6 +1348,16 @@ public class YDoc(
         return store.sequenceCursorAtFirstUndeleted(parent)
     }
 
+    internal fun sequenceCursorAtVisiblePrefix(parent: String, kind: RootKind, index: Long): SequenceCursor? {
+        ensureThreadAccess()
+        return store.sequenceCursorAtVisiblePrefix(parent, kind, index)
+    }
+
+    internal fun hasVisibleNativeTextFormat(parent: String): Boolean {
+        ensureThreadAccess()
+        return store.hasVisibleNativeTextFormat(parent)
+    }
+
     internal fun adjustOpenedTypeLength(parent: String, kind: RootKind, delta: Long) {
         if (maintainedLengthParents.isEmpty() || parent !in maintainedLengthParents) return
         (rootTypes[parent] ?: nestedTypes[parent])?.adjustVisibleLength(kind, delta)
@@ -2865,9 +2875,11 @@ public class YDoc(
         var madeProgress: Boolean
         do {
             madeProgress = false
-            val iterator = pendingItems.iterator()
-            while (iterator.hasNext()) {
-                val pendingItem = iterator.next()
+            // Compact survivors in place. Removing through the iterator shifted the tail of the
+            // backing array once per integrated struct, which is quadratic on a bulk remote apply.
+            var retained = 0
+            for (index in pendingItems.indices) {
+                val pendingItem = pendingItems[index]
                 val item = if (
                     pendingItem.unresolvedParent != null ||
                     isNestedName(pendingItem.parent)
@@ -2877,26 +2889,31 @@ public class YDoc(
                     pendingItem
                 }
                 if (item.id.clock < store.getClock(item.id.client)) {
-                    iterator.remove()
                     madeProgress = true
                     continue
                 }
-                if (canIntegrate(item)) {
-                    iterator.remove()
-                    cleanRemoteOrigins(item)
-                    if (captureSnapshots) captureParentBefore(item.parent, item.content.kind, item.parentSub)
-                    if (store.add(item)) {
-                        rememberMapKey(item)
-                        item.parentSub?.let { key -> changedMapKeys.add(item.parent to key) }
-                        if (shouldReapplyTextFormatsAfter(item)) {
-                            textFormatParents.add(item.parent)
-                        }
-                        rememberNestedRefs(item.content)
-                        recordAddedItem(item)
-                        currentTransaction?.markChanged(item.parent, item.parentSub)
-                    }
-                    madeProgress = true
+                if (!canIntegrate(item)) {
+                    pendingItems[retained++] = pendingItem
+                    continue
                 }
+                cleanRemoteOrigins(item)
+                if (captureSnapshots) captureParentBefore(item.parent, item.content.kind, item.parentSub)
+                if (store.add(item)) {
+                    rememberMapKey(item)
+                    item.parentSub?.let { key -> changedMapKeys.add(item.parent to key) }
+                    if (shouldReapplyTextFormatsAfter(item)) {
+                        textFormatParents.add(item.parent)
+                    }
+                    rememberNestedRefs(item.content)
+                    recordAddedItem(item)
+                    currentTransaction?.markChanged(item.parent, item.parentSub)
+                }
+                madeProgress = true
+            }
+            if (retained == 0) {
+                pendingItems.clear()
+            } else {
+                while (pendingItems.size > retained) pendingItems.removeAt(pendingItems.lastIndex)
             }
             if (pendingItems.isEmpty()) break
         } while (madeProgress)
