@@ -1,5 +1,7 @@
 package dev.yks.experimental.v14
 
+import dev.yks.AttributionsRendererOptions
+import dev.yks.ContentMap
 import dev.yks.RootKind
 import dev.yks.TwosetRenderer
 import dev.yks.YDoc
@@ -8,7 +10,10 @@ import dev.yks.YTextDeltaOp
 import dev.yks.YUnopenedRoot
 import dev.yks.YValue
 import dev.yks.createContentAttribute
+import dev.yks.createAttributionsRenderer
 import dev.yks.createIdMap
+import dev.yks.createIdSet
+import dev.yks.snapshot
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -563,5 +568,109 @@ class UnifiedTypeTest {
             ),
             insert.attribution,
         )
+    }
+
+    @Test
+    fun unifiedCollectionAndAttributeHelpersMatchYjs14TypeSemantics() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val type = doc.getType("mixed", RootKind.Array)
+
+        type.push("AB", mapOf("bold" to YValue.Bool(true)))
+        type.push(listOf(DeltaValue.integer(1), DeltaValue.bool(true)))
+        type.unshift(listOf(DeltaValue.text("start")))
+
+        assertEquals(5, type.length)
+        assertEquals(
+            listOf(DeltaValue.text("A"), DeltaValue.text("B"), DeltaValue.integer(1)),
+            type.slice(-4, -1),
+        )
+        assertEquals(
+            listOf(
+                DeltaValue.text("start"),
+                DeltaValue.text("AB"),
+                DeltaValue.integer(1),
+                DeltaValue.bool(true),
+            ),
+            type.toArray(),
+        )
+        assertEquals(
+            listOf("0:start", "1:AB", "2:1", "3:true"),
+            type.map { value, index -> "$index:${value.toTestString()}" },
+        )
+        val visited = mutableListOf<DeltaValue>()
+        type.forEach { value, _ -> visited += value }
+        assertEquals(type.toArray(), visited)
+
+        type.setAttr("lang", DeltaValue.text("ko"))
+        type.setAttr("owner", DeltaValue.text("alice"))
+        val before = snapshot(doc)
+        type.setAttr("lang", DeltaValue.text("en"))
+
+        assertEquals(2, type.attrSize)
+        assertEquals(setOf("lang", "owner"), type.attrKeys())
+        assertEquals(listOf(DeltaValue.text("en"), DeltaValue.text("alice")), type.attrValues().toList())
+        assertEquals(DeltaValue.text("ko"), type.getAttrs(before)["lang"])
+        val visitedAttrs = linkedMapOf<String, DeltaValue>()
+        type.forEachAttr { value, key, current ->
+            assertSame(type, current)
+            visitedAttrs[key] = value
+        }
+        assertEquals(type.getAttrs(), visitedAttrs)
+        assertEquals(
+            mapOf(
+                "children" to listOf("start", "AB", 1L, true),
+                "attrs" to mapOf("lang" to "en", "owner" to "alice"),
+            ),
+            type.toJSON(),
+        )
+
+        type.clearAttrs()
+        assertEquals(0, type.attrSize)
+        assertTrue(type.attrEntries().isEmpty())
+    }
+
+    @Test
+    fun rendererCanBeDetachedAndNestedContainerReadsKeepSharedTypeIdentity() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getType("body", RootKind.Text)
+        text.push("ab")
+        val renderer = createAttributionsRenderer(
+            ContentMap(createIdMap(), createIdMap()),
+            AttributionsRendererOptions(
+                renderedContent = createIdSet().also { ids -> ids.add(1, 1, 1) },
+            ),
+        )
+
+        text.useRenderer(renderer)
+        assertEquals(listOf(DeltaValue.text("b")), text.toArray())
+        text.useRenderer(null)
+        assertEquals(listOf(DeltaValue.text("ab")), text.toArray())
+
+        val nested = YMap()
+        nested.setAttr("name", "Ada")
+        val root = doc.getType("root", RootKind.Array)
+        root.push(
+            listOf(
+                DeltaValue.map(
+                    mapOf("children" to DeltaValue.list(listOf(DeltaValue.shared(nested)))),
+                ),
+            ),
+        )
+
+        val direct = assertIs<DeltaValue.MapData>(root.get(0))
+        val directChildren = assertIs<DeltaValue.ListData>(direct.values["children"])
+        assertSame(nested, assertIs<DeltaValue.SharedType>(directChildren.values.single()).value)
+        val arrayValue = assertIs<DeltaValue.MapData>(root.toArray().single())
+        val arrayChildren = assertIs<DeltaValue.ListData>(arrayValue.values["children"])
+        assertSame(nested, assertIs<DeltaValue.SharedType>(arrayChildren.values.single()).value)
+    }
+
+    private fun DeltaValue.toTestString(): String = when (this) {
+        is DeltaValue.Data -> value.toAny().toString()
+        is DeltaValue.SharedType -> value.toString()
+        is DeltaValue.SharedTypeState -> value.toString()
+        is DeltaValue.Subdocument -> value.toString()
+        is DeltaValue.ListData -> values.toString()
+        is DeltaValue.MapData -> values.toString()
     }
 }

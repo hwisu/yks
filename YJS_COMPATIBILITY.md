@@ -15,7 +15,8 @@ YKS is a Kotlin/JVM engine for Yjs wire and document semantics, not a JavaScript
 - `*Lossless` APIs may use a private `YKS` envelope for Kotlin-only state and must remain between YKS peers.
 - Yjs wire omits root kinds and root XML element names. Use typed getters or `YRootSchemaRegistry` for ambiguous remote roots.
 - `Item` and `Transaction` are safe JVM views, not Yjs mutable-internal APIs.
-- `experimental.v14` is not full RC API parity. `Type.delta` is a shallow snapshot; use the stable delegate for unsupported features.
+- `experimental.v14.Type` covers the RC collection and attribute read helpers, snapshot-aware attributes, nullable renderer detach, and renderer-visible `toArray`; root projection remains explicit on JVM.
+- `experimental.v14` is not full RC API parity. Detached `Type.from` and the full generic lib0 schema surface remain outside the adapter; use the stable delegate for unsupported features.
 
 ## Operational boundaries
 

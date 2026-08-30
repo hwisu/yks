@@ -4,7 +4,7 @@
       <verify-metadata>true</verify-metadata>
       <verify-signatures>false</verify-signatures>
       <trusted-artifacts>
-         <trust group="dev.yks" name="yks" version="0.2.11" reason="Release consumer verifies the artifact produced by this repository; its manifest embeds the release commit so its checksum cannot be committed without a hash cycle."/>
+         <trust group="dev.yks" name="yks" version="0.2.12" reason="Release consumer verifies the artifact produced by this repository; its manifest embeds the release commit so its checksum cannot be committed without a hash cycle."/>
       </trusted-artifacts>
    </configuration>
    <components>

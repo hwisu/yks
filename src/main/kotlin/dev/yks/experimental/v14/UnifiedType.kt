@@ -7,6 +7,7 @@ import dev.yks.AbstractRenderer
 import dev.yks.ItemContent
 import dev.yks.RootKind
 import dev.yks.SequenceCursor
+import dev.yks.Snapshot
 import dev.yks.StoreItem
 import dev.yks.Subscription
 import dev.yks.YArray
@@ -23,6 +24,7 @@ import dev.yks.YXmlElementType
 import dev.yks.YXmlFragment
 import dev.yks.YXmlHook
 import dev.yks.attributionJsonSchema
+import dev.yks.baseRenderer
 import dev.yks.renderUnifiedAttributes
 import dev.yks.renderUnifiedSequenceContent
 import dev.yks.renderedSequenceIndexToVisibleIndex
@@ -740,6 +742,9 @@ public class Type(public val delegate: AbstractYType) {
             else -> error("unsupported shared type: ${type::class.qualifiedName}")
         }
 
+    /** Number of currently visible attributes, matching @y/y 14's unified Type surface. */
+    public val attrSize: Int get() = getAttrs().size
+
     public val change: DeltaBuilder get() = DeltaBuilder()
 
     /** A live renderer-aware cache. A held reference is updated in place until [clearCache]. */
@@ -785,8 +790,9 @@ public class Type(public val delegate: AbstractYType) {
         state().off(eventName, listener)
     }
 
-    public fun useRenderer(renderer: AbstractRenderer): Type = apply {
-        delegate.useRenderer(renderer)
+    /** Select a renderer, or detach the current renderer with null. */
+    public fun useRenderer(renderer: AbstractRenderer?): Type = apply {
+        delegate.useRenderer(renderer ?: baseRenderer)
     }
 
     public fun applyDelta(delta: Delta, origin: Any? = null) {
@@ -834,6 +840,38 @@ public class Type(public val delegate: AbstractYType) {
         applyDelta(DeltaBuilder().retain(index).insertValues(values, formats).done(), origin)
     }
 
+    public fun push(
+        text: String,
+        formats: Map<String, YValue> = emptyMap(),
+        origin: Any? = null,
+    ) {
+        insert(length, text, formats, origin)
+    }
+
+    public fun push(
+        values: List<DeltaValue>,
+        formats: Map<String, YValue> = emptyMap(),
+        origin: Any? = null,
+    ) {
+        insertValues(length, values, formats, origin)
+    }
+
+    public fun unshift(
+        text: String,
+        formats: Map<String, YValue> = emptyMap(),
+        origin: Any? = null,
+    ) {
+        insert(0, text, formats, origin)
+    }
+
+    public fun unshift(
+        values: List<DeltaValue>,
+        formats: Map<String, YValue> = emptyMap(),
+        origin: Any? = null,
+    ) {
+        insertValues(0, values, formats, origin)
+    }
+
     public fun delete(index: Int, length: Int = 1, origin: Any? = null) {
         applyDelta(DeltaBuilder().retain(index).delete(length).done(), origin)
     }
@@ -855,6 +893,33 @@ public class Type(public val delegate: AbstractYType) {
         return deltaValueFromAny(sequenceValueAt(delegate, index))
     }
 
+    /** Return an unrendered indexed slice. Negative bounds follow the stable YKS/Yjs helpers. */
+    public fun slice(start: Int = 0, end: Int = length): List<DeltaValue> =
+        getRawSlice(delegate, start, end).map(::deltaValueFromAny)
+
+    /**
+     * Return renderer-visible child runs. Text runs remain strings, matching @y/y 14's toArray.
+     */
+    public fun toArray(): List<DeltaValue> {
+        if (delegate is YMap) return emptyList()
+        return buildList {
+            renderUnifiedSequenceContent(delegate, delegate.activeRenderer).forEach { rendered ->
+                if (rendered.text != null) {
+                    add(DeltaValue.text(rendered.text))
+                } else {
+                    addAll(rendered.values.map(::deltaValueFromAny))
+                }
+            }
+        }
+    }
+
+    public fun <R> map(transform: (value: DeltaValue, index: Int) -> R): List<R> =
+        toArray().mapIndexed { index, value -> transform(value, index) }
+
+    public fun forEach(action: (value: DeltaValue, index: Int) -> Unit) {
+        toArray().forEachIndexed { index, value -> action(value, index) }
+    }
+
     public fun getAttr(key: String): DeltaValue? =
         if (hasAttr(key)) deltaValueFromAny(getRawAttr(delegate, key)) else null
 
@@ -871,7 +936,34 @@ public class Type(public val delegate: AbstractYType) {
         .mapValues { (_, value) -> deltaValueFromAny(value) }
         .toSortedMap()
 
+    public fun getAttrs(snapshot: Snapshot): Map<String, DeltaValue> = getRawAttrs(delegate, snapshot)
+        .mapValues { (_, value) -> deltaValueFromAny(value) }
+        .toSortedMap()
+
+    public fun attrKeys(): Set<String> = getAttrs().keys
+
+    public fun attrValues(): Collection<DeltaValue> = getAttrs().values
+
+    public fun attrEntries(): Set<Map.Entry<String, DeltaValue>> = getAttrs().entries
+
+    public fun forEachAttr(action: (value: DeltaValue, key: String, type: Type) -> Unit) {
+        getAttrs().forEach { (key, value) -> action(value, key, this) }
+    }
+
+    public fun clearAttrs() {
+        clearRawAttrs(delegate)
+    }
+
     public fun toJson(): Any? = delegate.toJson()
+
+    /** Generic unified-Type JSON shape used by @y/y 14. */
+    public fun toJSON(): Map<String, Any?> = buildMap {
+        name?.let { nodeName -> put("name", nodeName) }
+        if (length > 0) put("children", toArray().map(::deltaValueToJson))
+        if (attrSize > 0) {
+            put("attrs", getAttrs().mapValues { (_, value) -> deltaValueToJson(value) })
+        }
+    }
 
     public fun clearCache() {
         state().clearCache()
@@ -1144,7 +1236,22 @@ private fun DeltaValue.sharedDeltaOrNull(): Delta? = (this as? DeltaValue.Shared
 private fun deltaValueFromAny(value: Any?): DeltaValue = when (value) {
     is AbstractYType -> DeltaValue.SharedType(value)
     is YDoc -> DeltaValue.Subdocument(value)
+    is List<*> -> DeltaValue.ListData(value.map(::deltaValueFromAny))
+    is Array<*> -> DeltaValue.ListData(value.map(::deltaValueFromAny))
+    is Map<*, *> -> DeltaValue.MapData(value.entries.associate { (key, nested) ->
+        require(key is String) { "delta map keys must be strings" }
+        key to deltaValueFromAny(nested)
+    }.toSortedMap())
     else -> DeltaValue.Data(YValue.from(value))
+}
+
+private fun deltaValueToJson(value: DeltaValue): Any? = when (value) {
+    is DeltaValue.Data -> value.value.toAny()
+    is DeltaValue.SharedType -> Type(value.value).toJSON()
+    is DeltaValue.SharedTypeState -> Type(value.value).toJSON()
+    is DeltaValue.Subdocument -> value.value
+    is DeltaValue.ListData -> value.values.map(::deltaValueToJson)
+    is DeltaValue.MapData -> value.values.mapValues { (_, nested) -> deltaValueToJson(nested) }
 }
 
 private fun deltaValueFromRenderedAny(value: Any?, renderer: AbstractRenderer): DeltaValue = when (value) {
@@ -1287,6 +1394,35 @@ private fun getRawAttrs(type: AbstractYType): Map<String, Any?> = when (type) {
     is YXmlFragment -> type.getAttrs()
     is YMap -> type.getAttrs()
     else -> error("unsupported shared type: ${type::class.qualifiedName}")
+}
+
+private fun getRawAttrs(type: AbstractYType, snapshot: Snapshot): Map<String, Any?> = when (type) {
+    is YArray -> type.getAttrs(snapshot)
+    is YText -> type.getAttrs(snapshot)
+    is YXmlElementType -> type.getAttrs(snapshot)
+    is YXmlFragment -> type.getAttrs(snapshot)
+    is YMap -> type.getAttrs(snapshot)
+    else -> error("unsupported shared type: ${type::class.qualifiedName}")
+}
+
+private fun getRawSlice(type: AbstractYType, start: Int, end: Int): List<Any?> = when (type) {
+    is YArray -> type.slice(start, end)
+    is YText -> type.slice(start, end)
+    is YXmlElementType -> type.slice(start, end)
+    is YXmlFragment -> type.slice(start, end)
+    is YMap -> emptyList()
+    else -> error("unsupported shared type: ${type::class.qualifiedName}")
+}
+
+private fun clearRawAttrs(type: AbstractYType) {
+    when (type) {
+        is YArray -> type.clearAttrs()
+        is YText -> type.clearAttrs()
+        is YXmlElementType -> type.clearAttrs()
+        is YXmlFragment -> type.clearAttrs()
+        is YMap -> type.clearAttrs()
+        else -> error("unsupported shared type: ${type::class.qualifiedName}")
+    }
 }
 
 private fun getRawAttr(type: AbstractYType, key: String): Any? = when (type) {

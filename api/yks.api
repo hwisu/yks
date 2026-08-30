@@ -4105,6 +4105,10 @@ public final class dev/yks/experimental/v14/Type {
 	public static synthetic fun applyDelta$default (Ldev/yks/experimental/v14/Type;Ldev/yks/experimental/v14/Delta;Ljava/lang/Object;ILjava/lang/Object;)V
 	public final fun applyDeltaWithCorrection (Ldev/yks/experimental/v14/Delta;Ljava/lang/Object;Ldev/yks/AbstractRenderer;)Ldev/yks/experimental/v14/Delta;
 	public static synthetic fun applyDeltaWithCorrection$default (Ldev/yks/experimental/v14/Type;Ldev/yks/experimental/v14/Delta;Ljava/lang/Object;Ldev/yks/AbstractRenderer;ILjava/lang/Object;)Ldev/yks/experimental/v14/Delta;
+	public final fun attrEntries ()Ljava/util/Set;
+	public final fun attrKeys ()Ljava/util/Set;
+	public final fun attrValues ()Ljava/util/Collection;
+	public final fun clearAttrs ()V
 	public final fun clearCache ()V
 	public final fun delete (IILjava/lang/Object;)V
 	public static synthetic fun delete$default (Ldev/yks/experimental/v14/Type;IILjava/lang/Object;ILjava/lang/Object;)V
@@ -4112,11 +4116,15 @@ public final class dev/yks/experimental/v14/Type {
 	public static synthetic fun deleteAttr$default (Ldev/yks/experimental/v14/Type;Ljava/lang/String;Ljava/lang/Object;ILjava/lang/Object;)V
 	public final fun destroy ()V
 	public fun equals (Ljava/lang/Object;)Z
+	public final fun forEach (Lkotlin/jvm/functions/Function2;)V
+	public final fun forEachAttr (Lkotlin/jvm/functions/Function3;)V
 	public final fun format (IILjava/util/Map;Ljava/lang/Object;)V
 	public static synthetic fun format$default (Ldev/yks/experimental/v14/Type;IILjava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
 	public final fun get (I)Ldev/yks/experimental/v14/DeltaValue;
 	public final fun getAttr (Ljava/lang/String;)Ldev/yks/experimental/v14/DeltaValue;
+	public final fun getAttrSize ()I
 	public final fun getAttrs ()Ljava/util/Map;
+	public final fun getAttrs (Ldev/yks/Snapshot;)Ljava/util/Map;
 	public final fun getChange ()Ldev/yks/experimental/v14/DeltaBuilder;
 	public final fun getDelegate ()Ldev/yks/AbstractYType;
 	public final fun getDelta ()Ldev/yks/experimental/v14/Delta;
@@ -4132,15 +4140,28 @@ public final class dev/yks/experimental/v14/Type {
 	public static synthetic fun insert$default (Ldev/yks/experimental/v14/Type;ILjava/lang/String;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
 	public final fun insertValues (ILjava/util/List;Ljava/util/Map;Ljava/lang/Object;)V
 	public static synthetic fun insertValues$default (Ldev/yks/experimental/v14/Type;ILjava/util/List;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun map (Lkotlin/jvm/functions/Function2;)Ljava/util/List;
 	public final fun off (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)V
 	public final fun on (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
 	public final fun once (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Ldev/yks/Subscription;
+	public final fun push (Ljava/lang/String;Ljava/util/Map;Ljava/lang/Object;)V
+	public final fun push (Ljava/util/List;Ljava/util/Map;Ljava/lang/Object;)V
+	public static synthetic fun push$default (Ldev/yks/experimental/v14/Type;Ljava/lang/String;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
+	public static synthetic fun push$default (Ldev/yks/experimental/v14/Type;Ljava/util/List;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
 	public final fun setAttr (Ljava/lang/String;Ldev/yks/experimental/v14/DeltaValue;Ljava/lang/Object;)V
 	public static synthetic fun setAttr$default (Ldev/yks/experimental/v14/Type;Ljava/lang/String;Ldev/yks/experimental/v14/DeltaValue;Ljava/lang/Object;ILjava/lang/Object;)V
+	public final fun slice (II)Ljava/util/List;
+	public static synthetic fun slice$default (Ldev/yks/experimental/v14/Type;IIILjava/lang/Object;)Ljava/util/List;
+	public final fun toArray ()Ljava/util/List;
 	public final fun toDelta ()Ldev/yks/experimental/v14/Delta;
 	public final fun toDelta (Ldev/yks/AbstractRenderer;)Ldev/yks/experimental/v14/Delta;
+	public final fun toJSON ()Ljava/util/Map;
 	public final fun toJson ()Ljava/lang/Object;
 	public fun toString ()Ljava/lang/String;
+	public final fun unshift (Ljava/lang/String;Ljava/util/Map;Ljava/lang/Object;)V
+	public final fun unshift (Ljava/util/List;Ljava/util/Map;Ljava/lang/Object;)V
+	public static synthetic fun unshift$default (Ldev/yks/experimental/v14/Type;Ljava/lang/String;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
+	public static synthetic fun unshift$default (Ldev/yks/experimental/v14/Type;Ljava/util/List;Ljava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
 	public final fun useRenderer (Ldev/yks/AbstractRenderer;)Ldev/yks/experimental/v14/Type;
 }
 
