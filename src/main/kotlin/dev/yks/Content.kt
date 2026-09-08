@@ -595,23 +595,40 @@ private fun Any?.asContentDocOpts(): Map<String, Any?> = when (this) {
 
 internal fun parseJsonLiteral(source: String): Any? = JsonLiteralParser(source).parse()
 
-internal fun toJsonLiteral(value: Any?): String = when (value) {
-    null -> "null"
-    is Boolean -> value.toString()
-    is Byte,
-    is Short,
-    is Int,
-    is Long -> (value as Number).toLong().toString()
-    is Float -> value.toDouble().toJsonNumber()
-    is Double -> value.toJsonNumber()
-    is String -> value.toJsonString()
-    is List<*> -> value.joinToString(separator = ",", prefix = "[", postfix = "]") { nested -> toJsonLiteral(nested) }
-    is Array<*> -> value.joinToString(separator = ",", prefix = "[", postfix = "]") { nested -> toJsonLiteral(nested) }
-    is Map<*, *> -> value.entries.joinToString(separator = ",", prefix = "{", postfix = "}") { (key, nested) ->
-        require(key is String) { "JSON object keys must be strings" }
-        "${key.toJsonString()}:${toJsonLiteral(nested)}"
-    }
-    else -> error("unsupported JSON value: ${value::class.qualifiedName}")
+internal fun toJsonLiteral(value: Any?): String {
+    val out = StringBuilder()
+    DeepRecursiveFunction<Any?, Unit> { nested ->
+        when (nested) {
+            null -> out.append("null")
+            is Boolean -> out.append(nested)
+            is Byte, is Short, is Int, is Long -> out.append((nested as Number).toLong())
+            is Float -> out.append(nested.toDouble().toJsonNumber())
+            is Double -> out.append(nested.toJsonNumber())
+            is String -> out.append(nested.toJsonString())
+            is List<*> -> {
+                out.append('[')
+                nested.forEachIndexed { index, child ->
+                    if (index > 0) out.append(',')
+                    callRecursive(child)
+                }
+                out.append(']')
+            }
+            is Array<*> -> callRecursive(nested.asList())
+            is Map<*, *> -> {
+                out.append('{')
+                nested.entries.forEachIndexed { index, (key, child) ->
+                    require(key is String) { "JSON object keys must be strings" }
+                    if (index > 0) out.append(',')
+                    out.append(key.toJsonString()).append(':')
+                    callRecursive(child)
+                }
+                out.append('}')
+            }
+            else -> error("unsupported JSON value: ${nested::class.qualifiedName}")
+        }
+        Unit
+    }(value)
+    return out.toString()
 }
 
 private fun Double.toJsonNumber(): String {
@@ -649,17 +666,17 @@ private class JsonLiteralParser(private val source: String) {
     private val decodeBudget = DecodeBudget()
 
     fun parse(): Any? {
-        val value = parseValue()
+        val value = parseValue(Unit)
         skipWhitespace()
         check(index == source.length) { "invalid trailing JSON content" }
         return value
     }
 
-    private fun parseValue(): Any? {
+    private val parseValue = DeepRecursiveFunction<Unit, Any?> {
         decodeBudget.consumeNode()
         skipWhitespace()
         check(index < source.length) { "unexpected end of JSON input" }
-        return when (source[index]) {
+        when (source[index]) {
             'n' -> {
                 expect("null")
                 null
@@ -673,8 +690,48 @@ private class JsonLiteralParser(private val source: String) {
                 false
             }
             '"' -> parseString()
-            '[' -> decodeBudget.nested(::parseArray)
-            '{' -> decodeBudget.nested(::parseObject)
+            '[' -> {
+                decodeBudget.enter()
+                try {
+                    expect('[')
+                    skipWhitespace()
+                    val values = mutableListOf<Any?>()
+                    if (!consume(']')) {
+                        while (true) {
+                            values.add(callRecursive(Unit))
+                            skipWhitespace()
+                            if (consume(']')) break
+                            check(consume(',')) { "expected ',' or ']' in JSON array" }
+                        }
+                    }
+                    if (values.isEmpty()) emptyList() else values
+                } finally {
+                    decodeBudget.exit()
+                }
+            }
+            '{' -> {
+                decodeBudget.enter()
+                try {
+                    expect('{')
+                    skipWhitespace()
+                    val values = linkedMapOf<String, Any?>()
+                    if (!consume('}')) {
+                        while (true) {
+                            skipWhitespace()
+                            val key = parseString()
+                            skipWhitespace()
+                            expect(':')
+                            values[key] = callRecursive(Unit)
+                            skipWhitespace()
+                            if (consume('}')) break
+                            check(consume(',')) { "expected ',' or '}' in JSON object" }
+                        }
+                    }
+                    if (values.isEmpty()) emptyMap() else values
+                } finally {
+                    decodeBudget.exit()
+                }
+            }
             else -> parseNumber()
         }
     }
@@ -719,42 +776,6 @@ private class JsonLiteralParser(private val source: String) {
         val code = encoded.toInt(16)
         index += 4
         return code.toChar()
-    }
-
-    private fun parseArray(): List<Any?> {
-        expect('[')
-        skipWhitespace()
-        if (consume(']')) return emptyList()
-        val values = mutableListOf<Any?>()
-        while (true) {
-            values.add(parseValue())
-            skipWhitespace()
-            when {
-                consume(']') -> return values
-                consume(',') -> Unit
-                else -> error("expected ',' or ']' in JSON array")
-            }
-        }
-    }
-
-    private fun parseObject(): Map<String, Any?> {
-        expect('{')
-        skipWhitespace()
-        if (consume('}')) return emptyMap()
-        val values = linkedMapOf<String, Any?>()
-        while (true) {
-            skipWhitespace()
-            val key = parseString()
-            skipWhitespace()
-            expect(':')
-            values[key] = parseValue()
-            skipWhitespace()
-            when {
-                consume('}') -> return values
-                consume(',') -> Unit
-                else -> error("expected ',' or '}' in JSON object")
-            }
-        }
     }
 
     private fun parseNumber(): Number {
@@ -814,12 +835,7 @@ private fun Char.isJsonHexDigit(): Boolean = this in '0'..'9' || this in 'a'..'f
 
 private fun Char.isHighSurrogate(): Boolean = code in 0xD800..0xDBFF
 
-private fun copyContentValue(value: Any?): Any? = when (value) {
-    is ByteArray -> value.copyOf()
-    is List<*> -> value.map(::copyContentValue)
-    is Map<*, *> -> value.entries.associate { (key, nested) -> key to copyContentValue(nested) }
-    else -> value
-}
+private fun copyContentValue(value: Any?): Any? = copyNestedContent(value)
 
 private fun contentValuesEqual(left: Any?, right: Any?): Boolean = when {
     left is ByteArray && right is ByteArray -> left.contentEquals(right)

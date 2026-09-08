@@ -50,11 +50,11 @@ public sealed interface YValue {
     }
 
     public data class ListValue(val value: List<YValue>) : YValue {
-        override fun toAny(): Any = value.map { it.toAny() }
+        override fun toAny(): Any = foldYValue(this, { it }, { it }, YValue::toAny)!!
     }
 
     public data class MapValue(val value: Map<String, YValue>) : YValue {
-        override fun toAny(): Any = value.mapValues { (_, nested) -> nested.toAny() }
+        override fun toAny(): Any = foldYValue(this, { it }, { it }, YValue::toAny)!!
     }
 
     public data class TypeRef(val kind: RootKind, val name: String) : YValue {
@@ -84,21 +84,40 @@ public sealed interface YValue {
     }
 
     public companion object {
-        public fun from(value: Any?): YValue = when (value) {
+        public fun from(value: Any?): YValue =
+            if (value is List<*> || value is Array<*> || value is Map<*, *> || value is YDoc) {
+                fromValue(value)
+            } else {
+                fromScalar(value)
+            }
+
+        private val fromValue = DeepRecursiveFunction<Any?, YValue> { value ->
+            when (value) {
+                is YDoc -> SubdocRef(
+                    guid = value.guid,
+                    gc = value.gc,
+                    shouldLoad = value.shouldLoad,
+                    autoLoad = value.autoLoad,
+                    instanceId = value.subdocInstanceId,
+                    collectionId = value.collectionId,
+                    meta = callRecursive(value.meta),
+                    isSuggestionDoc = value.isSuggestionDoc,
+                )
+                is List<*> -> ListValue(value.map { callRecursive(it) })
+                is Array<*> -> ListValue(value.map { callRecursive(it) })
+                is Map<*, *> -> MapValue(value.entries.associate { (key, nested) ->
+                    require(key is String) { "YValue map keys must be strings" }
+                    key to callRecursive(nested)
+                })
+                else -> fromScalar(value)
+            }
+        }
+
+        private fun fromScalar(value: Any?): YValue = when (value) {
             null -> Null
             Lib0Undefined -> Undefined
             is YValue -> value.copyForStorage()
             is AbstractYType -> TypeRef(value.kind, value.name)
-            is YDoc -> SubdocRef(
-                guid = value.guid,
-                gc = value.gc,
-                shouldLoad = value.shouldLoad,
-                autoLoad = value.autoLoad,
-                instanceId = value.subdocInstanceId,
-                collectionId = value.collectionId,
-                meta = from(value.meta),
-                isSuggestionDoc = value.isSuggestionDoc,
-            )
             is Boolean -> Bool(value)
             is Byte -> LongNumber(value.toLong())
             is Short -> LongNumber(value.toLong())
@@ -109,90 +128,90 @@ public sealed interface YValue {
             is Double -> DoubleNumber(value)
             is String -> StringValue(value)
             is ByteArray -> BinaryValue(value)
-            is List<*> -> ListValue(value.map(::from))
-            is Array<*> -> ListValue(value.map(::from))
-            is Map<*, *> -> MapValue(value.entries.associate { (key, nested) ->
-                require(key is String) { "YValue map keys must be strings" }
-                key to from(nested)
-            })
             else -> error("unsupported YValue type: ${value::class.qualifiedName}")
         }
     }
 }
 
 /** Detaches stored document values from mutable collections supplied through the public YValue API. */
-internal fun YValue.copyForStorage(): YValue = when (this) {
-    is YValue.BinaryValue -> YValue.BinaryValue(bytes())
-    is YValue.ListValue -> YValue.ListValue(value.map(YValue::copyForStorage))
-    is YValue.MapValue -> YValue.MapValue(
-        value.mapValuesTo(linkedMapOf()) { (_, nested) -> nested.copyForStorage() },
-    )
-    is YValue.SubdocRef -> copy(meta = meta.copyForStorage())
-    else -> this
-}
-
-public fun writeYValue(encoder: BinaryEncoder, value: YValue) {
+internal fun YValue.copyForStorage(): YValue = foldYValue(
+    this,
+    YValue::ListValue,
+    YValue::MapValue,
+) { value ->
     when (value) {
-        YValue.Undefined -> encoder.writeByte(11)
-        YValue.Null -> encoder.writeByte(0)
-        is YValue.Bool -> encoder.writeByte(if (value.value) 2 else 1)
-        is YValue.LongNumber -> {
-            encoder.writeByte(3)
-            encoder.writeVarInt(value.value)
-        }
-        is YValue.DoubleNumber -> {
-            encoder.writeByte(4)
-            java.lang.Double.doubleToRawLongBits(value.value).let { bits ->
-                repeat(Long.SIZE_BYTES) { index -> encoder.writeByte(((bits ushr (index * 8)) and 0xff).toInt()) }
-            }
-        }
-        is YValue.BigIntNumber -> {
-            encoder.writeByte(12)
-            encoder.writeString(value.value.toString())
-        }
-        is YValue.StringValue -> {
-            encoder.writeByte(5)
-            encoder.writeString(value.value)
-        }
-        is YValue.BinaryValue -> {
-            encoder.writeByte(6)
-            encoder.writeBytes(value.bytes())
-        }
-        is YValue.ListValue -> {
-            encoder.writeByte(7)
-            encoder.writeVarUInt(value.value.size.toLong())
-            value.value.forEach { writeYValue(encoder, it) }
-        }
-        is YValue.MapValue -> {
-            encoder.writeByte(8)
-            encoder.writeVarUInt(value.value.size.toLong())
-            value.value.forEach { (key, nested) ->
-                encoder.writeString(key)
-                writeYValue(encoder, nested)
-            }
-        }
-        is YValue.TypeRef -> {
-            encoder.writeByte(9)
-            encoder.writeByte(value.kind.ordinal)
-            encoder.writeString(value.name)
-        }
-        is YValue.SubdocRef -> {
-            encoder.writeByte(10)
-            encoder.writeString(value.guid)
-            encoder.writeBoolean(value.gc)
-            encoder.writeBoolean(value.autoLoad)
-            encoder.writeString(value.instanceId)
-            encoder.writeBoolean(value.collectionId != null)
-            value.collectionId?.let(encoder::writeString)
-            writeYValue(encoder, value.meta)
-            encoder.writeBoolean(value.isSuggestionDoc)
-        }
+        is YValue.BinaryValue -> YValue.BinaryValue(value.bytes())
+        is YValue.SubdocRef -> value.copy(meta = value.meta.copyForStorage())
+        else -> value
     }
 }
 
-public fun readYValue(decoder: BinaryDecoder): YValue {
+public fun writeYValue(encoder: BinaryEncoder, value: YValue) {
+    DeepRecursiveFunction<YValue, Unit> { value ->
+        when (value) {
+            YValue.Undefined -> encoder.writeByte(11)
+            YValue.Null -> encoder.writeByte(0)
+            is YValue.Bool -> encoder.writeByte(if (value.value) 2 else 1)
+            is YValue.LongNumber -> {
+                encoder.writeByte(3)
+                encoder.writeVarInt(value.value)
+            }
+            is YValue.DoubleNumber -> {
+                encoder.writeByte(4)
+                java.lang.Double.doubleToRawLongBits(value.value).let { bits ->
+                    repeat(Long.SIZE_BYTES) { index -> encoder.writeByte(((bits ushr (index * 8)) and 0xff).toInt()) }
+                }
+            }
+            is YValue.BigIntNumber -> {
+                encoder.writeByte(12)
+                encoder.writeString(value.value.toString())
+            }
+            is YValue.StringValue -> {
+                encoder.writeByte(5)
+                encoder.writeString(value.value)
+            }
+            is YValue.BinaryValue -> {
+                encoder.writeByte(6)
+                encoder.writeBytes(value.bytes())
+            }
+            is YValue.ListValue -> {
+                encoder.writeByte(7)
+                encoder.writeVarUInt(value.value.size.toLong())
+                value.value.forEach { callRecursive(it) }
+            }
+            is YValue.MapValue -> {
+                encoder.writeByte(8)
+                encoder.writeVarUInt(value.value.size.toLong())
+                value.value.forEach { (key, nested) ->
+                    encoder.writeString(key)
+                    callRecursive(nested)
+                }
+            }
+            is YValue.TypeRef -> {
+                encoder.writeByte(9)
+                encoder.writeByte(value.kind.ordinal)
+                encoder.writeString(value.name)
+            }
+            is YValue.SubdocRef -> {
+                encoder.writeByte(10)
+                encoder.writeString(value.guid)
+                encoder.writeBoolean(value.gc)
+                encoder.writeBoolean(value.autoLoad)
+                encoder.writeString(value.instanceId)
+                encoder.writeBoolean(value.collectionId != null)
+                value.collectionId?.let(encoder::writeString)
+                callRecursive(value.meta)
+                encoder.writeBoolean(value.isSuggestionDoc)
+            }
+        }
+    }(value)
+}
+
+public fun readYValue(decoder: BinaryDecoder): YValue = readNestedYValue(decoder)
+
+private val readNestedYValue = DeepRecursiveFunction<BinaryDecoder, YValue> { decoder ->
     decoder.decodeBudget.consumeNode()
-    return when (val tag = decoder.readByte()) {
+    when (val tag = decoder.readByte()) {
         0 -> YValue.Null
         1 -> YValue.Bool(false)
         2 -> YValue.Bool(true)
@@ -206,34 +225,51 @@ public fun readYValue(decoder: BinaryDecoder): YValue {
         }
         5 -> YValue.StringValue(decoder.readString())
         6 -> YValue.BinaryValue(decoder.readBytes())
-        7 -> decoder.decodeBudget.nested {
-            val size = decoder.readVarUInt().toDecodedCount()
-            YValue.ListValue(List(size) { readYValue(decoder) })
+        7 -> {
+            decoder.decodeBudget.enter()
+            try {
+                val size = decoder.readVarUInt().toDecodedCount()
+                val values = mutableListOf<YValue>()
+                repeat(size) { values.add(callRecursive(decoder)) }
+                YValue.ListValue(values)
+            } finally {
+                decoder.decodeBudget.exit()
+            }
         }
-        8 -> decoder.decodeBudget.nested {
-            val size = decoder.readVarUInt().toDecodedCount()
-            YValue.MapValue(buildMap {
-                repeat(size) {
-                    put(decoder.readString(), readYValue(decoder))
-                }
-            })
+        8 -> {
+            decoder.decodeBudget.enter()
+            try {
+                val size = decoder.readVarUInt().toDecodedCount()
+                YValue.MapValue(buildMap {
+                    repeat(size) {
+                        put(decoder.readString(), callRecursive(decoder))
+                    }
+                })
+            } finally {
+                decoder.decodeBudget.exit()
+            }
         }
         9 -> {
             val ordinal = decoder.readByte()
             val kind = RootKind.entries.getOrNull(ordinal) ?: error("unknown type ref kind: $ordinal")
             YValue.TypeRef(kind, decoder.readString())
         }
-        10 -> decoder.decodeBudget.nested {
-            YValue.SubdocRef(
-                guid = decoder.readString(),
-                gc = decoder.readBoolean(),
-                shouldLoad = false,
-                autoLoad = decoder.readBoolean(),
-                instanceId = decoder.readString(),
-                collectionId = if (decoder.readBoolean()) decoder.readString() else null,
-                meta = readYValue(decoder),
-                isSuggestionDoc = decoder.readBoolean(),
-            )
+        10 -> {
+            decoder.decodeBudget.enter()
+            try {
+                YValue.SubdocRef(
+                    guid = decoder.readString(),
+                    gc = decoder.readBoolean(),
+                    shouldLoad = false,
+                    autoLoad = decoder.readBoolean(),
+                    instanceId = decoder.readString(),
+                    collectionId = if (decoder.readBoolean()) decoder.readString() else null,
+                    meta = callRecursive(decoder),
+                    isSuggestionDoc = decoder.readBoolean(),
+                )
+            } finally {
+                decoder.decodeBudget.exit()
+            }
         }
         11 -> YValue.Undefined
         12 -> YValue.BigIntNumber(decoder.readString().toBigInteger())

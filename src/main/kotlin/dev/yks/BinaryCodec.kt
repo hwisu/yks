@@ -37,15 +37,23 @@ internal class DecodeBudget {
         }
     }
 
-    fun <T> nested(block: () -> T): T {
+    fun enter() {
         check(depth < maximumNestingDepth) {
             "decoded value nesting exceeds limit $maximumNestingDepth"
         }
         depth++
+    }
+
+    fun exit() {
+        depth--
+    }
+
+    fun <T> nested(block: () -> T): T {
+        enter()
         return try {
             block()
         } finally {
-            depth--
+            exit()
         }
     }
 }
@@ -314,6 +322,11 @@ public class BinaryDecoder private constructor(
     private var offset = start
 
     public fun hasRemaining(): Boolean = offset < limit
+
+    internal fun peekByte(): Int {
+        check(offset < limit) { "unexpected end of input" }
+        return bytes[offset].toInt() and 0xff
+    }
 
     public fun readByte(): Int {
         check(offset < limit) { "unexpected end of input" }

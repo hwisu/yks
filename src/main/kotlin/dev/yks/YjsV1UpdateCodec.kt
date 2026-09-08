@@ -1480,8 +1480,7 @@ private fun YValue.isSupportedAnyValue(topLevel: Boolean): Boolean = when (this)
     is YValue.LongNumber -> value in -YJS_MAX_SAFE_INTEGER..YJS_MAX_SAFE_INTEGER
     is YValue.DoubleNumber -> true
     is YValue.BigIntNumber -> runCatching { value.longValueExact() }.isSuccess
-    is YValue.ListValue -> value.all { nested -> nested.isSupportedAnyValue(topLevel = false) }
-    is YValue.MapValue -> value.values.all { nested -> nested.isSupportedAnyValue(topLevel = false) }
+    is YValue.ListValue, is YValue.MapValue -> scalarValues().all { it.isSupportedAnyValue(topLevel = false) }
     is YValue.TypeRef -> topLevel && kind in setOf(RootKind.Array, RootKind.Map, RootKind.Text)
     is YValue.SubdocRef ->
         topLevel &&
@@ -1501,8 +1500,7 @@ private fun YValue.isSupportedJsonValue(): Boolean = when (this) {
     is YValue.StringValue -> true
     is YValue.LongNumber -> value in -YJS_MAX_SAFE_INTEGER..YJS_MAX_SAFE_INTEGER
     is YValue.DoubleNumber -> value.isFinite()
-    is YValue.ListValue -> value.all(YValue::isSupportedJsonValue)
-    is YValue.MapValue -> value.values.all(YValue::isSupportedJsonValue)
+    is YValue.ListValue, is YValue.MapValue -> scalarValues().all(YValue::isSupportedJsonValue)
 }
 
 private sealed interface EncodedStruct {
