@@ -66,6 +66,12 @@ Use `encodeStateAsUpdateV2` and `applyUpdateV2` for V2 connections.
 
 See [Yjs compatibility](YJS_COMPATIBILITY.md) for supported versions and wire boundaries. See the [changelog](CHANGELOG.md) for release notes.
 
+Servers receiving untrusted updates should set `-Ddev.yks.maxDecodedNestingDepth=64` on the JVM.
+This rejects excessive recursive lib0, JSON, and private-format values before exhausting the stack,
+including when inspecting, merging, or checking snapshots rather than applying an update.
+The property must be a positive integer. The default remains unrestricted for Yjs compatibility;
+the setting is a process-wide input policy, separate from `YUpdateLimits` byte and struct limits.
+
 ## Build and verification
 
 Full verification requires JDK 21, Node.js 22+, and Rust 1.97.0.
