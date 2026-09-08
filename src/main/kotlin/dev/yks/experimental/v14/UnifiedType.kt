@@ -718,6 +718,9 @@ public class Type(public val delegate: AbstractYType) {
 
     public val kind: RootKind get() = delegate.kind
 
+    /** Nominal schema marker used by the rc.25+ Node surface. */
+    public val `$type`: dev.yks.YTypeSchema<Node> get() = Yjs14SchemaMarkers.`$nodeAny`
+
     /** @y/y node name. Root storage keys remain available as [storageName]. */
     public val name: String?
         get() = when (val type = delegate) {

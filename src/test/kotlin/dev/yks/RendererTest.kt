@@ -319,6 +319,37 @@ class RendererTest {
     }
 
     @Test
+    fun acceptingSuggestedNodeIncludesAttributeHistoryAndNestedChildrenOnly() {
+        val prev = YDoc(clientId = 1, gc = false)
+        val next = cloneDoc(prev).also { it.clientId = 2 }
+        val root = next.getArray("nodes")
+        val node = YMap()
+        root.push(node)
+        node.setAttr("src", "old.png")
+        node.setAttr("src", "new.png")
+        node.setAttr("temporary", true)
+        node.deleteAttr("temporary")
+        val caption = YText()
+        node.setAttr("caption", caption)
+        caption.insert(0, "Hello!")
+        caption.delete(5, 1)
+        next.getText("unrelated").insert(0, "pending")
+        val renderer = createDiffRenderer(prev, next)
+
+        renderer.acceptChanges(getTypeStructs(root).first().id)
+
+        val acceptedRoot = prev.getArray("nodes")
+        val acceptedNode = acceptedRoot.get(0) as YMap
+        assertEquals(1, acceptedRoot.length)
+        assertEquals("new.png", acceptedNode.getAttr("src"))
+        assertFalse(acceptedNode.hasAttr("temporary"))
+        assertEquals("Hello", (acceptedNode.getAttr("caption") as YText).toString())
+        assertEquals("", prev.getText("unrelated").toString())
+        assertEquals("pending", next.getText("unrelated").toString())
+        assertFalse(renderer.inserts.isEmpty())
+    }
+
+    @Test
     fun diffRendererTracksNextDocChangesAfterConstruction() {
         val prev = YDoc(clientId = 1)
         prev.getText("body").insert(0, "a")

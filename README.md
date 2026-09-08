@@ -5,11 +5,11 @@ YKS is a Kotlin/JVM CRDT library implementing the Yjs document model and update 
 - `YArray`, `YMap`, `YText`, live XML, and subdocuments
 - Transactions, observers, snapshots, relative positions, and `UndoManager`
 - `y-protocols` compatible Awareness
-- Typed schemas and an opt-in v14 `Type`/`DeltaBuilder` facade
+- Typed schemas and an opt-in v14 `Node`/`DeltaBuilder` facade (`Type` remains available)
 - Yjs update V1/V2 apply, merge, diff, conversion, and state vectors
 - Thread-access policies and external-update resource limits
 
-Bidirectional wire interoperability is tested against Yjs `13.6.32`, `@y/y` `14.0.0-rc.24`, and Yrs `0.27.2` in UTF-16 mode.
+Bidirectional wire interoperability is tested against Yjs `13.6.32`, `@y/y` `14.0.0-rc.26`, and Yrs `0.27.2` in UTF-16 mode.
 
 ## Installation
 
@@ -37,7 +37,7 @@ dependencyResolutionManagement {
 }
 
 // build.gradle.kts
-dependencies { implementation("dev.yks:yks:0.2.12") }
+dependencies { implementation("dev.yks:yks:0.2.13") }
 ```
 
 ## Quick start

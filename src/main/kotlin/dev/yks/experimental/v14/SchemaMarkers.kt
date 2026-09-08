@@ -8,7 +8,6 @@ import dev.yks.YSchema
 import dev.yks.YTypeSchema
 import dev.yks.namedTypeSchema
 import dev.yks.predicateSchema
-import dev.yks.rendererSchema
 import dev.yks.ydocSchema
 
 /**
@@ -20,6 +19,18 @@ import dev.yks.ydocSchema
 @ExperimentalYjs14Api
 public object Yjs14SchemaMarkers {
     @JvmField
+    public val `$doc`: YTypeSchema<YDoc> = ydocSchema
+
+    @JvmField
+    public val `$nodeAny`: YTypeSchema<Node> = namedTypeSchema("y:node") { value -> value is Node }
+
+    /** Check nominal node identity and its immutable name, as upstream rc.26 does. */
+    public fun `$node`(name: String? = null): YSchema<Node> =
+        predicateSchema("an experimental v14 Node named '$name'") { value ->
+            value is Node && (name == null || value.name == name)
+        }
+
+    @JvmField
     public val `$ydoc`: YTypeSchema<YDoc> = ydocSchema
 
     @JvmField
@@ -29,5 +40,6 @@ public object Yjs14SchemaMarkers {
     public fun `$ytype`(): YSchema<Type> = `$ytypeAny`
 
     @JvmField
-    public val `$renderer`: YTypeSchema<AbstractRenderer> = rendererSchema
+    public val `$renderer`: YTypeSchema<AbstractRenderer> =
+        namedTypeSchema("y:renderer") { value -> value is AbstractRenderer }
 }

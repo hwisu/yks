@@ -11,6 +11,26 @@ import kotlin.test.assertTrue
 
 class RelativePositionTest {
     @Test
+    fun snapshotRenderersRetainCursorOffsetsInsideDeletedNodes() {
+        val doc = YDoc(clientId = 1, gc = false)
+        val root = doc.getArray("nodes")
+        val child = YText()
+        root.push(child)
+        child.insert(0, "abc")
+        val renderer = createSnapshotRenderer(snapshot(doc))
+        val positions = (-1..1).map { assoc -> createRelativePositionFromTypeIndex(child, 1, assoc) }
+        root.delete(0, 1)
+
+        positions.forEach { position ->
+            assertEquals(0, createAbsolutePositionFromRelativePosition(position, doc)?.index)
+            val rendered = assertNotNull(createAbsolutePositionFromRelativePosition(position, doc, renderer = renderer))
+            assertEquals(child, rendered.type)
+            assertEquals(1, rendered.index)
+            assertEquals(position.assoc, rendered.assoc)
+        }
+    }
+
+    @Test
     fun relativePositionRoundTripsAcrossUpstreamFragmentedInsertCases() {
         val cases = listOf<(YText) -> Unit>(
             { text ->

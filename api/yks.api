@@ -4099,6 +4099,11 @@ public final class dev/yks/experimental/v14/FormatChange$Unchanged : dev/yks/exp
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class dev/yks/experimental/v14/NodeKt {
+	public static final fun asV14Node (Ldev/yks/AbstractYType;)Ldev/yks/experimental/v14/Type;
+	public static final fun getNode (Ldev/yks/YDoc;Ljava/lang/String;Ldev/yks/RootKind;)Ldev/yks/experimental/v14/Type;
+}
+
 public final class dev/yks/experimental/v14/Type {
 	public fun <init> (Ldev/yks/AbstractYType;)V
 	public final fun applyDelta (Ldev/yks/experimental/v14/Delta;Ljava/lang/Object;)V
@@ -4121,6 +4126,7 @@ public final class dev/yks/experimental/v14/Type {
 	public final fun format (IILjava/util/Map;Ljava/lang/Object;)V
 	public static synthetic fun format$default (Ldev/yks/experimental/v14/Type;IILjava/util/Map;Ljava/lang/Object;ILjava/lang/Object;)V
 	public final fun get (I)Ldev/yks/experimental/v14/DeltaValue;
+	public final fun get$type ()Ldev/yks/YTypeSchema;
 	public final fun getAttr (Ljava/lang/String;)Ldev/yks/experimental/v14/DeltaValue;
 	public final fun getAttrSize ()I
 	public final fun getAttrs ()Ljava/util/Map;
@@ -4191,10 +4197,14 @@ public final class dev/yks/experimental/v14/UnifiedTypeKt {
 }
 
 public final class dev/yks/experimental/v14/Yjs14SchemaMarkers {
+	public static final field $doc Ldev/yks/YTypeSchema;
+	public static final field $nodeAny Ldev/yks/YTypeSchema;
 	public static final field $renderer Ldev/yks/YTypeSchema;
 	public static final field $ydoc Ldev/yks/YTypeSchema;
 	public static final field $ytypeAny Ldev/yks/YSchema;
 	public static final field INSTANCE Ldev/yks/experimental/v14/Yjs14SchemaMarkers;
+	public final fun $node (Ljava/lang/String;)Ldev/yks/YSchema;
+	public static synthetic fun $node$default (Ldev/yks/experimental/v14/Yjs14SchemaMarkers;Ljava/lang/String;ILjava/lang/Object;)Ldev/yks/YSchema;
 	public final fun $ytype ()Ldev/yks/YSchema;
 }
 

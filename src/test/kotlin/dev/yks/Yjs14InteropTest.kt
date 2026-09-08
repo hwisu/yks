@@ -166,7 +166,7 @@ class Yjs14InteropTest {
         assertTrue(output.isBlank(), output)
         val packageJson = projectDirectory.resolve("node_modules/yjs14/package.json").toFile().readText()
         val installed = checkNotNull(Regex("\\\"version\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"").find(packageJson)).groupValues[1]
-        assertEquals("14.0.0-rc.24", installed)
+        assertEquals("14.0.0-rc.26", installed)
     }
 
     private fun runNode(vararg arguments: String): String {

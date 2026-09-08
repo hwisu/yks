@@ -117,7 +117,7 @@ public fun createAbsolutePositionFromRelativePosition(
         } else {
             0L
         }
-        val includeAnchor = !anchorUnit.deleted && (
+        val includeAnchor = rendererContentLength(renderer, anchorUnit.toItemStruct(doc)) > 0 && (
             relativePosition.assoc < 0 ||
                 (!followUndoneDeletions && originalItem.deleted && anchorId != itemId)
             )

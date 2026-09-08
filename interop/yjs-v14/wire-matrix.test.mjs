@@ -12,7 +12,7 @@ const createV14Document = () => {
   doc.get('body').insert(0, 'A😀한', { bold: true })
   doc.get('items').insert(0, [1, 'x', true])
   doc.get('meta').setAttr('title', 'hello')
-  const paragraph = new Y14.Type('p')
+  const paragraph = new Y14.Node('p')
   paragraph.setAttr('id', 'intro')
   paragraph.insert(0, 'hello')
   doc.get('xml').push([paragraph])
