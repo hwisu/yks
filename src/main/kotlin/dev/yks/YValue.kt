@@ -51,10 +51,18 @@ public sealed interface YValue {
 
     public data class ListValue(val value: List<YValue>) : YValue {
         override fun toAny(): Any = foldYValue(this, { it }, { it }, YValue::toAny)!!
+
+        override fun equals(other: Any?): Boolean = other is ListValue && nestedYValuesEqual(this, other)
+
+        override fun hashCode(): Int = nestedYValueHash(this)
     }
 
     public data class MapValue(val value: Map<String, YValue>) : YValue {
         override fun toAny(): Any = foldYValue(this, { it }, { it }, YValue::toAny)!!
+
+        override fun equals(other: Any?): Boolean = other is MapValue && nestedYValuesEqual(this, other)
+
+        override fun hashCode(): Int = nestedYValueHash(this)
     }
 
     public data class TypeRef(val kind: RootKind, val name: String) : YValue {

@@ -66,7 +66,7 @@ Use `encodeStateAsUpdateV2` and `applyUpdateV2` for V2 connections.
 
 See [Yjs compatibility](YJS_COMPATIBILITY.md) for supported versions and wire boundaries. See the [changelog](CHANGELOG.md) for release notes.
 
-Recursive value decoding, copying, and encoding use heap-backed traversal, so deeply nested
+Nested list/map value decoding, copying, comparison, hashing, and encoding use heap-backed traversal, so deeply nested
 lib0, JSON, and private-format values do not require an arbitrary nesting cutoff to protect
 the JVM stack on these paths. Standard Yjs V1/V2 update bytes and accepted value semantics
 remain unchanged. Continue to configure `YUpdateLimits` for untrusted channels.

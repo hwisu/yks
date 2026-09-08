@@ -45,15 +45,33 @@ class StackSafeValuesTest {
         val json = "{\"next\":".repeat(10_000) + "null" + "}".repeat(10_000)
         val value = parseJsonLiteral(json)
         val original = YDoc(clientId = 1)
-        original.getText("body").insert(0, "x")
+        original.getText("body").insert(0, "xy")
         original.getText("body").format(0, 1, mapOf("deep" to value))
         val restored = YDoc(clientId = 2)
         restored.getText("body")
         applyUpdate(restored, encodeStateAsUpdate(original))
-        assertEquals("x", restored.getText("body").toString())
+        original.getText("body").format(1, 1, mapOf("deep" to parseJsonLiteral(json)))
+        applyUpdate(restored, encodeStateAsUpdate(original, restored.encodeStateVector()))
+        assertEquals("xy", restored.getText("body").toString())
         encodeStateAsUpdateV2(restored)
-        restored.getText("body").format(0, 1, mapOf("deep" to null))
-        assertEquals("x", restored.getText("body").toString())
+        restored.getText("body").format(0, 2, mapOf("deep" to null))
+        assertEquals("xy", restored.getText("body").toString())
+    }
+
+    @Test
+    fun deepValueEqualityAndHashingRetainCollectionSemantics() {
+        for ((open, close) in listOf("[" to "]", "{\"next\":" to "}")) {
+            val json = open.repeat(10_000) + "null" + close.repeat(10_000)
+            val left = YValue.from(parseJsonLiteral(json))
+            val right = YValue.from(parseJsonLiteral(json))
+            assertEquals(left, right)
+            assertEquals(left.hashCode(), right.hashCode())
+        }
+        val list = YValue.ListValue(listOf(YValue.Null, YValue.StringValue("leaf")))
+        assertEquals(list.value.hashCode(), list.hashCode())
+        val map = YValue.MapValue(mapOf("a" to list, "b" to YValue.Null))
+        assertEquals(map.value.hashCode(), map.hashCode())
+        assertEquals(map, YValue.MapValue(mapOf("b" to YValue.Null, "a" to list)))
     }
 
     private fun nestedUpdate(depth: Int): ByteArray = BinaryEncoder().apply {

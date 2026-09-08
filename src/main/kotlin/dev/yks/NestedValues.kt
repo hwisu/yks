@@ -46,3 +46,33 @@ internal fun copyNestedContent(value: Any?): Any? {
         }
     }(value)
 }
+
+/** Preserves data-class collection equality without using recursive collection equals. */
+internal fun nestedYValuesEqual(left: YValue, right: YValue): Boolean {
+    if (left === right) return true
+    return compareNestedYValues(left to right)
+}
+
+private val compareNestedYValues = DeepRecursiveFunction<Pair<YValue, YValue>, Boolean> { (left, right) ->
+    when {
+        left === right -> true
+        left is YValue.ListValue && right is YValue.ListValue ->
+            left.value.size == right.value.size && left.value.indices.all { index ->
+                callRecursive(left.value[index] to right.value[index])
+            }
+        left is YValue.MapValue && right is YValue.MapValue ->
+            left.value.keys == right.value.keys && left.value.all { (key, nested) ->
+                callRecursive(nested to right.value.getValue(key))
+            }
+        left is YValue.ListValue || left is YValue.MapValue -> false
+        else -> left == right
+    }
+}
+
+/** Matches List.hashCode and Map.hashCode, including order-independent map hashing. */
+internal fun nestedYValueHash(value: YValue): Int = foldYValue(
+    value,
+    { values -> values.fold(1) { hash, nested -> 31 * hash + nested } },
+    { values -> values.entries.sumOf { (key, nested) -> key.hashCode() xor nested } },
+    YValue::hashCode,
+)
