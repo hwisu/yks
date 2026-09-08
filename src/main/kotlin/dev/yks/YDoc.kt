@@ -1905,72 +1905,76 @@ public class YDoc(
     }
 
     private fun validateStoreValue(value: Any?) {
-        when (value) {
-            null,
-            is YValue,
-            is AbstractYType,
-            is Boolean,
-            is Byte,
-            is Short,
-            is Int,
-            is Long,
-            is java.math.BigInteger,
-            is Float,
-            is Double,
-            is String,
-            is ByteArray -> Unit
-            is YDoc -> require(value !== this) { "a document cannot contain itself as a subdoc" }
-            is List<*> -> value.forEach(::validateStoreValue)
-            is Array<*> -> value.forEach(::validateStoreValue)
-            is Map<*, *> -> value.forEach { (key, nested) ->
-                require(key is String) { "YValue map keys must be strings" }
-                validateStoreValue(nested)
+        DeepRecursiveFunction<Any?, Unit> { value ->
+            when (value) {
+                null,
+                is YValue,
+                is AbstractYType,
+                is Boolean,
+                is Byte,
+                is Short,
+                is Int,
+                is Long,
+                is java.math.BigInteger,
+                is Float,
+                is Double,
+                is String,
+                is ByteArray -> Unit
+                is YDoc -> require(value !== this@YDoc) { "a document cannot contain itself as a subdoc" }
+                is List<*> -> value.forEach { callRecursive(it) }
+                is Array<*> -> value.forEach { callRecursive(it) }
+                is Map<*, *> -> value.forEach { (key, nested) ->
+                    require(key is String) { "YValue map keys must be strings" }
+                    callRecursive(nested)
+                }
+                else -> error("unsupported YValue type: ${value::class.qualifiedName}")
             }
+        }(value)
+    }
+
+    private fun storeAnyValue(value: Any?): YValue = DeepRecursiveFunction<Any?, YValue> { value ->
+        when (value) {
+            null -> YValue.Null
+            is YValue.TypeRef -> registerNestedTypeRefValue(value)
+            is YValue -> value.copyForStorage()
+            is AbstractYType -> registerNestedTypeValue(value).let { nested ->
+                YValue.TypeRef(nested.kind, nested.name)
+            }
+            is YDoc -> registerSubdocValue(value)
+            is Boolean -> YValue.Bool(value)
+            is Byte -> YValue.LongNumber(value.toLong())
+            is Short -> YValue.LongNumber(value.toLong())
+            is Int -> YValue.LongNumber(value.toLong())
+            is Long -> YValue.LongNumber(value)
+            is java.math.BigInteger -> YValue.BigIntNumber(value)
+            is Float -> YValue.DoubleNumber(value.toDouble())
+            is Double -> YValue.DoubleNumber(value)
+            is String -> YValue.StringValue(value)
+            is ByteArray -> YValue.BinaryValue(value)
+            is List<*> -> YValue.ListValue(value.map { callRecursive(it) })
+            is Array<*> -> YValue.ListValue(value.map { callRecursive(it) })
+            is Map<*, *> -> YValue.MapValue(value.entries.associate { (key, nested) ->
+                require(key is String) { "YValue map keys must be strings" }
+                key to callRecursive(nested)
+            })
             else -> error("unsupported YValue type: ${value::class.qualifiedName}")
         }
-    }
+    }(value)
 
-    private fun storeAnyValue(value: Any?): YValue = when (value) {
-        null -> YValue.Null
-        is YValue.TypeRef -> registerNestedTypeRefValue(value)
-        is YValue -> value.copyForStorage()
-        is AbstractYType -> registerNestedTypeValue(value).let { nested ->
-            YValue.TypeRef(nested.kind, nested.name)
+    internal fun valueToAny(value: YValue): Any? = foldYValue(value, { it }, { it }) { scalar ->
+        when (scalar) {
+            is YValue.TypeRef -> typeFromRef(scalar)
+            is YValue.SubdocRef -> subdocFromRef(scalar)
+            else -> scalar.toAny()
         }
-        is YDoc -> registerSubdocValue(value)
-        is Boolean -> YValue.Bool(value)
-        is Byte -> YValue.LongNumber(value.toLong())
-        is Short -> YValue.LongNumber(value.toLong())
-        is Int -> YValue.LongNumber(value.toLong())
-        is Long -> YValue.LongNumber(value)
-        is java.math.BigInteger -> YValue.BigIntNumber(value)
-        is Float -> YValue.DoubleNumber(value.toDouble())
-        is Double -> YValue.DoubleNumber(value)
-        is String -> YValue.StringValue(value)
-        is ByteArray -> YValue.BinaryValue(value)
-        is List<*> -> YValue.ListValue(value.map(::storeAnyValue))
-        is Array<*> -> YValue.ListValue(value.map(::storeAnyValue))
-        is Map<*, *> -> YValue.MapValue(value.entries.associate { (key, nested) ->
-            require(key is String) { "YValue map keys must be strings" }
-            key to storeAnyValue(nested)
-        })
-        else -> error("unsupported YValue type: ${value::class.qualifiedName}")
     }
 
-    internal fun valueToAny(value: YValue): Any? = when (value) {
-        is YValue.TypeRef -> typeFromRef(value)
-        is YValue.SubdocRef -> subdocFromRef(value)
-        is YValue.ListValue -> value.value.map { valueToAny(it) }
-        is YValue.MapValue -> value.value.mapValues { (_, nested) -> valueToAny(nested) }
-        else -> value.toAny()
-    }
-
-    internal fun valueToJson(value: YValue): Any? = when (value) {
-        is YValue.TypeRef -> typeFromRef(value).toJson()
-        is YValue.SubdocRef -> mapOf("guid" to value.guid)
-        is YValue.ListValue -> value.value.map { valueToJson(it) }
-        is YValue.MapValue -> value.value.mapValues { (_, nested) -> valueToJson(nested) }
-        else -> value.toAny()
+    internal fun valueToJson(value: YValue): Any? = foldYValue(value, { it }, { it }) { scalar ->
+        when (scalar) {
+            is YValue.TypeRef -> typeFromRef(scalar).toJson()
+            is YValue.SubdocRef -> mapOf("guid" to scalar.guid)
+            else -> scalar.toAny()
+        }
     }
 
     internal fun pathBetween(
@@ -2806,13 +2810,13 @@ public class YDoc(
                 }
             }
             textFormatParents.forEach { parent ->
-                    if (deferredTextFormatParents == null) {
-                        reapplyTextFormats(parent)
-                    } else {
-                        deferredTextFormatParents.add(parent)
-                    }
-                    currentTransaction?.markChanged(parent, null)
+                if (deferredTextFormatParents == null) {
+                    reapplyTextFormats(parent)
+                } else {
+                    deferredTextFormatParents.add(parent)
                 }
+                currentTransaction?.markChanged(parent, null)
+            }
         }
     }
 
@@ -2844,18 +2848,18 @@ public class YDoc(
             .mapNotNull { item -> item.parentSub?.let { key -> item.parent to key } }
             .distinct()
             .forEach { (parent, parentSub) ->
-            val logicalItems = mapItemOrder(parent, parentSub)
-            logicalItems.forEachAdjacentPair { left, right ->
-                val leftWillBeDeleted = !left.deleted && deleteSet.contains(left.id)
-                val rightWillBeDeleted = !right.deleted && deleteSet.contains(right.id)
-                if (
-                    leftWillBeDeleted != rightWillBeDeleted &&
-                    left.canVirtuallyMerge(left, right, logicallyAdjacent = true)
-                ) {
-                    transaction.mergeStructs.add(right.id)
+                val logicalItems = mapItemOrder(parent, parentSub)
+                logicalItems.forEachAdjacentPair { left, right ->
+                    val leftWillBeDeleted = !left.deleted && deleteSet.contains(left.id)
+                    val rightWillBeDeleted = !right.deleted && deleteSet.contains(right.id)
+                    if (
+                        leftWillBeDeleted != rightWillBeDeleted &&
+                        left.canVirtuallyMerge(left, right, logicallyAdjacent = true)
+                    ) {
+                        transaction.mergeStructs.add(right.id)
+                    }
                 }
             }
-        }
     }
 
     private fun expandDeleteSetWithNestedTypeContent(deleteSet: DeleteSet): DeleteSet {
@@ -4705,11 +4709,21 @@ public class YDoc(
         when (value) {
             is YValue.TypeRef -> {
                 rememberNestedTypeRef(value)
+                return
             }
-            is YValue.SubdocRef -> subdocFromRef(value)
-            is YValue.ListValue -> value.value.forEach(::rememberNestedRefs)
-            is YValue.MapValue -> value.value.values.forEach(::rememberNestedRefs)
-            else -> Unit
+            is YValue.SubdocRef -> {
+                subdocFromRef(value)
+                return
+            }
+            is YValue.ListValue, is YValue.MapValue -> Unit
+            else -> return
+        }
+        value.scalarValues().forEach { scalar ->
+            when (scalar) {
+                is YValue.TypeRef -> rememberNestedTypeRef(scalar)
+                is YValue.SubdocRef -> subdocFromRef(scalar)
+                else -> Unit
+            }
         }
     }
 
@@ -4752,72 +4766,74 @@ public class YDoc(
         return value
     }
 
+    private fun needsPreliminaryVisit(value: Any?): Boolean = when (value) {
+        is AbstractYType, is YTextDelta, is YTextDeepDelta, is YArrayDeepDelta,
+        is YMapDeepDelta, is YXmlFragmentDeepDelta, is YXmlElementDeepDelta,
+        is Map<*, *>, is Iterable<*>, is Array<*> -> true
+        else -> false
+    }
+
     private fun preparePreliminaryGraph(value: Any?) {
+        if (!needsPreliminaryVisit(value)) return
         val visiting = java.util.IdentityHashMap<AbstractYType, Boolean>()
         val visited = java.util.IdentityHashMap<AbstractYType, Boolean>()
         val ordered = mutableListOf<AbstractYType>()
 
-        lateinit var visitValue: (Any?) -> Unit
-        lateinit var visitType: (AbstractYType) -> Unit
-
-        visitValue = { raw ->
+        DeepRecursiveFunction<Any?, Unit> { raw ->
             when (raw) {
-                is AbstractYType -> visitType(raw)
+                is AbstractYType -> {
+                    val type = raw
+                    captureTypeStateForMutation(type)
+                    require(visiting[type] != true) { "shared type graph contains a cycle" }
+                    require(visited[type] != true) { "shared type instance occurs more than once in the inserted graph" }
+                    when (val current = type.binding) {
+                        YTypeBinding.Detached -> Unit
+                        is YTypeBinding.Reserved -> {
+                            require(current.doc === this@YDoc) { "shared type is reserved for another document" }
+                            require(!hasNestedTypeReference(current.name)) { "shared type '${current.name}' is already defined" }
+                        }
+                        is YTypeBinding.Root -> require(false) { "root shared types cannot be inserted as nested content" }
+                        is YTypeBinding.Nested -> require(false) {
+                            "shared type is already integrated; clone it explicitly before reinsertion"
+                        }
+                    }
+                    validatePreliminaryContent(type)
+                    visiting[type] = true
+                    ordered.add(type)
+                    type.preliminaryGraphValues().forEach { nested -> if (needsPreliminaryVisit(nested)) callRecursive(nested) }
+                    visiting.remove(type)
+                    visited[type] = true
+                }
                 is YTextDelta -> raw.ops.forEach { op ->
-                    visitValue(op.insert)
-                    visitValue(op.attributes)
+                    if (needsPreliminaryVisit(op.insert)) callRecursive(op.insert)
+                    if (needsPreliminaryVisit(op.attributes)) callRecursive(op.attributes)
                 }
                 is YTextDeepDelta -> {
-                    visitValue(raw.attrs)
-                    visitValue(raw.delta)
+                    if (needsPreliminaryVisit(raw.attrs)) callRecursive(raw.attrs)
+                    if (needsPreliminaryVisit(raw.delta)) callRecursive(raw.delta)
                 }
                 is YArrayDeepDelta -> {
-                    visitValue(raw.attrs)
-                    raw.delta.forEach { op -> visitValue(op.insert) }
+                    if (needsPreliminaryVisit(raw.attrs)) callRecursive(raw.attrs)
+                    raw.delta.forEach { op -> if (needsPreliminaryVisit(op.insert)) callRecursive(op.insert) }
                 }
-                is YMapDeepDelta -> visitValue(raw.attrs)
+                is YMapDeepDelta -> if (needsPreliminaryVisit(raw.attrs)) callRecursive(raw.attrs)
                 is YXmlFragmentDeepDelta -> {
-                    visitValue(raw.attrs)
-                    raw.delta.forEach { op -> visitValue(op.insert) }
+                    if (needsPreliminaryVisit(raw.attrs)) callRecursive(raw.attrs)
+                    raw.delta.forEach { op -> if (needsPreliminaryVisit(op.insert)) callRecursive(op.insert) }
                 }
                 is YXmlElementDeepDelta -> {
-                    visitValue(raw.attrs)
-                    raw.children.forEach { child -> visitValue(child) }
+                    if (needsPreliminaryVisit(raw.attrs)) callRecursive(raw.attrs)
+                    raw.children.forEach { child -> if (needsPreliminaryVisit(child)) callRecursive(child) }
                 }
                 is Map<*, *> -> raw.forEach { (key, nested) ->
                     require(key is String) { "YValue map keys must be strings" }
-                    visitValue(nested)
+                    if (needsPreliminaryVisit(nested)) callRecursive(nested)
                 }
-                is Iterable<*> -> raw.forEach { nested -> visitValue(nested) }
-                is Array<*> -> raw.forEach { nested -> visitValue(nested) }
+                is Iterable<*> -> raw.forEach { nested -> if (needsPreliminaryVisit(nested)) callRecursive(nested) }
+                is Array<*> -> raw.forEach { nested -> if (needsPreliminaryVisit(nested)) callRecursive(nested) }
                 else -> Unit
             }
-        }
-
-        visitType = { type ->
-            captureTypeStateForMutation(type)
-            require(visiting[type] != true) { "shared type graph contains a cycle" }
-            require(visited[type] != true) { "shared type instance occurs more than once in the inserted graph" }
-            when (val current = type.binding) {
-                YTypeBinding.Detached -> Unit
-                is YTypeBinding.Reserved -> {
-                    require(current.doc === this) { "shared type is reserved for another document" }
-                    require(!hasNestedTypeReference(current.name)) { "shared type '${current.name}' is already defined" }
-                }
-                is YTypeBinding.Root -> require(false) { "root shared types cannot be inserted as nested content" }
-                is YTypeBinding.Nested -> require(false) {
-                    "shared type is already integrated; clone it explicitly before reinsertion"
-                }
-            }
-            validatePreliminaryContent(type)
-            visiting[type] = true
-            ordered.add(type)
-            type.preliminaryGraphValues().forEach { nested -> visitValue(nested) }
-            visiting.remove(type)
-            visited[type] = true
-        }
-
-        visitValue(value)
+        }(value)
         ordered.forEach { type ->
             if (type.binding is YTypeBinding.Detached) {
                 val reservedName = nextNestedTypeName()
@@ -4870,8 +4886,7 @@ public class YDoc(
 
     private fun YValue.nestedTypeRefNames(): Set<String> = when (this) {
         is YValue.TypeRef -> setOf(name)
-        is YValue.ListValue -> value.flatMap { nested -> nested.nestedTypeRefNames() }.toSet()
-        is YValue.MapValue -> value.values.flatMap { nested -> nested.nestedTypeRefNames() }.toSet()
+        is YValue.ListValue, is YValue.MapValue -> scalarValues().filterIsInstance<YValue.TypeRef>().map { it.name }.toSet()
         else -> emptySet()
     }
 
@@ -5015,15 +5030,13 @@ public class YDoc(
 
     private fun YValue.hasSubdocRefs(): Boolean = when (this) {
         is YValue.SubdocRef -> true
-        is YValue.ListValue -> value.any { nested -> nested.hasSubdocRefs() }
-        is YValue.MapValue -> value.values.any { nested -> nested.hasSubdocRefs() }
+        is YValue.ListValue, is YValue.MapValue -> scalarValues().any { it is YValue.SubdocRef }
         else -> false
     }
 
     private fun subdocRefs(value: YValue): List<YValue.SubdocRef> = when (value) {
         is YValue.SubdocRef -> listOf(value)
-        is YValue.ListValue -> value.value.flatMap(::subdocRefs)
-        is YValue.MapValue -> value.value.values.flatMap(::subdocRefs)
+        is YValue.ListValue, is YValue.MapValue -> value.scalarValues().filterIsInstance<YValue.SubdocRef>().toList()
         else -> emptyList()
     }
 

@@ -3,9 +3,9 @@ package dev.yks
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 
-// These are representation limits, not policy limits. A standard Yjs update must not be
-// rejected merely because it crosses a YKS-specific safety threshold. Applications that accept
-// untrusted updates can opt in to smaller, document-level limits through YUpdateLimits.
+// Representation limits remain unrestricted for Yjs compatibility. Server processes accepting
+// untrusted updates can opt into a recursive-value depth ceiling for every decoder entry point,
+// including merge/snapshot inspection, with -Ddev.yks.maxDecodedNestingDepth=64.
 internal const val MAX_DECODED_COLLECTION_SIZE: Int = Int.MAX_VALUE
 internal const val MAX_DECODED_BINARY_SIZE: Int = Int.MAX_VALUE
 internal const val MAX_DECODED_NESTING_DEPTH: Int = Int.MAX_VALUE
@@ -13,6 +13,11 @@ internal const val MAX_DECODED_VALUE_NODES: Int = Int.MAX_VALUE
 internal const val MAX_DECODED_TOTAL_PAYLOAD_SIZE: Long = Long.MAX_VALUE
 
 internal class DecodeBudget {
+    private val maximumNestingDepth = System.getProperty("dev.yks.maxDecodedNestingDepth")?.let { value ->
+        requireNotNull(value.toIntOrNull()?.takeIf { it > 0 }) {
+            "dev.yks.maxDecodedNestingDepth must be a positive integer"
+        }
+    } ?: MAX_DECODED_NESTING_DEPTH
     private var depth = 0
     private var nodes = 0
     private var payloadBytes = 0L
@@ -32,15 +37,23 @@ internal class DecodeBudget {
         }
     }
 
-    fun <T> nested(block: () -> T): T {
-        check(depth < MAX_DECODED_NESTING_DEPTH) {
-            "decoded value nesting exceeds limit $MAX_DECODED_NESTING_DEPTH"
+    fun enter() {
+        check(depth < maximumNestingDepth) {
+            "decoded value nesting exceeds limit $maximumNestingDepth"
         }
         depth++
+    }
+
+    fun exit() {
+        depth--
+    }
+
+    fun <T> nested(block: () -> T): T {
+        enter()
         return try {
             block()
         } finally {
-            depth--
+            exit()
         }
     }
 }
@@ -309,6 +322,11 @@ public class BinaryDecoder private constructor(
     private var offset = start
 
     public fun hasRemaining(): Boolean = offset < limit
+
+    internal fun peekByte(): Int {
+        check(offset < limit) { "unexpected end of input" }
+        return bytes[offset].toInt() and 0xff
+    }
 
     public fun readByte(): Int {
         check(offset < limit) { "unexpected end of input" }

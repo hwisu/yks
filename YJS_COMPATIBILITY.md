@@ -23,6 +23,7 @@ YKS is a Kotlin/JVM engine for Yjs wire and document semantics, not a JavaScript
 ## Operational boundaries
 
 - Default `YUpdateLimits` allow JVM representation limits for compatibility. Configure smaller document-specific limits for untrusted channels.
+- Recursive value decoding and conversion use heap-backed traversal. The optional JVM property `dev.yks.maxDecodedNestingDepth` imposes an application policy on otherwise valid values; leave it unset to retain the default depth compatibility.
 - `YDoc` and attached types are thread-confined by default. Coroutine/server integrations must serialize access and use `EXTERNALLY_SERIALIZED`.
 - WebSocket/WebRTC providers and ProseMirror/Tiptap/CodeMirror bindings are out of scope.
 

@@ -16,6 +16,33 @@ private const val LIB0_BINARY = 116
 internal data object Lib0Undefined
 
 internal fun writeLib0Any(encoder: BinaryEncoder, value: Any?) {
+    if (value !is List<*> && value !is Array<*> && value !is Map<*, *>) {
+        writeScalarLib0Any(encoder, value)
+        return
+    }
+    DeepRecursiveFunction<Any?, Unit> { value ->
+        when (value) {
+            is List<*> -> {
+                encoder.writeByte(LIB0_ARRAY)
+                encoder.writeVarUInt(value.size.toLong())
+                value.forEach { nested -> callRecursive(nested) }
+            }
+            is Array<*> -> callRecursive(value.toList())
+            is Map<*, *> -> {
+                encoder.writeByte(LIB0_OBJECT)
+                encoder.writeVarUInt(value.size.toLong())
+                value.entries.sortedWith(jsObjectEntryComparator).forEach { (key, nested) ->
+                    require(key is String) { "lib0 object keys must be strings" }
+                    encoder.writeString(key)
+                    callRecursive(nested)
+                }
+            }
+            else -> writeScalarLib0Any(encoder, value)
+        }
+    }(value)
+}
+
+private fun writeScalarLib0Any(encoder: BinaryEncoder, value: Any?) {
     when (value) {
         Lib0Undefined,
         YValue.Undefined -> encoder.writeByte(LIB0_UNDEFINED)
@@ -42,21 +69,6 @@ internal fun writeLib0Any(encoder: BinaryEncoder, value: Any?) {
         is ByteArray -> {
             encoder.writeByte(LIB0_BINARY)
             encoder.writeBytes(value)
-        }
-        is List<*> -> {
-            encoder.writeByte(LIB0_ARRAY)
-            encoder.writeVarUInt(value.size.toLong())
-            value.forEach { nested -> writeLib0Any(encoder, nested) }
-        }
-        is Array<*> -> writeLib0Any(encoder, value.toList())
-        is Map<*, *> -> {
-            encoder.writeByte(LIB0_OBJECT)
-            encoder.writeVarUInt(value.size.toLong())
-            value.entries.sortedWith(jsObjectEntryComparator).forEach { (key, nested) ->
-                require(key is String) { "lib0 object keys must be strings" }
-                encoder.writeString(key)
-                writeLib0Any(encoder, nested)
-            }
         }
         else -> error("unsupported lib0 value: ${value::class.qualifiedName}")
     }
@@ -107,30 +119,53 @@ private fun String.jsArrayIndex(): Long? {
 }
 
 internal fun readLib0Any(decoder: BinaryDecoder): Any? {
+    val tag = decoder.peekByte()
+    if (tag == LIB0_OBJECT || tag == LIB0_ARRAY) return readNestedLib0Any(decoder)
     decoder.decodeBudget.consumeNode()
-    return when (val tag = decoder.readByte()) {
-        LIB0_UNDEFINED -> Lib0Undefined
-        LIB0_NULL -> null
-        LIB0_INTEGER -> decoder.readLib0VarIntWithSign().let { (value, negative) ->
-            if (value == 0L && negative) -0.0 else value
-        }
-        LIB0_FLOAT32 -> decoder.readFloat32().toDouble()
-        LIB0_FLOAT64 -> decoder.readFloat64()
-        LIB0_BIGINT -> java.math.BigInteger.valueOf(decoder.readInt64())
-        LIB0_FALSE -> false
-        LIB0_TRUE -> true
-        LIB0_STRING -> decoder.readString()
-        LIB0_OBJECT -> decoder.decodeBudget.nested {
-            buildMap {
-                repeat(decoder.readVarUInt().toDecodedCount()) {
-                    put(decoder.readString(), readLib0Any(decoder))
+    return readScalarLib0Any(decoder, decoder.readByte())
+}
+
+private val readNestedLib0Any = DeepRecursiveFunction<BinaryDecoder, Any?> { decoder ->
+    decoder.decodeBudget.consumeNode()
+    when (val tag = decoder.readByte()) {
+        LIB0_OBJECT -> {
+            decoder.decodeBudget.enter()
+            try {
+                buildMap {
+                    repeat(decoder.readVarUInt().toDecodedCount()) {
+                        put(decoder.readString(), callRecursive(decoder))
+                    }
                 }
+            } finally {
+                decoder.decodeBudget.exit()
             }
         }
-        LIB0_ARRAY -> decoder.decodeBudget.nested {
-            buildDecodedList(decoder.readVarUInt().toDecodedCount()) { readLib0Any(decoder) }
+        LIB0_ARRAY -> {
+            decoder.decodeBudget.enter()
+            try {
+                val values = mutableListOf<Any?>()
+                repeat(decoder.readVarUInt().toDecodedCount()) { values.add(callRecursive(decoder)) }
+                values
+            } finally {
+                decoder.decodeBudget.exit()
+            }
         }
-        LIB0_BINARY -> decoder.readBytes()
-        else -> error("unknown lib0 any tag: $tag")
+        else -> readScalarLib0Any(decoder, tag)
     }
+}
+
+private fun readScalarLib0Any(decoder: BinaryDecoder, tag: Int): Any? = when (tag) {
+    LIB0_UNDEFINED -> Lib0Undefined
+    LIB0_NULL -> null
+    LIB0_INTEGER -> decoder.readLib0VarIntWithSign().let { (value, negative) ->
+        if (value == 0L && negative) -0.0 else value
+    }
+    LIB0_FLOAT32 -> decoder.readFloat32().toDouble()
+    LIB0_FLOAT64 -> decoder.readFloat64()
+    LIB0_BIGINT -> java.math.BigInteger.valueOf(decoder.readInt64())
+    LIB0_FALSE -> false
+    LIB0_TRUE -> true
+    LIB0_STRING -> decoder.readString()
+    LIB0_BINARY -> decoder.readBytes()
+    else -> error("unknown lib0 any tag: $tag")
 }

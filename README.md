@@ -66,6 +66,17 @@ Use `encodeStateAsUpdateV2` and `applyUpdateV2` for V2 connections.
 
 See [Yjs compatibility](YJS_COMPATIBILITY.md) for supported versions and wire boundaries. See the [changelog](CHANGELOG.md) for release notes.
 
+Nested list/map value decoding, copying, comparison, hashing, and encoding use heap-backed traversal, so deeply nested
+lib0, JSON, and private-format values do not require an arbitrary nesting cutoff to protect
+the JVM stack on these paths. Standard Yjs V1/V2 update bytes and accepted value semantics
+remain unchanged. Continue to configure `YUpdateLimits` for untrusted channels.
+
+Applications that intentionally restrict valid nested values can additionally set
+`-Ddev.yks.maxDecodedNestingDepth=64`. This optional positive-integer property is a process-wide
+input policy, separate from byte and struct limits. It also restricts snapshot inspection,
+merging, and existing document loading, and rejects some values accepted by Yjs and Yrs.
+The default has no additional depth cutoff.
+
 ## Build and verification
 
 Full verification requires JDK 21, Node.js 22+, and Rust 1.97.0.
