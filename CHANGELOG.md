@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.14 — 2026-09-10
+
+- Avoided JVM stack growth when decoding, encoding, copying, comparing, and hashing deeply nested list/map values.
+- Added the optional process-wide `dev.yks.maxDecodedNestingDepth` decoder policy while preserving the default nesting compatibility.
+- Removed redundant collection allocations and reused state-vector encoding logic without changing public APIs or wire formats.
+
 ## 0.2.13 — 2026-09-08
 
 - Updated the experimental Yjs 14 oracle to rc.26 and added the Kotlin `Node` alias and accessors while retaining the `Type` ABI.

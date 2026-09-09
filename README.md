@@ -37,7 +37,7 @@ dependencyResolutionManagement {
 }
 
 // build.gradle.kts
-dependencies { implementation("dev.yks:yks:0.2.13") }
+dependencies { implementation("dev.yks:yks:0.2.14") }
 ```
 
 ## Quick start
