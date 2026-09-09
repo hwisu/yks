@@ -36,7 +36,7 @@ public class DeleteSet internal constructor(
 
     public fun addAll(other: DeleteSet) {
         other.clients.forEach { (client, ranges) ->
-            ranges.toList().forEach { range -> add(Id(client, range.clock), range.length) }
+            ranges.forEach { range -> add(Id(client, range.clock), range.length) }
         }
     }
 

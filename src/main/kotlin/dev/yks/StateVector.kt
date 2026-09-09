@@ -29,12 +29,7 @@ public fun writeStateVector(encoder: BinaryEncoder, stateVector: StateVector): B
 }
 
 public fun writeStateVector(encoder: IdSetEncoderV1, stateVector: StateVector): IdSetEncoderV1 {
-    requireYjsSafeStateVector(stateVector)
-    encoder.restEncoder.writeVarUInt(stateVector.size.toLong())
-    stateVector.toSortedMap(compareByDescending { it }).forEach { (client, clock) ->
-        encoder.restEncoder.writeVarUInt(client)
-        encoder.restEncoder.writeVarUInt(clock)
-    }
+    writeStateVector(encoder.restEncoder, stateVector)
     return encoder
 }
 
