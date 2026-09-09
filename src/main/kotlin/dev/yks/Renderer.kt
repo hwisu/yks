@@ -360,10 +360,10 @@ private fun IdSet.coversRange(client: Long, clock: Long, len: Long): Boolean =
     slice(client, clock, len).all { range -> range.exists }
 
 private fun IdSet.coveredLength(client: Long, clock: Long, len: Long): Long =
-    slice(client, clock, len).filter { range -> range.exists }.sumOf { range -> range.len }
+    slice(client, clock, len).sumOf { range -> if (range.exists) range.len else 0L }
 
 private fun IdMap.coveredLength(client: Long, clock: Long, len: Long): Long =
-    slice(client, clock, len).filter { range -> range.attrs != null }.sumOf { range -> range.len }
+    slice(client, clock, len).sumOf { range -> if (range.attrs != null) range.len else 0L }
 
 public class Attributions(
     public val inserts: IdMap = createIdMap(),

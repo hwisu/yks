@@ -112,9 +112,9 @@ public sealed interface DeltaValue {
 
         public fun subdocument(doc: YDoc): DeltaValue = Subdocument(doc)
 
-        public fun list(values: List<DeltaValue>): DeltaValue = ListData(values.toList())
+        public fun list(values: List<DeltaValue>): DeltaValue = ListData(values)
 
-        public fun map(values: Map<String, DeltaValue>): DeltaValue = MapData(values.toSortedMap())
+        public fun map(values: Map<String, DeltaValue>): DeltaValue = MapData(values)
     }
 }
 

@@ -344,5 +344,5 @@ private fun writeBlockSetRootKind(encoder: BinaryEncoder, kind: RootKind) {
 
 private fun readBlockSetRootKind(decoder: BinaryDecoder): RootKind {
     val ordinal = decoder.readVarUInt().toDecodedCount()
-    return enumValues<RootKind>().getOrNull(ordinal) ?: error("unknown root kind ordinal: $ordinal")
+    return RootKind.entries.getOrNull(ordinal) ?: error("unknown root kind ordinal: $ordinal")
 }
