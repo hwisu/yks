@@ -2,6 +2,10 @@
 
 YKS is a Kotlin/JVM CRDT library implementing the Yjs document model and update protocol (JDK 21).
 
+The `0.2.15-SNAPSHOT` source build uses Kotlin 2.4.20 and Gradle 9.7.1.
+Standalone consumer checks cover Kotlin 2.4.20 and the Kotlin 2.3.21 application
+baseline. The latest published version remains `0.2.14` until the next release.
+
 - `YArray`, `YMap`, `YText`, live XML, and subdocuments
 - Transactions, observers, snapshots, relative positions, and `UndoManager`
 - `y-protocols` compatible Awareness
