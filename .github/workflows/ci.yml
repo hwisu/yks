@@ -35,7 +35,10 @@ jobs:
       - run: npm ci
       - run: npm run interop:generate
       - run: npm run test:interop
-      - run: ./gradlew check consumerSmokeTest consumerKotlinCompatibilityTest --no-daemon
+      - name: Verify the release version and standalone consumers
+        run: >-
+          ./gradlew check consumerSmokeTest consumerKotlinCompatibilityTest --no-daemon
+          -PreleaseVersion=0.2.15 -PbuildRevision=${{ github.sha }}
       - run: npm run test:security
       - run: npm audit --audit-level=high
       - run: npm run interop:check-clean
