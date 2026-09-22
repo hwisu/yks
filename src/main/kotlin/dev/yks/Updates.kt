@@ -1197,8 +1197,8 @@ private class MergedClockRanges {
     }
 
     fun markDeleted(deleteSet: DeleteSet) {
-        deleteSet.clients.forEach { (client, ranges) ->
-            val clientItems = itemsByClient[client] ?: return@forEach
+        for ((client, ranges) in deleteSet.clients) {
+            val clientItems = itemsByClient[client] ?: continue
             ranges.forEach { range ->
                 var entry = clientItems.firstEndingAfter(range.clock)
                 while (entry != null && entry.key < range.end) {

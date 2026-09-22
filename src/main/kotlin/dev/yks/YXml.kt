@@ -1182,11 +1182,11 @@ public class YXmlFragment internal constructor(doc: YDoc, name: String) :
         if (!isPreliminary) doc.preflightSharedTypes(delta.map { op -> op.insert })
         doc.transact({ transaction ->
             var renderedIndex = 0
-            delta.forEach { op ->
+            for (op in delta) {
                 when {
                     op.retain != null -> renderedIndex += op.retain
                     op.delete != null -> {
-                        if (op.delete <= 0) return@forEach
+                        if (op.delete <= 0) continue
                         val startRendered = renderedIndex.coerceAtLeast(0)
                         recordRendererAttributedDeletes(transaction, this, startRendered, op.delete, renderer)
                         val index = renderedSequenceIndexToVisibleIndex(this, startRendered, renderer)

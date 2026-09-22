@@ -95,8 +95,8 @@ private class ParentItemIndex {
         if (replacements.isEmpty()) return
         val indexed = positions
         if (indexed == null) {
-            items.indices.forEach { index ->
-                val item = items[index] ?: return@forEach
+            for (index in items.indices) {
+                val item = items[index] ?: continue
                 replacements[item.id]?.let { replacement -> items[index] = replacement }
             }
         } else {
@@ -533,9 +533,9 @@ public class StructStore(private val owner: YDoc? = null) {
     /** Merge compatible deleted-item fragments touched by a delete-set, from right to left. */
     internal fun mergeDeletedItems(deleteSet: DeleteSet): Int {
         var merged = 0
-        deleteSet.clients.forEach { (client, ranges) ->
-            val structs = clientItems[client] ?: return@forEach
-            if (structs.size < 2 || ranges.isEmpty()) return@forEach
+        for ((client, ranges) in deleteSet.clients) {
+            val structs = clientItems[client] ?: continue
+            if (structs.size < 2 || ranges.isEmpty()) continue
             ranges.asReversed().forEach { range ->
                 var index = structs.findFirstStartingAtOrAfter(range.end)
                 if (index >= structs.size || structs[index].id.clock > range.end) index--
@@ -836,10 +836,10 @@ public class StructStore(private val owner: YDoc? = null) {
     }
 
     internal fun itemsStartingIn(deleteSet: DeleteSet): List<StoreItem> = buildList {
-        deleteSet.clients.keys.sorted().forEach { client ->
-            val structs = clientItems[client] ?: return@forEach
+        for (client in deleteSet.clients.keys.sorted()) {
+            val structs = clientItems[client] ?: continue
             val ranges = deleteSet.rangesFor(client)
-            if (structs.isEmpty() || ranges.isEmpty()) return@forEach
+            if (structs.isEmpty() || ranges.isEmpty()) continue
 
             var structIndex = structs.findFirstStartingAtOrAfter(ranges.first().clock)
             var rangeIndex = 0
@@ -859,10 +859,10 @@ public class StructStore(private val owner: YDoc? = null) {
     }
 
     internal fun itemsOverlapping(deleteSet: DeleteSet): List<StoreItem> = buildList {
-        deleteSet.clients.keys.sorted().forEach { client ->
-            val structs = clientItems[client] ?: return@forEach
+        for (client in deleteSet.clients.keys.sorted()) {
+            val structs = clientItems[client] ?: continue
             val ranges = deleteSet.rangesFor(client)
-            if (structs.isEmpty() || ranges.isEmpty()) return@forEach
+            if (structs.isEmpty() || ranges.isEmpty()) continue
 
             var structIndex = structs.findFirstEndingAfter(ranges.first().clock)
             var rangeIndex = 0
@@ -949,8 +949,8 @@ public class StructStore(private val owner: YDoc? = null) {
                 counts[item.parent] = (counts[item.parent] ?: 0) + 1
             }
         }
-        counts.forEach { (parent, count) ->
-            if (count < threshold) return@forEach
+        for ((parent, count) in counts) {
+            if (count < threshold) continue
             sequenceCache.remove(parent)
             renderedTextAttributes.remove(parent)
             visibleTextCache.remove(parent)

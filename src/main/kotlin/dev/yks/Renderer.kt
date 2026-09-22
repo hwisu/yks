@@ -749,8 +749,8 @@ public class SnapshotRenderer(
         if ((nextSnapshot.sv[client] ?: 0) <= clock) return
         val slice = attrs.slice(client, clock, content.getLength())
         var remaining = if (slice.size == 1) content else content.copy()
-        slice.forEach { range ->
-            if ((nextSnapshot.sv[client] ?: 0) <= range.clock) return@forEach
+        for (range in slice) {
+            if ((nextSnapshot.sv[client] ?: 0) <= range.clock) continue
             val current = remaining
             if (range.len < current.getLength()) {
                 remaining = current.splice(range.len)
