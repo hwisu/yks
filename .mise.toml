@@ -1,5 +1,5 @@
 [tools]
-gradle = "8.14.3"
+gradle = "9.7.1"
 java = "temurin-21"
-kotlin = "2.2.20"
-rust = "1.97.0"
+kotlin = "2.4.20"
+rust = "1.98.1"

@@ -2,7 +2,7 @@ import java.util.zip.ZipFile
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
 
 plugins {
-    kotlin("jvm") version "2.2.20"
+    kotlin("jvm") version "2.4.20"
     `maven-publish`
 }
 
@@ -27,9 +27,7 @@ kotlin {
     }
 
     @OptIn(org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation::class)
-    abiValidation {
-        enabled.set(true)
-    }
+    abiValidation()
 }
 
 java {
@@ -104,16 +102,25 @@ val releaseAbiV029Test = registerReleaseAbiConsumer("0.2.9", "compat.v029.Curren
 val releaseAbiCheck = tasks.register<Exec>("releaseAbiCheck") {
     description = "Checks that the current public ABI retains every callable from supported releases."
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    dependsOn("dumpLegacyAbi")
+    dependsOn("internalDumpKotlinAbi", tasks.compileKotlin)
+    val currentAbiDump = layout.buildDirectory.file("kotlin/abi/yks.api")
+    val mainClasses = tasks.compileKotlin.flatMap { it.destinationDirectory }
+    val javap = javaToolchains.launcherFor(java.toolchain).map {
+        it.metadata.installationPath.file("bin/javap").asFile.absolutePath
+    }
     inputs.file("scripts/check-release-abi.mjs")
-    inputs.file("build/kotlin/abi-legacy/yks.api")
+    inputs.file(currentAbiDump)
+    inputs.dir(mainClasses)
     inputs.property("releaseAbiBaselines", listOf("v0.2.8", "v0.2.9"))
+    environment("JAVAP", javap.get())
     commandLine(
         "node",
         rootProject.file("scripts/check-release-abi.mjs").absolutePath,
+        "--classes",
+        mainClasses.get().asFile.absolutePath,
         "v0.2.8",
         "v0.2.9",
-        layout.buildDirectory.file("kotlin/abi-legacy/yks.api").get().asFile.absolutePath,
+        currentAbiDump.get().asFile.absolutePath,
     )
 }
 
@@ -128,7 +135,7 @@ val consumerSmokeTest = tasks.register<GradleBuild>("consumerSmokeTest") {
     dir = file("consumer-smoke")
     tasks = listOf("clean", "run")
     startParameter.projectProperties = mapOf(
-        "consumerKotlinVersion" to "2.2.20",
+        "consumerKotlinVersion" to "2.4.20",
         "yksVersion" to project.version.toString(),
     )
 }
@@ -315,7 +322,7 @@ tasks.register<JavaExec>("jmh") {
 
 dependencies {
     testImplementation(kotlin("test"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.13.4")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
     add(jmhSourceSet.implementationConfigurationName, "org.openjdk.jmh:jmh-core:1.37")
     add(jmhSourceSet.annotationProcessorConfigurationName, "org.openjdk.jmh:jmh-generator-annprocess:1.37")
 }

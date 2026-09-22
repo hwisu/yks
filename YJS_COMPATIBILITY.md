@@ -6,7 +6,7 @@ YKS is a Kotlin/JVM engine for Yjs wire and document semantics, not a JavaScript
 |---|---:|---|
 | Yjs | `13.6.32` | Stable API, update V1/V2, document model |
 | `@y/y` | `14.0.0-rc.26` | V1/V2 wire and opt-in `experimental.v14` facade |
-| Yrs | `0.27.2` | Bidirectional wire in UTF-16 mode |
+| Yrs | `0.28.0` | Bidirectional wire in UTF-16 mode |
 | `y-protocols` | `1.0.7` | Awareness wire |
 
 ## Core contracts

@@ -626,7 +626,6 @@ internal fun toJsonLiteral(value: Any?): String {
             }
             else -> error("unsupported JSON value: ${nested::class.qualifiedName}")
         }
-        Unit
     }(value)
     return out.toString()
 }

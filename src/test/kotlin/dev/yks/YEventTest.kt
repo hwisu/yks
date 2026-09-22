@@ -818,7 +818,7 @@ class YEventTest {
         val event = events.single()
         val decodedStructs = decodeUpdate(event.update).structs
         val addedStruct = event.transaction!!.addedStructs.first { it.id == Id(1, 0) }
-        val deletedStruct = event.transaction!!.deletedStructs.single()
+        val deletedStruct = event.transaction.deletedStructs.single()
 
         assertTrue(event.adds(Id(1, 0)))
         assertTrue(event.adds(1, 1))

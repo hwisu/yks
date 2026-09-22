@@ -2210,7 +2210,7 @@ private fun List<DecodedWireItem>.toDenseStoreItems(firstClock: Long): List<Stor
     fun anchorIndex(id: Id): Int? {
         if (id.client != client) return null
         val index = id.clock - firstClock
-        return index.toInt().takeIf { index >= 0 && index < size && index.toLong() == id.clock - firstClock }
+        return index.toInt().takeIf { index >= 0 && index < size }
     }
 
     for (index in indices) {

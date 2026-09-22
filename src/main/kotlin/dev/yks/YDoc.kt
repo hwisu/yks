@@ -3583,7 +3583,7 @@ public class YDoc(
                     if (firstError == null) {
                         firstError = error
                     } else {
-                        firstError?.addSuppressed(error)
+                        firstError.addSuppressed(error)
                     }
                 }
             }

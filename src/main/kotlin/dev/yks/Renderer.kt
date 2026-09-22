@@ -280,10 +280,11 @@ public class AttributionsRenderer(
         var outer: List<MaybeIdRange>? = null
         var inRenderedContent = !deleted
         renderedContent?.let { visible ->
-            outer = visible.slice(client, clock, total)
-            if (outer?.size == 1) {
-                inRenderedContent = outer!!.single().exists
-                outer = null
+            val sliced = visible.slice(client, clock, total)
+            if (sliced.size == 1) {
+                inRenderedContent = sliced.single().exists
+            } else {
+                outer = sliced
             }
         }
 

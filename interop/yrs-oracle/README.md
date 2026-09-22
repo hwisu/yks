@@ -1,6 +1,6 @@
 # Yrs interoperability oracle
 
-This directory pins the official Rust Yjs port, Yrs `0.27.2`, as an independent
+This directory pins the official Rust Yjs port, Yrs `0.28.0`, as an independent
 wire and CRDT oracle for YKS. Yjs remains the normative implementation when the
 two upstream implementations differ.
 

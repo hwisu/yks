@@ -9,7 +9,7 @@ YKS is a Kotlin/JVM CRDT library implementing the Yjs document model and update 
 - Yjs update V1/V2 apply, merge, diff, conversion, and state vectors
 - Thread-access policies and external-update resource limits
 
-Bidirectional wire interoperability is tested against Yjs `13.6.32`, `@y/y` `14.0.0-rc.26`, and Yrs `0.27.2` in UTF-16 mode.
+Bidirectional wire interoperability is tested against Yjs `13.6.32`, `@y/y` `14.0.0-rc.26`, and Yrs `0.28.0` in UTF-16 mode.
 
 ## Installation
 

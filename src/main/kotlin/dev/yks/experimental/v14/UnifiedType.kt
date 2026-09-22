@@ -2252,8 +2252,8 @@ private fun DeltaBuilder.appendAlignedChange(
     val beforeShared = before.value?.sharedTypeOrNull()
     val afterShared = after.value?.sharedTypeOrNull()
     if (beforeShared != null && beforeShared === afterShared) {
-        val beforeDelta = before.value?.sharedDeltaOrNull() ?: DeltaBuilder().done()
-        val afterDelta = after.value?.sharedDeltaOrNull() ?: DeltaBuilder().done()
+        val beforeDelta = before.value.sharedDeltaOrNull() ?: DeltaBuilder().done()
+        val afterDelta = after.value.sharedDeltaOrNull() ?: DeltaBuilder().done()
         val nested = diffSettledDelta(beforeDelta, afterDelta)
         if (!nested.isEmpty) {
             modifyChanges(nested, formats, attribution)
@@ -2372,7 +2372,7 @@ private fun inverseDelta(
                     inverse.modifyChanges(
                         inverseDelta(
                             op.delta,
-                            slot.value?.sharedDeltaOrNull() ?: Type(shared).toDelta(renderer),
+                            slot.value.sharedDeltaOrNull() ?: Type(shared).toDelta(renderer),
                             renderer,
                         ),
                         inverseFormatChange(slot.formats, op.formats),

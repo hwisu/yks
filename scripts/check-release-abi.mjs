@@ -1,13 +1,22 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 const args = process.argv.slice(2)
+let classesDir = null
+const classesFlag = args.indexOf('--classes')
+if (classesFlag >= 0) {
+  classesDir = args[classesFlag + 1]
+  args.splice(classesFlag, 2)
+}
 const currentPath = args.pop()
 const baselineRefs = args
-if (baselineRefs.length === 0 || !currentPath) {
-  throw new Error('usage: check-release-abi.mjs <baseline-git-ref>... <current-api-dump>')
+if (baselineRefs.length === 0 || !currentPath || (classesFlag >= 0 && !classesDir)) {
+  throw new Error(
+    'usage: check-release-abi.mjs [--classes <class-dir>] <baseline-git-ref>... <current-api-dump>',
+  )
 }
 
 const current = readFileSync(currentPath, 'utf8')
@@ -67,6 +76,40 @@ function isFinal(line) {
   return /\bfinal\b/.test(line)
 }
 
+// Kotlin 2.4's ABI dump omits some JVM-public members that older dumps listed, such as
+// explicit no-arg constructors and default-argument overloads of internal constructors.
+// When a baseline member is missing from the dump, confirm it against the bytecode instead.
+const bytecodeMembers = new Map()
+
+function bytecodeMembersOf(className) {
+  if (bytecodeMembers.has(className)) return bytecodeMembers.get(className)
+  const members = new Set()
+  const classFile = classesDir && join(classesDir, `${className}.class`)
+  if (classFile && existsSync(classFile)) {
+    const output = execFileSync(process.env.JAVAP ?? 'javap', ['-p', '-s', classFile], {
+      encoding: 'utf8',
+    })
+    const lines = output.split(/\r?\n/)
+    for (let index = 0; index + 1 < lines.length; index++) {
+      const descriptor = lines[index + 1].match(/^\s+descriptor: (\S+)$/)
+      if (!descriptor) continue
+      const declaration = lines[index].trim()
+      if (!/^(public|protected) /.test(declaration)) continue
+      const isStatic = / static /.test(declaration)
+      const callable = declaration.match(/([^\s(]+)\(/)
+      if (callable) {
+        const name = callable[1] === className.replaceAll('/', '.') ? '<init>' : callable[1]
+        members.add(`${isStatic ? 'static ' : ''}fun ${name} ${descriptor[1]}`)
+      } else {
+        const name = declaration.replace(/;$/, '').split(/\s+/).pop()
+        members.add(`${isStatic ? 'static ' : ''}field ${name} ${descriptor[1]}`)
+      }
+    }
+  }
+  bytecodeMembers.set(className, members)
+  return members
+}
+
 const newClasses = parseApi(current)
 let failed = false
 
@@ -103,6 +146,7 @@ for (const baselineRef of baselineRefs) {
       const key = canonicalMember(oldMember)
       const newMember = newMembers.get(key)
       if (!newMember) {
+        if (bytecodeMembersOf(name).has(key)) continue
         failures.push(`removed member: ${name} :: ${key}`)
         continue
       }

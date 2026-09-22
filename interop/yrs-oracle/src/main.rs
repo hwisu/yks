@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use yrs::updates::decoder::Decode;
 use yrs::{
-    Any, Array, ClientID, Doc, GetString, Map, MapPrelim, MapRef, OffsetKind, Options, Out,
+    Any, Array, ClientID, Doc, GetString, Map, MapPrelim, MapRef, Number, OffsetKind, Options, Out,
     ReadTxn, StateVector, Text, Transact, Update,
 };
 
@@ -205,12 +205,12 @@ fn generate_bundle() -> OracleResult<FixtureBundle> {
     let array_map_v1 = {
         let mut txn = array_map_doc.transact_mut();
         items.insert(&mut txn, 0, Any::String("a".into()));
-        items.insert(&mut txn, 1, Any::Number(42.0));
+        items.insert(&mut txn, 1, Any::Number(Number::Int(42)));
         items.insert(&mut txn, 2, Any::Bool(true));
         items.insert(&mut txn, 3, Any::Null);
         items.insert(&mut txn, 4, Any::Buffer(vec![1, 2].into()));
         meta.insert(&mut txn, "title", "hello");
-        meta.insert(&mut txn, "count", Any::Number(2.0));
+        meta.insert(&mut txn, "count", Any::Number(Number::Int(2)));
         txn.encode_update_v1()
     };
 
@@ -338,7 +338,7 @@ fn verify_array_map(update: &[u8]) -> OracleResult<()> {
     let actual: Vec<Out> = items.iter(&txn).collect();
     let expected = [
         Out::Any(Any::String("a".into())),
-        Out::Any(Any::Number(42.0)),
+        Out::Any(Any::Number(Number::Int(42))),
         Out::Any(Any::Bool(true)),
         Out::Any(Any::Null),
         Out::Any(Any::Buffer(vec![1, 2].into())),
@@ -349,7 +349,7 @@ fn verify_array_map(update: &[u8]) -> OracleResult<()> {
     )?;
     expect_string(meta.get(&txn, "title"), "hello", "meta.title")?;
     require(
-        meta.get(&txn, "count") == Some(Out::Any(Any::Number(2.0))),
+        meta.get(&txn, "count") == Some(Out::Any(Any::Number(Number::Int(2)))),
         "meta.count is not integer 2",
     )
 }
@@ -605,7 +605,7 @@ fn run() -> OracleResult<()> {
             bundle.write_to(&directory)?;
             middle_skip.write_to(&directory)?;
             println!(
-                "generated and verified {} Yrs 0.27.2 fixtures in {}",
+                "generated and verified {} Yrs 0.28.0 fixtures in {}",
                 bundle.entries().len() + middle_skip.entries().len(),
                 directory.display()
             );
@@ -621,7 +621,7 @@ fn run() -> OracleResult<()> {
             verify_bundle(&bundle)?;
             verify_official_regressions()?;
             println!(
-                "verified Kotlin fixture bundle with Yrs 0.27.2: {}",
+                "verified Kotlin fixture bundle with Yrs 0.28.0: {}",
                 directory.display()
             );
             Ok(())
@@ -630,7 +630,7 @@ fn run() -> OracleResult<()> {
             require(args.next().is_none(), usage())?;
             verify_bundle(&generate_bundle()?)?;
             verify_official_regressions()?;
-            println!("Yrs 0.27.2 oracle self-test passed");
+            println!("Yrs 0.28.0 oracle self-test passed");
             Ok(())
         }
         _ => failure(usage()),

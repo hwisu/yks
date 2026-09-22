@@ -539,7 +539,7 @@ class UnifiedTypeTest {
         )
         val marker = doc.sequence("items").first { item ->
             item.content is dev.yks.ItemContent.NativeTextFormat &&
-                (item.content as dev.yks.ItemContent.NativeTextFormat).value != YValue.Null
+                item.content.value != YValue.Null
         }
         val renderer = TwosetRenderer(
             inserts = createIdMap().also { ids ->

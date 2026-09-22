@@ -239,7 +239,7 @@ class YDocEventChannelTest {
             assertEquals("origin", origin)
             assertSame(doc, eventDoc)
             assertTrue(transaction?.local == true)
-            seen.add("update:${transaction?.afterState}")
+            seen.add("update:${transaction.afterState}")
         }
         doc.once("updateV2") { update, origin, eventDoc, transaction ->
             assertTrue(update.isNotEmpty())

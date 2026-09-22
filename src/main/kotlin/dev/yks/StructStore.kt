@@ -819,7 +819,6 @@ public class StructStore(private val owner: YDoc? = null) {
                                     if (values.size == 1) ItemContent.Value(values.single())
                                     else current.copy(values = values)
                                 }
-                                else -> error("unreachable packed content")
                             }
                             add(
                                 item.copy(
@@ -1530,7 +1529,6 @@ public class StructStore(private val owner: YDoc? = null) {
                     right.content !is ItemContent.Value &&
                     right.content !is ItemContent.ArrayValues
                 ) return null
-                else -> return null
             }
         }
 
@@ -1578,7 +1576,6 @@ public class StructStore(private val owner: YDoc? = null) {
                 }
                 ItemContent.ArrayValues(values)
             }
-            else -> return null
         }
         val removed = if (itemCount == 2) {
             listOf(structs[firstIndex + 1])

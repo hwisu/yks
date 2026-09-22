@@ -162,7 +162,7 @@ fun main(args: Array<String>) {
 
     val standardTransactionDoc = YDoc(clientId = 13)
     standardTransactionDoc.applyUpdate(fixture)
-    standardTransactionDoc.observeUpdates { _, _ -> Unit }
+    standardTransactionDoc.observeUpdates { _, _ -> }
 
     val arrayReadDoc = YDoc(
         YDocOptions(clientId = 14),
@@ -320,7 +320,7 @@ fun main(args: Array<String>) {
             encodeStateAsUpdateV2(encodeDoc).size.toLong()
         },
         "standard_empty_tx_5000" measures {
-            repeat(1_000) { standardTransactionDoc.transact { Unit } }
+            repeat(1_000) { standardTransactionDoc.transact { } }
             standardTransactionDoc.getText("left").length.toLong()
         },
         "formatted_apply_5004" measures {
