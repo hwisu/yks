@@ -998,11 +998,11 @@ public class YArray internal constructor(doc: YDoc, name: String) : AbstractYTyp
         if (!isPreliminary) doc.preflightNestedValue(delta.map { op -> op.insert })
         doc.transact({ transaction ->
             var renderedIndex = 0
-            delta.forEach { op ->
+            for (op in delta) {
                 when {
                     op.retain != null -> renderedIndex += op.retain
                     op.delete != null -> {
-                        if (op.delete <= 0) return@forEach
+                        if (op.delete <= 0) continue
                         val startRendered = renderedIndex.coerceAtLeast(0)
                         recordRendererAttributedDeletes(transaction, this, startRendered, op.delete, renderer)
                         val index = renderedSequenceIndexToVisibleIndex(this, startRendered, renderer)
@@ -1015,7 +1015,7 @@ public class YArray internal constructor(doc: YDoc, name: String) : AbstractYTyp
                         delete(index, rawEnd - index)
                     }
                     op.insert != null -> {
-                        if (op.insert.isEmpty()) return@forEach
+                        if (op.insert.isEmpty()) continue
                         val index = renderedSequenceIndexToVisibleIndex(this, renderedIndex, renderer)
                         insert(index, op.insert)
                         renderedIndex += op.insert.size
@@ -1616,8 +1616,8 @@ public open class YText internal constructor(
             }
         }
 
-        doc.sequence(name).forEach { item ->
-            if (item.deleted || item.content.kind != kind) return@forEach
+        for (item in doc.sequence(name)) {
+            if (item.deleted || item.content.kind != kind) continue
             if (item.content is ItemContent.NativeTextFormat) {
                 // Upstream Y.Text.toDelta packs pending text at every visible ContentFormat
                 // marker, even when the marker leaves the effective attributes unchanged.
@@ -1627,7 +1627,7 @@ public open class YText internal constructor(
                 activeWithoutNulls = activeNativeAttributes
                     .filterValues { value -> value != YValue.Null }
                     .toSortedMap()
-                return@forEach
+                continue
             }
             when (val content = item.content) {
                 is ItemContent.Text -> {
@@ -1827,8 +1827,8 @@ public open class YText internal constructor(
     public fun toList(): List<Any?> {
         if (warnIfPreliminary()) return emptyList()
         return buildList(length) {
-            doc.sequence(name).forEach { item ->
-                if (item.deleted || !item.countable || item.content.kind != kind) return@forEach
+            for (item in doc.sequence(name)) {
+                if (item.deleted || !item.countable || item.content.kind != kind) continue
                 when (val content = item.content) {
                     is ItemContent.Text -> content.value.forEach { character -> add(character.toString()) }
                     is ItemContent.TextEmbed -> add(doc.valueToAny(content.value))

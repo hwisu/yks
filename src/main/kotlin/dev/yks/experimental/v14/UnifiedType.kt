@@ -2085,8 +2085,8 @@ private fun clearUnifiedFormats(target: AbstractYType, index: Int, length: Int) 
     val end = Math.addExact(index, length)
     var position = 0
     val keys = sortedSetOf<String>()
-    target.doc.sequence(target.name).forEach { item ->
-        if (item.deleted || !item.countable || item.content.kind != target.kind) return@forEach
+    for (item in target.doc.sequence(target.name)) {
+        if (item.deleted || !item.countable || item.content.kind != target.kind) continue
         val itemEnd = Math.addExact(position, item.length.toNonNegativeInt("formatted item length"))
         if (itemEnd > index && position < end) keys += target.doc.renderedTextAttributes(item).keys
         position = itemEnd

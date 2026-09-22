@@ -279,11 +279,11 @@ public fun tryMerge(ds: IdSet, blocks: BlockSet): Int {
     var merged = 0
     ds.clients.forEach { (client, ranges) ->
         val structs = blocks.clients[client]?.refs ?: return@forEach
-        ranges.asReversed().forEach { range ->
-            if (range.len == 0L || structs.size < 2) return@forEach
-            val first = structs.firstOrNull() ?: return@forEach
+        for (range in ranges.asReversed()) {
+            if (range.len == 0L || structs.size < 2) continue
+            val first = structs.firstOrNull() ?: continue
             val last = structs.last()
-            if (range.end <= first.id.clock || range.clock >= last.end) return@forEach
+            if (range.end <= first.id.clock || range.clock >= last.end) continue
             val lastDeletedClock = minOf(range.end - 1, last.end - 1)
             var index = minOf(structs.lastIndex, findIndexSS(structs, lastDeletedClock) + 1)
             while (index > 0 && index < structs.size && structs[index].id.clock >= range.clock) {
@@ -432,11 +432,11 @@ public fun iterateStructsByIdSetWithoutSplits(
     idSet: IdSet,
     action: (struct: ItemStruct, offset: Long, length: Long) -> Unit,
 ) {
-    idSet.ranges().forEach { (client, range) ->
+    for ((client, range) in idSet.ranges()) {
         val structs = store.clients[client].orEmpty()
-        if (structs.isEmpty()) return@forEach
+        if (structs.isEmpty()) continue
         val nextClock = structs.last().end
-        if (range.clock >= nextClock) return@forEach
+        if (range.clock >= nextClock) continue
         iterateStructsWithoutSplits(structs, range.clock, minOf(range.len, nextClock - range.clock)) { struct, offset, length ->
             action(struct as ItemStruct, offset, length)
         }

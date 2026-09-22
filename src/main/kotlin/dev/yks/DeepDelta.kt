@@ -84,8 +84,8 @@ internal fun renderUnifiedSequenceContent(
         unifiedFormatAttributionsByTarget(type, options)
     }
     return buildList {
-        renderSequenceItems(type, type.kind, options).forEach { rendered ->
-            if (rendered.action != RenderedDeltaAction.Insert) return@forEach
+        for (rendered in renderSequenceItems(type, type.kind, options)) {
+            if (rendered.action != RenderedDeltaAction.Insert) continue
             val content = rendered.content.content
             val attribution = createAttributionFromAttributionItems(
                 rendered.content.attrs,
@@ -110,8 +110,8 @@ private fun unifiedFormatAttributionsByTarget(
 ): Map<Id, Map<String, Any?>> {
     val attributionsByTarget = linkedMapOf<Id, Map<String, Any?>>()
     val active = linkedMapOf<String, Map<String, Any?>>()
-    type.doc.sequence(type.name).forEach { item ->
-        if (item.content.kind != type.kind) return@forEach
+    for (item in type.doc.sequence(type.name)) {
+        if (item.content.kind != type.kind) continue
         when (val content = item.content) {
             is ItemContent.NativeTextFormat -> {
                 active[content.key] = if (content.value == YValue.Null) {

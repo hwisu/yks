@@ -2121,9 +2121,9 @@ public class YDoc(
     internal fun mapValueAtSnapshot(type: AbstractYType, key: String, snapshot: Snapshot): YValue? {
         ensureThreadAccess()
         require(type.doc === this) { "type must belong to this document" }
-        mapItemOrder(type.name, key).asReversed().forEach { item ->
+        for (item in mapItemOrder(type.name, key).asReversed()) {
             val visibleEnd = minOf(item.clockEnd(), snapshot.sv[item.id.client] ?: 0)
-            if (visibleEnd <= item.id.clock) return@forEach
+            if (visibleEnd <= item.id.clock) continue
             val visibleClock = visibleEnd - 1
             if (snapshot.ds.hasId(Id(item.id.client, visibleClock))) return null
             return when (val content = item.content) {
@@ -2362,13 +2362,13 @@ public class YDoc(
             }
         }
 
-        sequence(type.name).forEach { rawItem ->
-            if (rawItem.content.kind != type.kind || !rawItem.isVisibleIn(snapshot)) return@forEach
+        for (rawItem in sequence(type.name)) {
+            if (rawItem.content.kind != type.kind || !rawItem.isVisibleIn(snapshot)) continue
             if (rawItem.content is ItemContent.NativeTextFormat) {
                 flush()
-                return@forEach
+                continue
             }
-            val item = formattedById[rawItem.id] ?: return@forEach
+            val item = formattedById[rawItem.id] ?: continue
             when (val content = item.content) {
                 is ItemContent.Text -> {
                     val attrs = textAttributesToPublic(content.textAttributesOrEmpty())
@@ -3166,8 +3166,8 @@ public class YDoc(
         val activeNativeAttributes = linkedMapOf<String, YValue>()
         var activeEffectiveAttributes: Map<String, YValue> = emptyMap()
         val nativeReplacements = linkedMapOf<Id, ItemContent>()
-        sequence(parent).toList().forEach { item ->
-            if (item.deleted) return@forEach
+        for (item in sequence(parent).toList()) {
+            if (item.deleted) continue
             when (val content = item.content) {
                 is ItemContent.NativeTextFormat -> {
                     activeNativeAttributes[content.key] = content.value
@@ -3639,8 +3639,8 @@ public class YDoc(
                                 deleteSet.add(item.id, item.length)
                             }
                         }
-                        mergedStructRepresentatives.forEach { (member, representative) ->
-                            if (!transaction.deleteSet.contains(representative)) return@forEach
+                        for ((member, representative) in mergedStructRepresentatives) {
+                            if (!transaction.deleteSet.contains(representative)) continue
                             store.getStoreItem(member)?.let { item -> deleteSet.add(item.id, item.length) }
                         }
                     }
@@ -3785,8 +3785,8 @@ public class YDoc(
             keySelector = { entry -> entry.value },
             valueTransform = { entry -> entry.key },
         )
-        candidates.forEach { candidate ->
-            val representative = representatives[candidate] ?: return@forEach
+        for (candidate in candidates) {
+            val representative = representatives[candidate] ?: continue
             membersByRepresentative[representative].orEmpty().forEach { id -> representatives[id] = id }
         }
     }
@@ -3798,13 +3798,13 @@ public class YDoc(
         representatives: MutableMap<Id, Id>,
     ) {
         val physicallyMergeableTextGroups = mutableListOf<List<Id>>()
-        afterState.forEach { (client, afterClock) ->
+        for ((client, afterClock) in afterState) {
             val beforeClock = beforeState[client] ?: 0
-            if (beforeClock == afterClock) return@forEach
+            if (beforeClock == afterClock) continue
             val clientItems = store.itemsForClient(client)
-            if (clientItems.size < 2) return@forEach
+            if (clientItems.size < 2) continue
             val changedIndex = store.firstItemEndingAfter(client, beforeClock)
-            if (changedIndex >= clientItems.size) return@forEach
+            if (changedIndex >= clientItems.size) continue
             val firstChangePosition = maxOf(changedIndex, 1)
             var index = clientItems.lastIndex
             while (index >= firstChangePosition) {
@@ -4094,10 +4094,10 @@ public class YDoc(
             // Private lossless values may contain nested references below JSON-like containers.
             // Standard ContentType owners always take the indexed upward path above.
             if (matched.size < deepTypes.size) {
-                deepTypes.forEach { ancestor ->
-                    if (ancestor.name in matched) return@forEach
+                for (ancestor in deepTypes) {
+                    if (ancestor.name in matched) continue
                     val fallbackPath = pathBetweenByTraversal(ancestor.name, changedParent, baseRenderer)
-                        ?: return@forEach
+                        ?: continue
                     grouped.getOrPut(ancestor) { mutableListOf() }
                         .add(
                             directEvent.copyForDeep(
@@ -4736,8 +4736,8 @@ public class YDoc(
     }
 
     private fun attachAndReplayPreliminaryTypes(content: ItemContent, ownerId: Id) {
-        content.nestedTypeRefNames().forEach { name ->
-            val type = pendingPreliminaryAttachments.remove(name) ?: return@forEach
+        for (name in content.nestedTypeRefNames()) {
+            val type = pendingPreliminaryAttachments.remove(name) ?: continue
             captureTypeStateForMutation(type)
             type.integrateReserved(this, ownerId)
             currentTransaction?.preliminaryReplayedParents?.add(type.name)
@@ -5101,11 +5101,11 @@ public class YDoc(
     }
 
     private fun rememberRedoneRangeEnds(pairs: List<Pair<StoreItem, StoreItem>>, originalPositions: Map<Id, Int>) {
-        pairs.groupBy { (source, _) -> source.parent to source.parentSub }.values.forEach { group ->
+        for (group in pairs.groupBy { (source, _) -> source.parent to source.parentSub }.values) {
             val parentSub = group.first().first.parentSub
             if (parentSub != null) {
                 group.forEach { (source, restored) -> rememberRedoneRangeEnd(source.id, restored.id) }
-                return@forEach
+                continue
             }
 
             val sorted = group.sortedWith(

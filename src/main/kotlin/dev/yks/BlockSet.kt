@@ -13,8 +13,8 @@ public class BlockSet(
         clients.toSortedMap().forEach { (client, range) ->
             var lastClock = 0L
             var lastLen = 0L
-            range.refs.forEach { block ->
-                if (block is Skip) return@forEach
+            for (block in range.refs) {
+                if (block is Skip) continue
                 if (lastClock + lastLen == block.id.clock) {
                     lastLen += block.length
                 } else {
@@ -34,11 +34,11 @@ public class BlockSet(
             val ranges = exclude.ranges(client)
             val structs = clients[client]?.refs ?: return@forEach
             if (ranges.isEmpty() || structs.isEmpty()) return@forEach
-            ranges.forEach { range ->
-                if (structs.isEmpty()) return@forEach
+            for (range in ranges) {
+                if (structs.isEmpty()) continue
                 val firstStruct = structs.first()
                 val lastStruct = structs.last()
-                if (range.clock >= lastStruct.end || range.end <= firstStruct.id.clock) return@forEach
+                if (range.clock >= lastStruct.end || range.end <= firstStruct.id.clock) continue
                 val startIndex = if (range.clock > firstStruct.id.clock) {
                     splitBlockRangeAt(structs, range.clock)
                 } else {
@@ -60,18 +60,18 @@ public class BlockSet(
     }
 
     public fun insertInto(inserts: BlockSet) {
-        inserts.clients.forEach { (client, newRange) ->
+        for ((client, newRange) in inserts.clients) {
             val range = clients[client]
             if (range == null) {
                 clients[client] = newRange
-                return@forEach
+                continue
             }
             if (range.refs.isEmpty()) {
                 range.refs = newRange.refs
-                return@forEach
+                continue
             }
             if (newRange.refs.isEmpty()) {
-                return@forEach
+                continue
             }
             val localIsLeft = range.refs.first().id.clock < newRange.refs.first().id.clock
             val leftRefs = if (localIsLeft) range.refs else newRange.refs
@@ -181,8 +181,8 @@ private fun mergeOverlappingBlockRefs(
         .sortedWith(compareBy<IndexedValue<AbstractStruct>> { indexed -> indexed.value.id.clock }.thenBy { it.index })
         .map { indexed -> indexed.value }
         .toList()
-    candidates.forEach { block ->
-        if (block.end <= nextExpectedClock) return@forEach
+    for (block in candidates) {
+        if (block.end <= nextExpectedClock) continue
         if (block.id.clock > nextExpectedClock) {
             result.add(Skip(Id(client, nextExpectedClock), block.id.clock - nextExpectedClock))
             nextExpectedClock = block.id.clock
