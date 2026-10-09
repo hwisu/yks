@@ -394,16 +394,20 @@ public class BinaryDecoder private constructor(
         if (offset < limit) bytes[offset++].toInt() and 0xff else 0.also { offset++ }
 
     /**
-     * lib0's readUint8Array constructs a new typed-array view without checking the current view's
-     * end. It can therefore read a declared string from the shared backing buffer even when the
-     * substream itself ends immediately after the length prefix.
+     * Reads the concatenated string block of a lib0 string stream.
+     *
+     * Older lib0 readUint8Array implementations constructed a new typed-array view without checking
+     * the current view's end, so a declared string could be read from the shared backing buffer even
+     * when the substream itself ended immediately after the length prefix. lib0 0.2.118+ bounds-checks
+     * the view and rejects such overlong declarations, so this read is bounded by the view limit to
+     * match upstream acceptance.
      */
-    internal fun readLib0StringFromBacking(): String {
+    internal fun readLib0StringBlock(): String {
         val length = readVarUInt().toDecodedCount(
             "string byte length",
-            minOf(MAX_DECODED_BINARY_SIZE, bytes.size - offset),
+            minOf(MAX_DECODED_BINARY_SIZE, limit - offset),
         )
-        check(length <= bytes.size - offset) { "invalid string length: $length" }
+        check(length <= limit - offset) { "invalid string length: $length" }
         decodeBudget.consumePayloadBytes(length)
         return decodeUtf8(offset, length).also { offset += length }
     }

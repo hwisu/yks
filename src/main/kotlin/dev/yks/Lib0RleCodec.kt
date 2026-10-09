@@ -153,7 +153,7 @@ internal class Lib0StringDecoder(decoder: BinaryDecoder) {
     private var offset = 0
 
     init {
-        value = decoder.readLib0StringFromBacking()
+        value = decoder.readLib0StringBlock()
         lengths = Lib0UintOptRleDecoder(decoder)
     }
 

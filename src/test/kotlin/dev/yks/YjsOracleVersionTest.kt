@@ -18,7 +18,7 @@ class YjsOracleVersionTest {
         val output = process.inputStream.bufferedReader().readText()
 
         assertTrue(process.waitFor() == 0, output)
-        assertEquals("13.6.32", installedYjsVersion(projectDirectory))
+        assertEquals("13.6.33", installedYjsVersion(projectDirectory))
     }
 
     private fun installedYjsVersion(projectDirectory: Path): String {

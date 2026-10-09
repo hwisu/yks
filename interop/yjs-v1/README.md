@@ -1,7 +1,7 @@
 # Yjs V1/V2 interoperability harness
 
 This directory is the external compatibility oracle for the Kotlin update
-codec. It is pinned to Yjs `13.6.32` and uses fixed client IDs so committed
+codec. It is pinned to Yjs `13.6.33` and uses fixed client IDs so committed
 fixture bytes are deterministic.
 
 Install dependencies, regenerate fixtures, and run the JavaScript checks:

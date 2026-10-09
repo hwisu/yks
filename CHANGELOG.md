@@ -3,10 +3,11 @@
 ## Unreleased — 0.2.15
 
 - Replaced labeled collection iteration with explicit loops in struct, snapshot, delta, and renderer paths while preserving traversal order and skip behavior.
-- Updated the build to Kotlin 2.4.20 and Gradle 9.7.1, with JUnit 6.1.3 and Rust 1.98.1 for verification.
+- Aligned the V2 string-stream decoder with the lib0 0.2.118+ view bounds check, rejecting overlong string declarations that upstream now rejects.
+- Updated the build to Kotlin 2.4.20 and Gradle 9.8.1, with JUnit 6.1.3 and Rust 1.99.0 for verification.
 - Preserved the released JVM ABI and standalone consumption with Kotlin 2.3.21.
 - Updated the self-produced release artifact verification rule to 0.2.15 and made CI exercise release-version consumers.
-- Updated the Yrs 0.28 oracle integration while retaining byte-identical fixtures and the Yjs 13.6.32 / Yjs 14 rc.26 wire targets.
+- Updated the Yrs 0.28 oracle integration while retaining byte-identical fixtures and the Yjs 13.6.33 / Yjs 14 rc.28 wire targets.
 
 ## 0.2.14 — 2026-09-10
 

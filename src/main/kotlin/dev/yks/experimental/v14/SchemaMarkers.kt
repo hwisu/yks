@@ -24,7 +24,7 @@ public object Yjs14SchemaMarkers {
     @JvmField
     public val `$nodeAny`: YTypeSchema<Node> = namedTypeSchema("y:node") { value -> value is Node }
 
-    /** Check nominal node identity and its immutable name, as upstream rc.26 does. */
+    /** Check nominal node identity and its immutable name, as upstream rc.28 does. */
     public fun `$node`(name: String? = null): YSchema<Node> =
         predicateSchema("an experimental v14 Node named '$name'") { value ->
             value is Node && (name == null || value.name == name)
