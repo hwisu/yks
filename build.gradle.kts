@@ -2,7 +2,7 @@ import java.util.zip.ZipFile
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
 
 plugins {
-    kotlin("jvm") version "2.4.20"
+    kotlin("jvm") version "2.4.21"
     `maven-publish`
 }
 
@@ -135,7 +135,7 @@ val consumerSmokeTest = tasks.register<GradleBuild>("consumerSmokeTest") {
     dir = file("consumer-smoke")
     tasks = listOf("clean", "run")
     startParameter.projectProperties = mapOf(
-        "consumerKotlinVersion" to "2.4.20",
+        "consumerKotlinVersion" to "2.4.21",
         "yksVersion" to project.version.toString(),
     )
 }
