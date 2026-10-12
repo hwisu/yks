@@ -3,7 +3,7 @@ plugins {
     application
 }
 
-val yksVersion = providers.gradleProperty("yksVersion").getOrElse("0.2.15-SNAPSHOT")
+val yksVersion = providers.gradleProperty("yksVersion").getOrElse("0.2.16-SNAPSHOT")
 val consumerKotlinVersion = providers.gradleProperty("consumerKotlinVersion").getOrElse("2.4.21")
 
 kotlin {

@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "dev.yks"
-version = providers.gradleProperty("releaseVersion").getOrElse("0.2.15-SNAPSHOT")
+version = providers.gradleProperty("releaseVersion").getOrElse("0.2.16-SNAPSHOT")
 
 dependencyLocking {
     lockAllConfigurations()
