@@ -5,7 +5,7 @@ YKS is a Kotlin/JVM engine for Yjs wire and document semantics, not a JavaScript
 | Target | Tested version | Scope |
 |---|---:|---|
 | Yjs | `13.6.33` | Stable API, update V1/V2, document model |
-| `@y/y` | `14.0.0-rc.28` | V1/V2 wire and opt-in `experimental.v14` facade |
+| `@y/y` | `14.0.0-rc.29` | V1/V2 wire and opt-in `experimental.v14` facade |
 | Yrs | `0.28.0` | Bidirectional wire in UTF-16 mode |
 | `y-protocols` | `1.0.7` | Awareness wire |
 
@@ -16,6 +16,7 @@ YKS is a Kotlin/JVM engine for Yjs wire and document semantics, not a JavaScript
 - Yjs wire omits root kinds and root XML element names. Use typed getters or `YRootSchemaRegistry` for ambiguous remote roots.
 - `Item` and `Transaction` are safe JVM views, not Yjs mutable-internal APIs.
 - `experimental.v14.Node` (a Kotlin alias of the retained JVM `Type` class) covers the RC collection and attribute read helpers, snapshot-aware attributes, nullable renderer detach, and renderer-visible `toArray`; root projection remains explicit on JVM.
+- rc.29 update merges retain the first encoding of every clock, including partial GC overlaps; document diffs omit insert/delete churn and accept a null renderer for plain changes.
 - rc.28 node schemas check nominal identity and node names; the earlier `Type` and schema-marker spellings remain available.
 - The opt-in `$renderer` marker uses `y:renderer`; stable renderer strings and schemas retain `y:r` for compatibility.
 - `experimental.v14` is not full RC API parity. Detached `Node.from`, renderer-aware delta/relative position conversion, utility ID schemas, and the full generic lib0 schema surface remain outside the adapter; use the stable delegate for unsupported features.

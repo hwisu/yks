@@ -1607,19 +1607,12 @@ private fun mergeWireItems(items: List<DecodedWireItem>): List<DecodedWireItem> 
     .toSortedMap(compareByDescending { client -> client })
     .values
     .flatMap { clientItems ->
-        val merged = mutableListOf<DecodedWireItem>()
-        clientItems.sortedBy { item -> item.id.clock }.forEach { incoming ->
-            val incomingEnd = checkedClockAdd(incoming.id.clock, incoming.content.length, "incoming wire item end")
-            val coveredUntil = merged.lastOrNull()?.let { item ->
-                checkedClockAdd(item.id.clock, item.content.length, "merged wire item end")
-            } ?: incoming.id.clock
-            when {
-                incomingEnd <= coveredUntil -> Unit
-                incoming.id.clock < coveredUntil -> merged.add(incoming.sliceFromClock(coveredUntil))
-                else -> merged.add(incoming)
-            }
-        }
-        merged
+        mergeClockRangesFirstWins(
+            clientItems,
+            start = { it.id.clock },
+            end = { checkedClockAdd(it.id.clock, it.content.length, "wire item end") },
+            slice = { item, start, end -> item.sliceClocks(start, end) },
+        )
     }
 
 private fun DecodedWireItem.sliceFromClock(startClock: Long): DecodedWireItem {

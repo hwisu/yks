@@ -200,7 +200,7 @@ public fun YDoc.applyDeltaDeep(delta: YDocDeepDelta, origin: Any? = null) {
 public fun diffDocsToDelta(
     previous: YDoc,
     next: YDoc,
-    renderer: AbstractRenderer = createDiffRenderer(previous, next),
+    renderer: AbstractRenderer? = createDiffRenderer(previous, next),
 ): YDocDeepDelta {
     val insertDiff = diffIdSet(
         createInsertSetFromDoc(next, filterDeleted = false),
@@ -209,11 +209,12 @@ public fun diffDocsToDelta(
     val deleteDiff = diffIdSet(createDeleteSetFromDoc(next), createDeleteSetFromDoc(previous))
     val insertsOnly = diffIdSet(insertDiff, deleteDiff)
     val deletesOnly = diffIdSet(deleteDiff, insertDiff)
-    val itemsToRender = mergeIdSets(listOf(insertsOnly, deleteDiff))
+    val itemsToRender = mergeIdSets(listOf(insertsOnly, deletesOnly))
     val changedTypes = computeModifiedFromItems(next, itemsToRender)
     val options = DeepDeltaRenderOptions(
-        renderer = renderer,
+        renderer = renderer ?: baseRenderer,
         itemsToRender = itemsToRender,
+        insertedItems = insertDiff,
         retainDeletes = true,
         modified = changedTypes,
     )

@@ -85,7 +85,7 @@ public class BlockSet(
                     addAll(rightRefs)
                 }
             } else {
-                mergeOverlappingBlockRefs(client, leftRefs, rightRefs)
+                mergeOverlappingBlockRefs(client, range.refs, newRange.refs)
             }
         }
         inserts.clients.clear()
@@ -171,31 +171,24 @@ private fun mergeOverlappingBlockRefs(
     rightRefs: List<AbstractStruct>,
 ): MutableList<AbstractStruct> {
     val allRefs = leftRefs + rightRefs
-    if (allRefs.isEmpty()) return mutableListOf()
-    val result = mutableListOf<AbstractStruct>()
-    var nextExpectedClock = allRefs.minOf { it.id.clock }
-    val candidates = allRefs
-        .withIndex()
-        .asSequence()
-        .filterNot { indexed -> indexed.value is Skip }
-        .sortedWith(compareBy<IndexedValue<AbstractStruct>> { indexed -> indexed.value.id.clock }.thenBy { it.index })
-        .map { indexed -> indexed.value }
-        .toList()
-    for (block in candidates) {
-        if (block.end <= nextExpectedClock) continue
-        if (block.id.clock > nextExpectedClock) {
-            result.add(Skip(Id(client, nextExpectedClock), block.id.clock - nextExpectedClock))
-            nextExpectedClock = block.id.clock
+    val merged = mergeClockRangesFirstWins(
+        allRefs.filterNot { it is Skip },
+        start = { it.id.clock },
+        end = { it.end },
+        slice = { block, start, end ->
+            sliceStruct(block, start - block.id.clock).also { sliced ->
+                if (end < sliced.end) splitStruct(sliced, end - start)
+            }
+        },
+    )
+    var clock = allRefs.minOf { it.id.clock }
+    return buildList {
+        for (block in merged) {
+            if (block.id.clock > clock) add(Skip(Id(client, clock), block.id.clock - clock))
+            add(block)
+            clock = block.end
         }
-        val nextBlock = if (block.id.clock < nextExpectedClock) {
-            sliceStruct(block, nextExpectedClock - block.id.clock)
-        } else {
-            sliceStruct(block, 0)
-        }
-        result.add(nextBlock)
-        nextExpectedClock = nextBlock.end
-    }
-    return result
+    }.toMutableList()
 }
 
 private fun readBlockSetStruct(decoder: UpdateDecoderV1): AbstractStruct {

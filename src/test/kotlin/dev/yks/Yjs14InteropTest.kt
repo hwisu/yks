@@ -20,6 +20,23 @@ class Yjs14InteropTest {
         Path.of(System.getProperty("yks.projectDirectory", System.getProperty("user.dir")))
 
     @Test
+    fun mergedUpdatesRetainFirstEncodingAcrossPartialGcOverlaps() {
+        val directory = Files.createTempDirectory("yks-first-encoding-")
+        try {
+            runNode("interop/yjs-v14/merge-first-encoding-fixtures.mjs", directory.toString())
+            Files.readAllLines(directory.resolve("inputs.tsv")).forEach { line ->
+                val fields = line.split('\t')
+                val updates = fields.drop(2).map { Base64.getDecoder().decode(it) }
+                val merged = if (fields[0] == "v1") mergeUpdates(updates) else mergeUpdatesV2(updates)
+                Files.write(directory.resolve("${fields[0]}-${fields[1]}.bin"), merged)
+            }
+            runNode("interop/yjs-v14/merge-first-encoding-fixtures.mjs", directory.toString(), "verify")
+        } finally {
+            Files.walk(directory).sorted(Comparator.reverseOrder()).forEach(Path::deleteIfExists)
+        }
+    }
+
+    @Test
     fun yjs14V1AndV2UpdatesApplyInKotlin() {
         val corpus = Files.createTempFile("yks-yjs14-", ".tsv")
         val roundTripDirectory = Files.createTempDirectory("yks-yjs14-roundtrip-")
@@ -166,7 +183,7 @@ class Yjs14InteropTest {
         assertTrue(output.isBlank(), output)
         val packageJson = projectDirectory.resolve("node_modules/yjs14/package.json").toFile().readText()
         val installed = checkNotNull(Regex("\\\"version\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"").find(packageJson)).groupValues[1]
-        assertEquals("14.0.0-rc.28", installed)
+        assertEquals("14.0.0-rc.29", installed)
     }
 
     private fun runNode(vararg arguments: String): String {

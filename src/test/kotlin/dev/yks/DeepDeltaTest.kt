@@ -520,6 +520,37 @@ class DeepDeltaTest {
     }
 
     @Test
+    fun diffDocsToDeltaOmitsTextAndAttributeChurn() {
+        val previous = YDoc(clientId = 41, gc = false)
+        previous.getText("body").insert(0, "base")
+        previous.getMap("meta").setAttr("keep", "unchanged")
+        val next = cloneDoc(previous, YDocOptions(clientId = 42, gc = false))
+        next.getText("body").insert(4, "temporary")
+        next.getText("body").delete(4, 9)
+        next.getMap("meta").setAttr("temporary", true)
+        next.getMap("meta").deleteAttr("temporary")
+
+        assertEquals(emptyMap(), diffDocsToDelta(previous, next).roots)
+        assertEquals(emptyMap(), diffDocsToDelta(previous, next, renderer = null).roots)
+    }
+
+    @Test
+    fun diffDocsToDeltaPlainChangesKeepRealDeletesAndIgnoreChurn() {
+        val previous = YDoc(clientId = 41, gc = false)
+        previous.getText("body").insert(0, "base")
+        val next = cloneDoc(previous, YDocOptions(clientId = 42, gc = false))
+        next.getText("body").insert(4, "temporary")
+        next.getText("body").delete(4, 9)
+        next.getText("body").delete(1, 2)
+        next.getText("body").insert(1, "X")
+
+        assertEquals(
+            YTextDeepDelta(delta = YTextDelta().retain(1).delete(2).insert("X").retain(1)),
+            diffDocsToDelta(previous, next, renderer = null).roots["body"],
+        )
+    }
+
+    @Test
     fun diffDocsToDeltaIncludesOnlyChangedRoots() {
         val previous = YDoc(clientId = 1)
         previous.getArray("items").push("a")

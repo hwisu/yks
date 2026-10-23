@@ -2,6 +2,9 @@
 
 ## Unreleased — 0.2.16
 
+- Updated the experimental Yjs 14 oracle to rc.29 and verified partial GC overlaps preserve the first update's content in V1/V2 merges and BlockSet insertion.
+- Omitted insert-then-delete churn from document diffs and accepted a null renderer for plain, unattributed changes.
+
 - Replaced labeled collection iteration with explicit loops in struct, snapshot, delta, and renderer paths while preserving traversal order and skip behavior.
 - Aligned the V2 string-stream decoder with the lib0 0.2.118+ view bounds check, rejecting overlong string declarations that upstream now rejects.
 - Updated the build to Kotlin 2.4.21 and Gradle 9.8.1, with JUnit 6.1.3 and Rust 1.99.0 for verification.

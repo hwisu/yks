@@ -14,7 +14,7 @@ The latest published version remains `0.2.14` until the next release.
 - Yjs update V1/V2 apply, merge, diff, conversion, and state vectors
 - Thread-access policies and external-update resource limits
 
-Bidirectional wire interoperability is tested against Yjs `13.6.33`, `@y/y` `14.0.0-rc.28`, and Yrs `0.28.0` in UTF-16 mode.
+Bidirectional wire interoperability is tested against Yjs `13.6.33`, `@y/y` `14.0.0-rc.29`, and Yrs `0.28.0` in UTF-16 mode.
 
 ## Installation
 
