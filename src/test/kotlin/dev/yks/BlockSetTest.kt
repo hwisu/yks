@@ -81,6 +81,38 @@ class BlockSetTest {
     }
 
     @Test
+    fun blockSetLaterGcOnlyFillsGapsAroundEarlierContent() {
+        val original = item(1, 1, "b")
+        val base = BlockSet(linkedMapOf(1L to BlockRange(mutableListOf(original))))
+        base.insertInto(BlockSet(linkedMapOf(1L to BlockRange(mutableListOf(GC(Id(1, 0), 3))))))
+
+        val refs = base.clients.getValue(1).refs
+        assertEquals(listOf(Id(1, 0), Id(1, 1), Id(1, 2)), refs.map { it.id })
+        assertEquals(listOf(1L, 1L, 1L), refs.map { it.length })
+        assertTrue(refs[0] is GC && refs[2] is GC)
+        assertEquals("b", (refs[1] as ItemStruct).content.getContent().single())
+        assertEquals(1L, original.length)
+    }
+
+    @Test
+    fun blockSetEarlierStubsSliceLaterContentWithoutMutatingIt() {
+        val original = item(1, 0, "abcde")
+        val base = BlockSet(linkedMapOf(1L to BlockRange(mutableListOf(
+            GC(Id(1, 1), 1), Skip(Id(1, 2), 1), GC(Id(1, 3), 1),
+        ))))
+        base.insertInto(BlockSet(linkedMapOf(1L to BlockRange(mutableListOf(original)))))
+
+        val refs = base.clients.getValue(1).refs
+        assertEquals((0L..4L).map { Id(1, it) }, refs.map { it.id })
+        assertEquals(listOf("a", "c", "e"), refs.filterIsInstance<ItemStruct>().map {
+            it.content.getContent().single()
+        })
+        assertTrue(refs[1] is GC && refs[3] is GC)
+        assertEquals("abcde", (original.content as ContentString).str)
+        assertEquals(5L, original.length)
+    }
+
+    @Test
     fun sliceStructReturnsRightPartWithoutMutatingOriginalStructView() {
         val original = item(1, 0, "hello")
         val sliced = sliceStruct(original, 2) as ItemStruct
