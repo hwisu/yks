@@ -92,10 +92,13 @@ npm run test:interop
 ./gradlew check consumerSmokeTest consumerKotlinCompatibilityTest
 npm run test:security
 npm audit
+cargo audit --file interop/yrs-oracle/Cargo.lock
 ```
 
 `test:security` checks OSV advisories for locked JVM dependencies and verified
-build/consumer artifacts, including the Kotlin Gradle plugin.
+build/consumer artifacts, including the Kotlin Gradle plugin. `cargo audit` requires
+[cargo-audit](https://crates.io/crates/cargo-audit). CI runs these advisory checks on
+each push and pull request, and the Security workflow repeats them weekly.
 
 ## License
 

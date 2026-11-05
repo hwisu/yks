@@ -36,6 +36,32 @@ test("checks consumer plugins and build dependencies even when runtime dependenc
   assert.throws(() => collectMavenDependencies(root), /ENOENT/u);
 });
 
+test("follows OSV continuation tokens before declaring a package clean", async () => {
+  const entries = [
+    ["example:clean:1.0", { package: { ecosystem: "Maven", name: "example:clean" }, version: "1.0" }],
+    ["example:paged:1.0", { package: { ecosystem: "Maven", name: "example:paged" }, version: "1.0" }],
+  ];
+  const requests = [];
+  await assert.rejects(checkMavenDependencies(entries, async (_url, options) => {
+    const { queries } = JSON.parse(options.body);
+    requests.push(queries);
+    if (requests.length === 1) {
+      return Response.json({ results: [{}, { next_page_token: "page-2" }] });
+    }
+    return Response.json({ results: [{ vulns: [{ id: "GHSA-next-page" }] }] });
+  }), /example:paged:1\.0: GHSA-next-page/u);
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[1], [{ ...entries[1][1], page_token: "page-2" }]);
+
+  let incompleteRequests = 0;
+  await assert.rejects(checkMavenDependencies(entries, async () => {
+    incompleteRequests += 1;
+    return incompleteRequests === 1
+      ? Response.json({ results: [{}, { next_page_token: "page-2" }] })
+      : new Response(null, { status: 503 });
+  }), /HTTP 503/u);
+});
+
 test("fails closed on incomplete results or an unavailable advisory service", async () => {
   const entries = [["example:library:1.0", { package: { ecosystem: "Maven", name: "example:library" }, version: "1.0" }]];
   await checkMavenDependencies(entries, async () => Response.json({ results: [{}] }));

@@ -31,8 +31,8 @@ byte-identical: semantically equivalent Yjs-family implementations may use
 different struct packing.
 
 For dependency advisories, run `cargo audit --file interop/yrs-oracle/Cargo.lock`
-with cargo-audit installed. The 2026-10-11 audit found no vulnerabilities and one
-maintenance warning: Yrs 0.28.0 depends on `smallstr` 0.3.1, which is unmaintained
+with cargo-audit installed. CI fails on vulnerabilities but allows maintenance
+warnings. The 2026-11-06 audit found no vulnerabilities and one maintenance warning: Yrs 0.28.0 depends on `smallstr` 0.3.1, which is unmaintained
 ([RUSTSEC-2026-0215](https://rustsec.org/advisories/RUSTSEC-2026-0215.html)). No patched
 version is available; this dependency is used only by the test oracle and is not
 included in the published JVM library.

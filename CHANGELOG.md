@@ -11,6 +11,7 @@
 - Preserved the released JVM ABI and Kotlin 2.3.21 compiler consumption through the patched Kotlin Gradle plugin, removing the legacy plugin affected by CVE-2026-53914.
 - Updated the self-produced release artifact verification rule to 0.2.16 and made CI exercise release-version consumers.
 - Extended the JVM dependency advisory check to test, build, and standalone-consumer artifacts, with regression coverage for consumer-only vulnerabilities.
+- Added a weekly advisory workflow, `cargo audit` and Gradle wrapper validation to CI and release verification, followed OSV result pagination, and aligned the wrapper JAR with Gradle 9.8.1.
 - Updated the Yrs 0.28 oracle integration while retaining byte-identical fixtures and the Yjs 13.6.33 / Yjs 14 rc.28 wire targets.
 
 ## 0.2.14 — 2026-09-10
