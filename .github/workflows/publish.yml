@@ -22,6 +22,8 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
       - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
         with:
           distribution: temurin
@@ -76,6 +78,8 @@ jobs:
 
       - run: npm run test:security
       - run: npm audit --audit-level=high
+      - run: cargo install cargo-audit --version 0.22.2 --locked
+      - run: cargo audit --file interop/yrs-oracle/Cargo.lock
       - run: npm run interop:check-clean
       - run: git diff --exit-code
 

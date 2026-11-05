@@ -1,0 +1,32 @@
+name: Security
+
+# Advisories are published independently of this repository's activity, so the
+# checks that CI runs on each push also run on a schedule.
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '22'
+
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: '1.99.0'
+          components: rustfmt
+          cache-workspaces: interop/yrs-oracle -> target
+
+      - run: npm run test:security
+      - run: npm audit --audit-level=high
+      - run: cargo install cargo-audit --version 0.22.2 --locked
+      - run: cargo audit --file interop/yrs-oracle/Cargo.lock

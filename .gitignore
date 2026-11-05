@@ -7,3 +7,4 @@ out/
 node_modules/
 interop/yrs-oracle/target/
 dev.yks.benchmark.*-AverageTime/
+experiments/

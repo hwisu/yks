@@ -38,24 +38,35 @@ export function collectMavenDependencies(root) {
 }
 
 export async function checkMavenDependencies(entries, fetchImplementation = fetch) {
-  const response = await fetchImplementation("https://api.osv.dev/v1/querybatch", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ queries: entries.map(([, query]) => query) }),
-    signal: AbortSignal.timeout(60_000),
-  });
-  if (!response.ok) {
-    throw new Error(`OSV query failed with HTTP ${response.status}`);
-  }
+  const findings = [];
+  let pending = entries;
+  // OSV may split one package's advisories across pages, and a page can hold
+  // a continuation token without any advisories, so every token must be followed.
+  while (pending.length > 0) {
+    const response = await fetchImplementation("https://api.osv.dev/v1/querybatch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ queries: pending.map(([, query]) => query) }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!response.ok) {
+      throw new Error(`OSV query failed with HTTP ${response.status}`);
+    }
 
-  const body = await response.json();
-  assert.equal(body.results.length, entries.length, "OSV returned an incomplete result set");
-  const findings = body.results.flatMap((result, index) =>
-    (result.vulns ?? []).map((vulnerability) => ({
-      coordinate: entries[index][0],
-      id: vulnerability.id,
-    })),
-  );
+    const body = await response.json();
+    assert.equal(body.results.length, pending.length, "OSV returned an incomplete result set");
+    const nextPages = [];
+    for (const [index, result] of body.results.entries()) {
+      const [coordinate, query] = pending[index];
+      for (const vulnerability of result.vulns ?? []) {
+        findings.push({ coordinate, id: vulnerability.id });
+      }
+      if (result.next_page_token) {
+        nextPages.push([coordinate, { ...query, page_token: result.next_page_token }]);
+      }
+    }
+    pending = nextPages;
+  }
 
   if (findings.length > 0) {
     const details = findings.map(({ coordinate, id }) => `${coordinate}: ${id}`).join("\n");
