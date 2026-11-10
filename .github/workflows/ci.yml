@@ -40,7 +40,7 @@ jobs:
       - name: Verify the release version and standalone consumers
         run: >-
           ./gradlew check consumerSmokeTest consumerKotlinCompatibilityTest --no-daemon
-          -PreleaseVersion=0.2.16 -PbuildRevision=${{ github.sha }}
+          -PreleaseVersion=0.2.17 -PbuildRevision=${{ github.sha }}
       - run: npm run test:security
       - run: npm audit --audit-level=high
       - run: cargo install cargo-audit --version 0.22.2 --locked
