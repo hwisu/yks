@@ -6,7 +6,7 @@ YKS is a Kotlin/JVM engine for Yjs wire and document semantics, not a JavaScript
 |---|---:|---|
 | Yjs | `13.6.33` | Stable API, update V1/V2, document model |
 | `@y/y` | `14.0.0-rc.29` | V1/V2 wire and opt-in `experimental.v14` facade |
-| Yrs | `0.28.0` | Bidirectional wire in UTF-16 mode |
+| Yrs | `0.28.1` | Bidirectional wire in UTF-16 mode |
 | `y-protocols` | `1.0.7` | Awareness wire |
 
 ## Core contracts
@@ -23,6 +23,7 @@ YKS is a Kotlin/JVM engine for Yjs wire and document semantics, not a JavaScript
 
 ## Operational boundaries
 
+- Standard V1/V2 update APIs reject zero-length GC and Skip structs with `YksDecodingException`, including decode, apply, merge, diff, conversion, and inspection. This follows Yrs 0.28.1's malformed-input policy and is intentionally stricter than Yjs 13.6.33 / 14 rc.29, whose decoders accept these structs (rc.29's multi-update merge throws). Empty client listings remain accepted; valid nonempty structs and wire formats are unchanged.
 - Default `YUpdateLimits` allow JVM representation limits for compatibility. Configure smaller document-specific limits for untrusted channels.
 - Recursive value decoding and conversion use heap-backed traversal. The optional JVM property `dev.yks.maxDecodedNestingDepth` imposes an application policy on otherwise valid values; leave it unset to retain the default depth compatibility.
 - `YDoc` and attached types are thread-confined by default. Coroutine/server integrations must serialize access and use `EXTERNALLY_SERIALIZED`.

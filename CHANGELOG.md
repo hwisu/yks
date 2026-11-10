@@ -1,9 +1,15 @@
 # Changelog
 
-## Unreleased — 0.2.16
+## 0.2.17 — 2026-11-10
 
+- Updated the Yrs oracle to 0.28.1 while retaining all 15 byte-identical fixtures; added pending-update, UTF-16, cursor-restoration, and selective-history regressions alongside Yjs 13/14 checks.
+- Rejected zero-length GC/Skip structs consistently across standard V1/V2 update APIs, including merge and conversion, while retaining empty-client no-ops. This is an explicit malformed-input restriction beyond the current Yjs decoders.
+- Updated lib0 to 0.2.120 to avoid Node.js localStorage warnings and Gradle to 9.8.2 with a verified distribution checksum and regenerated wrapper.
 - Updated the experimental Yjs 14 oracle to rc.29 and verified partial GC overlaps preserve the first update's content in V1/V2 merges and BlockSet insertion.
 - Omitted insert-then-delete churn from document diffs and accepted a null renderer for plain, unattributed changes.
+- Added a weekly advisory workflow, `cargo audit` and Gradle wrapper validation to CI and release verification, and followed OSV result pagination.
+
+## 0.2.16 — 2026-10-12
 
 - Replaced labeled collection iteration with explicit loops in struct, snapshot, delta, and renderer paths while preserving traversal order and skip behavior.
 - Aligned the V2 string-stream decoder with the lib0 0.2.118+ view bounds check, rejecting overlong string declarations that upstream now rejects.
@@ -11,7 +17,6 @@
 - Preserved the released JVM ABI and Kotlin 2.3.21 compiler consumption through the patched Kotlin Gradle plugin, removing the legacy plugin affected by CVE-2026-53914.
 - Updated the self-produced release artifact verification rule to 0.2.16 and made CI exercise release-version consumers.
 - Extended the JVM dependency advisory check to test, build, and standalone-consumer artifacts, with regression coverage for consumer-only vulnerabilities.
-- Added a weekly advisory workflow, `cargo audit` and Gradle wrapper validation to CI and release verification, followed OSV result pagination, and aligned the wrapper JAR with Gradle 9.8.1.
 - Updated the Yrs 0.28 oracle integration while retaining byte-identical fixtures and the Yjs 13.6.33 / Yjs 14 rc.28 wire targets.
 
 ## 0.2.14 — 2026-09-10

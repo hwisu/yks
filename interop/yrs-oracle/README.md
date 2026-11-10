@@ -1,6 +1,6 @@
 # Yrs interoperability oracle
 
-This directory pins the official Rust Yjs port, Yrs `0.28.0`, as an independent
+This directory pins the official Rust Yjs port, Yrs `0.28.1`, as an independent
 wire and CRDT oracle for YKS. Yjs remains the normative implementation when the
 two upstream implementations differ.
 
@@ -32,7 +32,7 @@ different struct packing.
 
 For dependency advisories, run `cargo audit --file interop/yrs-oracle/Cargo.lock`
 with cargo-audit installed. CI fails on vulnerabilities but allows maintenance
-warnings. The 2026-11-06 audit found no vulnerabilities and one maintenance warning: Yrs 0.28.0 depends on `smallstr` 0.3.1, which is unmaintained
+warnings. Yrs 0.28.1 still depends on `smallstr` 0.3.1, which is unmaintained
 ([RUSTSEC-2026-0215](https://rustsec.org/advisories/RUSTSEC-2026-0215.html)). No patched
 version is available; this dependency is used only by the test oracle and is not
 included in the published JVM library.
@@ -83,3 +83,10 @@ skip-middle-c3-v1.bin
 The Rust tests additionally preserve the official Yrs `0.27.2` pending-delete
 resurrection vectors and the upstream partial/middle `Skip` regressions. They do
 not depend on generated fixture files.
+
+The 0.28.1 regressions cover malformed V2 varints, empty GC/Skip rejection,
+pending replay in all six delivery orders for V1/V2, edits inside UTF-16 surrogate
+pairs, sticky-index offsets after redo, and selective undo/redo history clearing.
+The Kotlin and Yjs suites also check the corresponding public behavior. See
+[Yjs compatibility](../../YJS_COMPATIBILITY.md) for the explicit malformed-input
+policy difference from the Yjs decoders.

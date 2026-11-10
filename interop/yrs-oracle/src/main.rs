@@ -605,7 +605,7 @@ fn run() -> OracleResult<()> {
             bundle.write_to(&directory)?;
             middle_skip.write_to(&directory)?;
             println!(
-                "generated and verified {} Yrs 0.28.0 fixtures in {}",
+                "generated and verified {} Yrs 0.28.1 fixtures in {}",
                 bundle.entries().len() + middle_skip.entries().len(),
                 directory.display()
             );
@@ -621,7 +621,7 @@ fn run() -> OracleResult<()> {
             verify_bundle(&bundle)?;
             verify_official_regressions()?;
             println!(
-                "verified Kotlin fixture bundle with Yrs 0.28.0: {}",
+                "verified Kotlin fixture bundle with Yrs 0.28.1: {}",
                 directory.display()
             );
             Ok(())
@@ -630,7 +630,7 @@ fn run() -> OracleResult<()> {
             require(args.next().is_none(), usage())?;
             verify_bundle(&generate_bundle()?)?;
             verify_official_regressions()?;
-            println!("Yrs 0.28.0 oracle self-test passed");
+            println!("Yrs 0.28.1 oracle self-test passed");
             Ok(())
         }
         _ => failure(usage()),
@@ -647,6 +647,101 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use yrs::{Assoc, IndexedSequence, UndoManager};
+
+    #[test]
+    fn malformed_v2_varints_and_empty_blocks_are_rejected() {
+        for ref_number in [0, 10] {
+            assert!(Update::decode_v1(&[1, 1, 96, 0, ref_number, 0, 0]).is_err());
+        }
+        assert!(Update::decode_v1(&[1, 0, 96, 0, 0]).is_ok());
+        for length in 1..=40 {
+            let mut bytes = vec![0];
+            bytes.extend(std::iter::repeat_n(0xff, length));
+            assert!(Update::decode_v2(&bytes).is_err());
+            bytes.push(1);
+            assert!(Update::decode_v2(&bytes).is_err());
+        }
+    }
+
+    #[test]
+    fn pending_updates_replay_in_every_delivery_order() {
+        for version in [WireVersion::V1, WireVersion::V2] {
+            let source = oracle_doc(1);
+            let a = source.get_or_insert_text("a");
+            let b = source.get_or_insert_text("b");
+            let updates: Vec<_> = [(&a, 0, "A"), (&a, 1, "B"), (&b, 0, "C")]
+                .into_iter()
+                .map(|(text, index, chunk)| {
+                    let mut txn = source.transact_mut();
+                    text.insert(&mut txn, index, chunk);
+                    match version {
+                        WireVersion::V1 => txn.encode_update_v1(),
+                        WireVersion::V2 => txn.encode_update_v2(),
+                    }
+                })
+                .collect();
+            for order in [
+                [0, 1, 2],
+                [0, 2, 1],
+                [1, 0, 2],
+                [1, 2, 0],
+                [2, 0, 1],
+                [2, 1, 0],
+            ] {
+                let target = oracle_doc(2);
+                let a = target.get_or_insert_text("a");
+                let b = target.get_or_insert_text("b");
+                for index in order {
+                    apply(&target, &updates[index], version).unwrap();
+                }
+                let txn = target.transact();
+                assert_eq!(a.get_string(&txn), "AB");
+                assert_eq!(b.get_string(&txn), "C");
+                assert!(!txn.has_missing_updates());
+                assert_eq!(txn.state_vector(), source.transact().state_vector());
+            }
+        }
+    }
+
+    #[test]
+    fn utf16_edits_split_surrogate_pairs_like_yjs() {
+        let doc = oracle_doc(1);
+        let text = doc.get_or_insert_text("body");
+        let mut txn = doc.transact_mut();
+        text.insert(&mut txn, 0, "😀");
+        text.insert(&mut txn, 1, "x");
+        assert_eq!(text.get_string(&txn), "\u{FFFD}x\u{FFFD}");
+        text.remove_range(&mut txn, 0, 3);
+        text.insert(&mut txn, 0, "😀😀");
+        text.remove_range(&mut txn, 1, 2);
+        assert_eq!(text.get_string(&txn), "\u{FFFD}\u{FFFD}");
+    }
+
+    #[test]
+    fn redo_keeps_sticky_index_offset_and_selective_clear_keeps_other_history() {
+        for clear_undo in [false, true] {
+            let doc = oracle_doc(1);
+            let text = doc.get_or_insert_text("body");
+            let mut undo = UndoManager::new();
+            undo.expand_scope(&doc, &text);
+            text.insert(&mut doc.transact_mut(), 0, "hello world");
+            let position = text.sticky_index(&doc.transact(), 5, Assoc::After).unwrap();
+            assert!(undo.undo_blocking());
+            assert!(undo.redo_blocking());
+            assert_eq!(position.get_offset(&doc.transact()).unwrap().index, 5);
+            undo.reset();
+            text.insert(&mut doc.transact_mut(), 11, "!");
+            assert!(undo.undo_blocking());
+            if clear_undo {
+                undo.clear_undo();
+            } else {
+                undo.clear_redo();
+            }
+            assert_eq!(undo.can_undo(), !clear_undo);
+            assert_eq!(undo.can_redo(), clear_undo);
+        }
+    }
 
     #[test]
     fn generated_fixture_contract_is_self_consistent() {

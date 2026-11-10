@@ -311,6 +311,7 @@ internal object UpdateCodec {
                 when (info and INFO_CONTENT_MASK) {
                     structGCRefNumber -> {
                         val length = decoder.readLen()
+                        check(length > 0) { "GC struct length must be positive" }
                         structs.add(
                             DecodedWireItem(
                                 Id(client, clock),
@@ -326,6 +327,7 @@ internal object UpdateCodec {
                     }
                     structSkipRefNumber -> {
                         val length = decoder.restDecoder.readVarUInt()
+                        check(length > 0) { "Skip struct length must be positive" }
                         structs.add(
                             DecodedWireItem(
                                 Id(client, clock),
@@ -517,6 +519,7 @@ internal object UpdateCodec {
                 when (info and INFO_CONTENT_MASK) {
                     structGCRefNumber -> {
                         val length = decoder.readVarUInt()
+                        check(length > 0) { "GC struct length must be positive" }
                         structs.add(
                             DecodedWireItem(
                                 id = Id(client, clock),
@@ -532,6 +535,7 @@ internal object UpdateCodec {
                     }
                     structSkipRefNumber -> {
                         val length = decoder.readVarUInt()
+                        check(length > 0) { "Skip struct length must be positive" }
                         structs.add(
                             DecodedWireItem(
                                 id = Id(client, clock),
