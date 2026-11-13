@@ -2,10 +2,10 @@
 
 YKS is a Kotlin/JVM CRDT library implementing the Yjs document model and update protocol (JDK 21).
 
-The `0.2.17-SNAPSHOT` source build uses Kotlin 2.4.21 and Gradle 9.8.2.
+The `0.2.18-SNAPSHOT` source build uses Kotlin 2.4.21 and Gradle 9.8.2.
 Standalone consumer checks cover Kotlin 2.4.21 and the Kotlin 2.3.21 application
 compiler baseline through the patched Kotlin 2.4.21 Gradle plugin and Build Tools API.
-The latest release is `0.2.17`.
+The latest release is `0.2.18`.
 
 - `YArray`, `YMap`, `YText`, live XML, and subdocuments
 - Transactions, observers, snapshots, relative positions, and `UndoManager`
@@ -42,7 +42,7 @@ dependencyResolutionManagement {
 }
 
 // build.gradle.kts
-dependencies { implementation("dev.yks:yks:0.2.17") }
+dependencies { implementation("dev.yks:yks:0.2.18") }
 ```
 
 ## Quick start

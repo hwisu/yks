@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.18 — 2026-11-13
 
 - Rejected clients, clocks, origins, and delete ranges above the JavaScript safe integer range in standard V1/V2 update decoding. A 14-byte update could previously be applied and leave the document unable to encode its state vector or a standard update. A length above that range is now refused instead of being kept for `*Lossless` encoding; local client ids above it still use the private envelope.
 
