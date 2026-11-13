@@ -571,6 +571,22 @@ public class StructStore(private val owner: YDoc? = null) {
         val right = structs[rightIndex]
         val leftContent = left.content as? ItemContent.Deleted ?: return false
         val rightContent = right.content as? ItemContent.Deleted ?: return false
+        if (left.isGc && right.isGc) {
+            // GC structs carry no position, so clock adjacency alone lets them merge, as in Yjs.
+            if (
+                left.id.client != right.id.client ||
+                left.endClock() != right.id.clock ||
+                left.requiresClockContinuity != right.requiresClockContinuity
+            ) return false
+            captureClientBeforeMutation(left.id.client)
+            clearLookupHint(left.id.client)
+            val mergedLength = checkedClockAdd(left.length, right.length, "merged GC length")
+            val merged = left.copy(content = leftContent.copy(length = mergedLength))
+            structs[rightIndex - 1] = merged
+            structs.removeAt(rightIndex)
+            recordReplacement(left, listOf(merged), additionallyRemoved = listOf(right))
+            return true
+        }
         val logicallyAdjacent = if (left.parentSub == null) {
             areSequenceAdjacent(left, right)
         } else if (
@@ -632,6 +648,31 @@ public class StructStore(private val owner: YDoc? = null) {
         val collected = item.copy(content = ItemContent.Deleted(item.content.kind, item.length))
         structs[index] = collected
         recordReplacement(item, listOf(collected))
+        return collected
+    }
+
+    /**
+     * Replaces a deleted item below a collected type with a GC struct, as Yjs does when it
+     * collects a type's children: the item leaves its parent, so nothing names that parent later.
+     */
+    internal fun collectItemAsGc(id: Id): StoreItem? {
+        val structs = clientItems[id.client] ?: return null
+        val index = findContainingIndex(id.client, id.clock, structs)
+        if (index < 0) return null
+        val item = structs[index]
+        if (!item.deleted || item.isGc) return null
+        captureClientBeforeMutation(id.client)
+        val collected = item.asGcStruct()
+        structs[index] = collected
+        invalidateNonSequenceCaches(item)
+        if (item.content.directTypeRef() != null) parentItemIdsCache = null
+        version++
+        removeStructuralIndex(item)
+        addStructuralIndex(collected)
+        removeDerivedState(item)
+        addDerivedState(collected)
+        sequenceCache[item.parent]?.replace(item, emptyList(), emptyList())
+        sequenceCache[collected.parent]?.integrate(collected)
         return collected
     }
 

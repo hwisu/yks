@@ -492,19 +492,54 @@ internal fun collectGarbageNow(
     return collected
 }
 
+/**
+ * Collects [root] and everything nested below it, each type's children before the type itself.
+ *
+ * As in Yjs, [root] keeps its place as a deleted item while everything below it becomes a GC
+ * struct. A remote update decides how deeply types nest, so the walk keeps its own stack instead
+ * of the thread's: overflowing midway left the deletion applied with no update emitted for it.
+ */
 private fun collectDeletedItemContent(
     doc: YDoc,
-    item: StoreItem,
+    root: StoreItem,
     collected: IdSet,
 ) {
-    if (!item.deleted || item.content is ItemContent.Deleted) return
-    item.content.directTypeRef()?.let { ref ->
-        doc.store.itemsForParent(ref.name)
-            .forEach { child -> collectDeletedItemContent(doc, child, collected) }
+    if (!root.deleted || root.content is ItemContent.Deleted) return
+    if (root.content.directTypeRef() != null) {
+        val pending = ArrayDeque<PendingCollection>()
+        pending.addLast(PendingCollection(root, doc.nestedItems(root)))
+        while (pending.isNotEmpty()) {
+            val current = pending.last()
+            val nested = current.children.nextNotYetGc()
+            if (nested != null) {
+                pending.addLast(PendingCollection(nested, doc.nestedItems(nested)))
+                continue
+            }
+            pending.removeLast()
+            val item = current.item
+            if (item !== root && doc.store.collectItemAsGc(item.id) != null) {
+                collected.add(item.id, item.length)
+            }
+        }
     }
-    if (doc.store.collectItemContent(item.id) != null) {
-        collected.add(item.id, item.length)
+    if (doc.store.collectItemContent(root.id) != null) {
+        collected.add(root.id, root.length)
     }
+}
+
+private class PendingCollection(val item: StoreItem, val children: Iterator<StoreItem>)
+
+private fun YDoc.nestedItems(item: StoreItem): Iterator<StoreItem> =
+    item.content.directTypeRef()?.let { ref -> store.itemsForParent(ref.name).iterator() }
+        ?: emptyList<StoreItem>().iterator()
+
+/** A child collected on its own earlier already lost its content but is still an item. */
+private fun Iterator<StoreItem>.nextNotYetGc(): StoreItem? {
+    while (hasNext()) {
+        val child = next()
+        if (child.deleted && !child.isGc) return child
+    }
+    return null
 }
 
 public fun tryGc(

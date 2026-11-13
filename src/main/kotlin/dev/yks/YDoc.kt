@@ -3027,12 +3027,13 @@ public class YDoc(
                     item.rightOrigin?.let(store::getStoreItem)?.isGc == true
             )
         ) {
-            return item.asRemoteGc()
+            return item.asGcStruct()
         }
         when (val unresolved = item.unresolvedParent) {
             is UnresolvedYjsParent.Nested -> {
                 val parentItem = store.getStoreItem(unresolved.id) ?: return item
-                if (parentItem.isGc) return item.asRemoteGc()
+                // A collected parent no longer holds a type, so Yjs integrates the child as GC.
+                if (parentItem.isGc || parentItem.content is ItemContent.Deleted) return item.asGcStruct()
                 val ref = parentItem.content.directTypeRef() ?: return item
                 val parentKind = if (item.parentSub != null && ref.kind != RootKind.XmlHook) {
                     RootKind.Map
@@ -3048,7 +3049,7 @@ public class YDoc(
             }
             is UnresolvedYjsParent.Inherit -> {
                 val anchor = store.getStoreItem(unresolved.id) ?: return item
-                if (anchor.isGc) return item.asRemoteGc()
+                if (anchor.isGc) return item.asGcStruct()
                 val inheritedKind = when {
                     anchor.parentSub != null -> knownParentKind(anchor.parent)
                         ?.takeIf { kind -> kind == RootKind.XmlHook }
@@ -5583,7 +5584,8 @@ private fun ItemContent.withRemoteParentKind(kind: RootKind): ItemContent = when
     is ItemContent.Deleted -> copy(kind = kind)
 }
 
-private fun StoreItem.asRemoteGc(): StoreItem = copy(
+/** The GC struct Yjs keeps in place of an item whose parent type no longer exists. */
+internal fun StoreItem.asGcStruct(): StoreItem = copy(
     origin = null,
     rightOrigin = null,
     parent = "__yjs_gc__:${id.client}",

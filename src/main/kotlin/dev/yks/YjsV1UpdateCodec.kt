@@ -1587,6 +1587,7 @@ private data class DecodedWireItem(
     val isSkip: Boolean = false,
 ) {
     var resolvedParent: String? = null
+    var resolvedParentIsLeakedTypeName: Boolean = false
     var resolvedParentSub: String? = null
     var isParentSubResolved: Boolean = false
     var resolvedKind: RootKind? = null
@@ -1975,9 +1976,11 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
         parentPath.clear()
         var current = item
         var result: String
+        var leakedTypeName = false
         while (true) {
             current.resolvedParent?.let { cached ->
                 result = cached
+                leakedTypeName = current.resolvedParentIsLeakedTypeName
                 break
             }
             check(current.parentResolutionMark != generation) {
@@ -1988,6 +1991,7 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
             when (val reference = current.parent) {
                 is ParentReference.Root -> {
                     result = reference.name
+                    leakedTypeName = reference.name.startsWith(NESTED_TYPE_NAME_PREFIX)
                     break
                 }
                 is ParentReference.Nested -> {
@@ -2006,7 +2010,10 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
                 }
             }
         }
-        parentPath.forEach { candidate -> candidate.resolvedParent = result }
+        parentPath.forEach { candidate ->
+            candidate.resolvedParent = result
+            candidate.resolvedParentIsLeakedTypeName = leakedTypeName
+        }
         return result
     }
 
@@ -2110,8 +2117,16 @@ private fun List<DecodedWireItem>.toStoreItems(): List<StoreItem> {
         if (item.isGc) return true
         if (item.origin?.let(::containing)?.isGc == true) return true
         if (item.rightOrigin?.let(::containing)?.isGc == true) return true
-        val parent = item.parent as? ParentReference.Nested ?: return false
-        return containing(parent.id)?.isGc == true
+        (item.parent as? ParentReference.Nested)?.let { parent ->
+            // A parent that was collected no longer holds a type; Yjs integrates its child as GC.
+            val owner = containing(parent.id) ?: return false
+            return owner.isGc || owner.content is WireContent.Deleted
+        }
+        // Releases through 0.2.18 wrote the children of a collected type as deleted items under
+        // the type's internal name, spelled as a root. Yjs keeps those children as GC structs.
+        if (item.content !is WireContent.Deleted) return false
+        resolveParent(item)
+        return item.resolvedParentIsLeakedTypeName
     }
 
     val unresolvedParentPath = ArrayList<DecodedWireItem>()
@@ -2484,7 +2499,9 @@ private fun BinaryEncoder.writeId(id: Id) {
 
 private fun BinaryDecoder.readId(): Id = Id(readVarUInt(), readVarUInt())
 
-private fun nestedTypeName(id: Id): String = "__yks_yjs_nested__:${id.client}:${id.clock}"
+private const val NESTED_TYPE_NAME_PREFIX = "__yks_yjs_nested__:"
+
+private fun nestedTypeName(id: Id): String = "$NESTED_TYPE_NAME_PREFIX${id.client}:${id.clock}"
 private fun nestedParentAlias(id: Id): String = "__yjs_nested__:${id.client}:${id.clock}"
 private fun inheritedParentName(id: Id): String = "__yjs_inherit__:${id.client}:${id.clock}"
 private fun gcParentName(client: Long): String = "__yjs_gc__:$client"

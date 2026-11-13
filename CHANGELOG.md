@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Kept the children of a collected nested shared type as GC structs, as Yjs does, so a collected state encodes the structs Yjs encodes. Standard updates previously wrote those children as deleted items under an internal root name (`__yks_yjs_nested__:…`) when the type had arrived in a remote update, which created that root in Yjs peers, and `encodeStateAsUpdate` threw `UnsupportedYjsStandardUpdateException` when the type had been created locally. A document that loads a state written that way now reads those children as GC structs.
+- Integrated an item whose parent type was already collected as a GC struct, and merged adjacent GC structs after collection.
+- Collected deleted nested shared types without stack recursion. With garbage collection on, deleting about 40,000 nested types threw `StackOverflowError` after the deletion was applied and before its update was emitted, and the resulting state could not be loaded again.
+
 ## 0.2.18 — 2026-11-13
 
 - Rejected clients, clocks, origins, and delete ranges above the JavaScript safe integer range in standard V1/V2 update decoding. A 14-byte update could previously be applied and leave the document unable to encode its state vector or a standard update. A length above that range is now refused instead of being kept for `*Lossless` encoding; local client ids above it still use the private envelope.

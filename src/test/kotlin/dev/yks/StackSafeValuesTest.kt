@@ -1,9 +1,46 @@
 package dev.yks
 
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 
 class StackSafeValuesTest {
+    @Test
+    fun deeplyNestedSharedTypesAreDeletedAndCollectedWithoutStackGrowth() {
+        val depth = 50_000
+        val create = nestedMapsUpdate(depth)
+        val delete = byteArrayOf(0, 1, 1, 1, 0, 1) // delete set: client 1, clock 0, length 1
+        // A small explicit stack makes a per-level recursion fail on every platform.
+        onSmallStack {
+            for (gc in listOf(true, false)) {
+                val doc = YDoc(clientId = 9, gc = gc)
+                val emitted = mutableListOf<ByteArray>()
+                doc.observeUpdates { update, _ -> emitted.add(update) }
+                applyUpdate(doc, create)
+                assertEquals(1, doc.getMap("m").size)
+                applyUpdate(doc, delete)
+                assertEquals(0, doc.getMap("m").size, "gc=$gc")
+                assertEquals(2, emitted.size, "gc=$gc")
+
+                val reloaded = YDoc(clientId = 10, gc = gc)
+                applyUpdate(reloaded, encodeStateAsUpdate(doc))
+                assertEquals(0, reloaded.getMap("m").size)
+                assertContentEquals(doc.encodeStateVector(), reloaded.encodeStateVector())
+
+                val merged = YDoc(clientId = 11, gc = gc)
+                applyUpdate(merged, mergeUpdates(listOf(create, delete)))
+                assertContentEquals(doc.encodeStateVector(), merged.encodeStateVector())
+
+                val local = YDoc(clientId = 12, gc = gc)
+                applyUpdate(local, create)
+                local.getMap("m").delete("k")
+                assertEquals(0, local.getMap("m").size)
+                applyUpdate(doc, encodeStateAsUpdate(local, doc.encodeStateVector()))
+                assertContentEquals(local.encodeStateVector(), doc.encodeStateVector())
+            }
+        }
+    }
+
     @Test
     fun deepStandardValuesSurviveApplyReadMergeAndBothWireFormats() {
         val update = nestedUpdate(10_000)
@@ -92,5 +129,35 @@ class StackSafeValuesTest {
         var current = value
         repeat(depth) { current = (current as List<*>).single() }
         assertEquals(null, current)
+    }
+
+    /** Client 1 nests [depth] maps under root map "m", each stored at key "k" of the one above. */
+    private fun nestedMapsUpdate(depth: Int): ByteArray = BinaryEncoder().apply {
+        writeVarUInt(1) // clients
+        writeVarUInt(depth.toLong()) // structs
+        writeVarUInt(1) // client
+        writeVarUInt(0) // start clock
+        repeat(depth) { clock ->
+            writeByte(0x20 or 7) // parentSub flag, ContentType
+            if (clock == 0) {
+                writeVarUInt(1) // parent is a root name
+                writeString("m")
+            } else {
+                writeVarUInt(0) // parent is the previous map
+                writeVarUInt(1)
+                writeVarUInt(clock - 1L)
+            }
+            writeString("k")
+            writeVarUInt(1) // YMap type ref
+        }
+        writeVarUInt(0) // empty delete set
+    }.toByteArray()
+
+    private fun onSmallStack(block: () -> Unit) {
+        var failure: Throwable? = null
+        val thread = Thread(null, { failure = runCatching(block).exceptionOrNull() }, "small-stack", 256L * 1024)
+        thread.start()
+        thread.join()
+        failure?.let { throw it }
     }
 }

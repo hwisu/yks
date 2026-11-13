@@ -1,12 +1,77 @@
 package dev.yks
 
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class GarbageCollectionDeleteSetTest {
+    @Test
+    fun locallyCollectedNestedTypeEncodesTheStateUpstreamEncodes() {
+        val doc = YDoc(clientId = 1)
+        val root = doc.getMap("m")
+        doc.transact {
+            val nested = doc.createMap()
+            root.set("k", nested)
+            nested.set("a", 1)
+            nested.set("b", 2)
+            nested.set("c", 3)
+        }
+        root.delete("k")
+
+        // Yjs 13.6.33 for the same edits: the deleted type as an item, its three entries as one GC.
+        val upstream = hex("010201002101016d016b0100030101010004")
+        assertContentEquals(upstream, encodeStateAsUpdate(doc))
+        assertContentEquals(upstream, convertUpdateFormatV2ToV1(encodeStateAsUpdateV2(doc)))
+        val peer = YDoc(clientId = 2)
+        applyUpdate(peer, encodeStateAsUpdate(doc))
+        assertEquals(0, peer.getMap("m").size)
+        assertContentEquals(doc.encodeStateVector(), peer.encodeStateVector())
+    }
+
+    @Test
+    fun childrenWrittenUnderATypeNameByEarlierReleasesLoadAsGc() {
+        // States encoded by 0.2.18 after collecting a nested type, and what Yjs encodes for them.
+        val states = mapOf(
+            "map values" to (
+                "010401002101016d016b012101165f5f796b735f796a735f6e65737465645f5f3a313a300161012101165f5f796b73" +
+                    "5f796a735f6e65737465645f5f3a313a300162012101165f5f796b735f796a735f6e65737465645f5f3a313a3001" +
+                    "63010101010004" to "010201002101016d016b0100030101010004"
+                ),
+            "sibling chain" to (
+                "010201002101016d016b010101165f5f796b735f796a735f6e65737465645f5f3a313a30040101010005" to
+                    "010201002101016d016b0100040101010005"
+                ),
+            "xml element" to (
+                "010501002101016d016b012101165f5f796b735f796a735f6e65737465645f5f3a313a300161010101165f5f796b73" +
+                    "5f796a735f6e65737465645f5f3a313a30010101165f5f796b735f796a735f6e65737465645f5f3a313a32028101" +
+                    "02010101010006" to "010201002101016d016b0100050101010006"
+                ),
+            "child of a second client" to (
+                "020202002101165f5f796b735f796a735f6e65737465645f5f3a313a3001620128000100046c617465017d03020100" +
+                    "2101016d016b012101165f5f796b735f796a735f6e65737465645f5f3a313a30016101020201000101010002" to
+                    "0201020000020201002101016d016b010001020201000201010002"
+                ),
+        )
+        for ((name, state) in states) {
+            val (written, upstream) = state
+            for (gc in listOf(true, false)) {
+                val doc = YDoc(clientId = 9, gc = gc)
+                applyUpdate(doc, hex(written))
+                val encoded = encodeStateAsUpdate(doc)
+                assertFalse(encoded.namesAnInternalType(), "$name gc=$gc")
+                assertFalse(encodeStateAsUpdateV2(doc).namesAnInternalType(), "$name gc=$gc")
+                assertEquals(describeClocks(hex(upstream)), describeClocks(encoded), "$name gc=$gc")
+                assertEquals(0, doc.getMap("m").size)
+            }
+        }
+    }
+
+    private fun hex(value: String): ByteArray =
+        ByteArray(value.length / 2) { index -> value.substring(index * 2, index * 2 + 2).toInt(16).toByte() }
+
     @Test
     fun deleteSetConstructorInputsAndPublicViewsCannotCorruptNormalizedState() {
         val sourceRanges = mutableListOf(DeleteRange(5, 1), DeleteRange(0, 2))

@@ -226,9 +226,11 @@ class StructHelperTest {
 
         val collected = gcIdSet(doc, idSet(1, 0, 1)) { struct -> struct.id.clock == 0L }
         val peer = YDoc()
-        assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdate(doc) }
-        applyUpdateLossless(peer, encodeStateAsUpdateLossless(doc))
+        // Everything below a collected type becomes a GC struct, so the state stays standard wire.
+        applyUpdate(peer, encodeStateAsUpdate(doc))
 
+        assertTrue(checkNotNull(doc.store.getStoreItem(Id(1, 0))).isGc.not())
+        (1L..3L).forEach { clock -> assertTrue(checkNotNull(doc.store.getStoreItem(Id(1, clock))).isGc) }
         assertTrue(collected.has(1, 0))
         assertTrue(collected.has(1, 1))
         assertTrue(collected.has(1, 2))
