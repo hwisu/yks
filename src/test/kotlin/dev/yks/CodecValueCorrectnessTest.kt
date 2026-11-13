@@ -194,12 +194,14 @@ class CodecValueCorrectnessTest {
     @Test
     fun unsafeYjsNumbersUseLosslessPrivateEncoding() {
         val unsafe = YJS_MAX_SAFE_INTEGER + 2
-        val rangeDoc = YDoc(clientId = 2)
-        applyUpdate(rangeDoc, contentDeletedUpdate(unsafe))
+        // Standard wire never carries such a number into a document; only a local client id can.
+        assertFailsWith<YksDecodingException> { applyUpdate(YDoc(clientId = 2), contentDeletedUpdate(unsafe)) }
+        val rangeDoc = YDoc(clientId = unsafe)
+        rangeDoc.getText("body").insert(0, "a")
         assertFailsWith<UnsupportedYjsStandardUpdateException> { encodeStateAsUpdate(rangeDoc) }
         val rangeRelay = encodeStateAsUpdateLossless(rangeDoc)
         assertTrue(rangeRelay.hasYksMagic())
-        assertEquals(unsafe, decodeUpdateLossless(rangeRelay).structs.single().length)
+        assertEquals(unsafe, decodeUpdateLossless(rangeRelay).structs.single().id.client)
 
         val deleteSet = DeleteSet.empty().also { set -> set.add(Id(1, unsafe), 1) }
         assertFailsWith<UnsupportedYjsStandardUpdateException> {

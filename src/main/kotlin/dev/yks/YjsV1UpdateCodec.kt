@@ -303,8 +303,8 @@ internal object UpdateCodec {
         repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
             val numberOfStructs = decoder.restDecoder.readVarUInt().toDecodedCount()
             budget.structs.consume(numberOfStructs)
-            val client = decoder.readClient()
-            var clock = decoder.restDecoder.readVarUInt()
+            val client = decoder.readClient().requireWireSafe("struct client")
+            var clock = decoder.restDecoder.readVarUInt().requireWireSafe("struct clock")
             recordMetaStart(metaFrom, client, clock)
             repeat(numberOfStructs) {
                 val info = decoder.readInfo()
@@ -323,7 +323,7 @@ internal object UpdateCodec {
                                 isGc = true,
                             ),
                         )
-                        clock = checkedClockAdd(clock, length)
+                        clock = checkedClockAdd(clock, length).requireWireSafe("struct end clock")
                     }
                     structSkipRefNumber -> {
                         val length = decoder.restDecoder.readVarUInt()
@@ -339,17 +339,25 @@ internal object UpdateCodec {
                                 isSkip = true,
                             ),
                         )
-                        clock = checkedClockAdd(clock, length)
+                        clock = checkedClockAdd(clock, length).requireWireSafe("struct end clock")
                     }
                     else -> {
                         val id = Id(client, clock)
-                        val origin = if ((info and INFO_HAS_ORIGIN) != 0) decoder.readLeftID() else null
-                        val rightOrigin = if ((info and INFO_HAS_RIGHT_ORIGIN) != 0) decoder.readRightID() else null
+                        val origin = if ((info and INFO_HAS_ORIGIN) != 0) {
+                            decoder.readLeftID().requireWireSafe("origin")
+                        } else {
+                            null
+                        }
+                        val rightOrigin = if ((info and INFO_HAS_RIGHT_ORIGIN) != 0) {
+                            decoder.readRightID().requireWireSafe("right origin")
+                        } else {
+                            null
+                        }
                         val parent = if (origin == null && rightOrigin == null) {
                             if (decoder.readParentInfo()) {
                                 ParentReference.Root(decoder.readString())
                             } else {
-                                ParentReference.Nested(decoder.readLeftID())
+                                ParentReference.Nested(decoder.readLeftID().requireWireSafe("parent"))
                             }
                         } else {
                             ParentReference.Inherit(origin ?: checkNotNull(rightOrigin))
@@ -359,7 +367,7 @@ internal object UpdateCodec {
                         ) decoder.readString() else null
                         val content = readWireContentV2(decoder, info and INFO_CONTENT_MASK, id)
                         structs.add(DecodedWireItem(id, origin, rightOrigin, parent, parentSub, content))
-                        clock = checkedClockAdd(clock, content.length)
+                        clock = checkedClockAdd(clock, content.length).requireWireSafe("struct end clock")
                     }
                 }
             }
@@ -368,11 +376,14 @@ internal object UpdateCodec {
         val deleteSet = DeleteSet.empty()
         repeat(decoder.restDecoder.readVarUInt().toDecodedCount()) {
             decoder.resetDsCurVal()
-            val client = decoder.restDecoder.readVarUInt()
+            val client = decoder.restDecoder.readVarUInt().requireWireSafe("delete client")
             val rangeCount = decoder.restDecoder.readVarUInt().toDecodedCount()
             budget.deleteRanges.consume(rangeCount)
             repeat(rangeCount) {
-                deleteSet.add(Id(client, decoder.readDsClock()), decoder.readDsLen())
+                val clock = decoder.readDsClock()
+                val length = decoder.readDsLen()
+                requireWireSafeRange(clock, length, "delete range")
+                deleteSet.add(Id(client, clock), length)
             }
         }
         return WireDocumentUpdate(structs, deleteSet)
@@ -511,8 +522,8 @@ internal object UpdateCodec {
         repeat(decoder.readVarUInt().toDecodedCount()) {
             val numberOfStructs = decoder.readVarUInt().toDecodedCount()
             budget.structs.consume(numberOfStructs)
-            val client = decoder.readVarUInt()
-            var clock = decoder.readVarUInt()
+            val client = decoder.readVarUInt().requireWireSafe("struct client")
+            var clock = decoder.readVarUInt().requireWireSafe("struct clock")
             recordMetaStart(metaFrom, client, clock)
             repeat(numberOfStructs) {
                 val info = decoder.readByte()
@@ -531,7 +542,7 @@ internal object UpdateCodec {
                                 isGc = true,
                             ),
                         )
-                        clock = checkedClockAdd(clock, length)
+                        clock = checkedClockAdd(clock, length).requireWireSafe("struct end clock")
                     }
                     structSkipRefNumber -> {
                         val length = decoder.readVarUInt()
@@ -547,17 +558,25 @@ internal object UpdateCodec {
                                 isSkip = true,
                             ),
                         )
-                        clock = checkedClockAdd(clock, length)
+                        clock = checkedClockAdd(clock, length).requireWireSafe("struct end clock")
                     }
                     else -> {
                         val id = Id(client, clock)
-                        val origin = if ((info and INFO_HAS_ORIGIN) != 0) decoder.readId() else null
-                        val rightOrigin = if ((info and INFO_HAS_RIGHT_ORIGIN) != 0) decoder.readId() else null
+                        val origin = if ((info and INFO_HAS_ORIGIN) != 0) {
+                            decoder.readId().requireWireSafe("origin")
+                        } else {
+                            null
+                        }
+                        val rightOrigin = if ((info and INFO_HAS_RIGHT_ORIGIN) != 0) {
+                            decoder.readId().requireWireSafe("right origin")
+                        } else {
+                            null
+                        }
                         val parent = if (origin == null && rightOrigin == null) {
                             if (decoder.readVarUInt() == 1L) {
                                 ParentReference.Root(decoder.readString())
                             } else {
-                                ParentReference.Nested(decoder.readId())
+                                ParentReference.Nested(decoder.readId().requireWireSafe("parent"))
                             }
                         } else {
                             ParentReference.Inherit(origin ?: checkNotNull(rightOrigin))
@@ -571,7 +590,7 @@ internal object UpdateCodec {
                         }
                         val content = readWireContent(decoder, info and INFO_CONTENT_MASK, id)
                         structs.add(DecodedWireItem(id, origin, rightOrigin, parent, parentSub, content))
-                        clock = checkedClockAdd(clock, content.length)
+                        clock = checkedClockAdd(clock, content.length).requireWireSafe("struct end clock")
                     }
                 }
             }
@@ -1076,11 +1095,14 @@ internal object UpdateCodec {
     private fun readDeleteSet(decoder: BinaryDecoder, rangeBudget: DecodedCountBudget): DeleteSet {
         val deleteSet = DeleteSet.empty()
         repeat(decoder.readVarUInt().toDecodedCount()) {
-            val client = decoder.readVarUInt()
+            val client = decoder.readVarUInt().requireWireSafe("delete client")
             val rangeCount = decoder.readVarUInt().toDecodedCount()
             rangeBudget.consume(rangeCount)
             repeat(rangeCount) {
-                deleteSet.add(Id(client, decoder.readVarUInt()), decoder.readVarUInt())
+                val clock = decoder.readVarUInt()
+                val length = decoder.readVarUInt()
+                requireWireSafeRange(clock, length, "delete range")
+                deleteSet.add(Id(client, clock), length)
             }
         }
         return deleteSet
@@ -1341,6 +1363,26 @@ private class StandardUpdateIndex(items: List<StoreItem>) {
 internal fun Long.isYjsSafeVarUint(): Boolean = this in 0..YJS_MAX_SAFE_INTEGER
 
 internal fun Id.isYjsSafeId(): Boolean = client.isYjsSafeVarUint() && clock.isYjsSafeVarUint()
+
+/**
+ * Yjs holds clients and clocks as IEEE doubles, and no standard writer here emits a larger value.
+ * Refusing one while decoding keeps a document able to encode its state after it accepts an update.
+ */
+private fun Long.requireWireSafe(field: String): Long {
+    check(isYjsSafeVarUint()) { "$field is outside the JavaScript safe integer range: $this" }
+    return this
+}
+
+private fun Id.requireWireSafe(field: String): Id {
+    client.requireWireSafe("$field client")
+    clock.requireWireSafe("$field clock")
+    return this
+}
+
+private fun requireWireSafeRange(clock: Long, length: Long, field: String) {
+    clock.requireWireSafe("$field clock")
+    checkedClockAdd(clock, length, "$field end").requireWireSafe("$field end")
+}
 
 private fun StoreItem.hasYjsSafeClocks(): Boolean =
     id.isYjsSafeId() &&

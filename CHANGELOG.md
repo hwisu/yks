@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Rejected clients, clocks, origins, and delete ranges above the JavaScript safe integer range in standard V1/V2 update decoding. A 14-byte update could previously be applied and leave the document unable to encode its state vector or a standard update. A length above that range is now refused instead of being kept for `*Lossless` encoding; local client ids above it still use the private envelope.
+
 ## 0.2.17 — 2026-11-10
 
 - Updated the Yrs oracle to 0.28.1 while retaining all 15 byte-identical fixtures; added pending-update, UTF-16, cursor-restoration, and selective-history regressions alongside Yjs 13/14 checks.
