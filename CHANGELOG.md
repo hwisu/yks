@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.19 — 2026-11-13
 
 - Kept the children of a collected nested shared type as GC structs, as Yjs does, so a collected state encodes the structs Yjs encodes. Standard updates previously wrote those children as deleted items under an internal root name (`__yks_yjs_nested__:…`) when the type had arrived in a remote update, which created that root in Yjs peers, and `encodeStateAsUpdate` threw `UnsupportedYjsStandardUpdateException` when the type had been created locally. A document that loads a state written that way now reads those children as GC structs.
 - Integrated an item whose parent type was already collected as a GC struct, and merged adjacent GC structs after collection.
