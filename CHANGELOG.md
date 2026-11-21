@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.20 — 2026-11-21
+
+- Scoped undo and redo to individual items in mixed transactions. Undoing an edit to one shared type preserves edits to other types in the same transaction.
+- Serialized local Awareness field edits and heartbeat refreshes. Concurrent JVM callers can add or remove distinct presence fields without losing each other's changes.
+- Queued updates created inside `observeUpdates` callbacks. Listeners receive the original update before follow-up edits, including when a listener throws.
+- Released GC protection when clearing undo history or discarding redo history. Deleted content needed for redo stays protected until the history is cleared.
+
 ## 0.2.19 — 2026-11-13
 
 - Kept the children of a collected nested shared type as GC structs, as Yjs does, so a collected state encodes the structs Yjs encodes. Standard updates previously wrote those children as deleted items under an internal root name (`__yks_yjs_nested__:…`) when the type had arrived in a remote update, which created that root in Yjs peers, and `encodeStateAsUpdate` threw `UnsupportedYjsStandardUpdateException` when the type had been created locally. A document that loads a state written that way now reads those children as GC structs.

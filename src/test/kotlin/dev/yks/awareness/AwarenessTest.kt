@@ -4,6 +4,9 @@ import dev.yks.BinaryEncoder
 import dev.yks.YDoc
 import dev.yks.YValue
 import dev.yks.YksDecodingException
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -12,6 +15,34 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AwarenessTest {
+    @Test
+    fun concurrentFieldEditsPreserveEveryIndependentAdditionAndRemoval() {
+        val fields = (0 until 8).map { "field-$it" }
+        val value = YValue.Bool(true)
+        val initial = AwarenessState(fields.associate { "old-$it" to value })
+        val expected = AwarenessState(fields.associateWith { value })
+        val start = CyclicBarrier(fields.size)
+        val pool = Executors.newFixedThreadPool(fields.size)
+        awareness(1, MutableClock(0)).use { awareness ->
+            try {
+                repeat(20) {
+                    awareness.setLocalState(initial)
+                    val edits = fields.map { field ->
+                        pool.submit {
+                            start.await(5, TimeUnit.SECONDS)
+                            awareness.setLocalStateField(field, value)
+                            awareness.removeLocalStateField("old-$field")
+                        }
+                    }
+                    edits.forEach { it.get(10, TimeUnit.SECONDS) }
+                    assertEquals(expected, awareness.getLocalState())
+                }
+            } finally {
+                pool.shutdownNow()
+            }
+        }
+    }
+
     @Test
     fun localStateUsesTypedChangeAndHeartbeatUpdateSemantics() {
         val clock = MutableClock(1_000)

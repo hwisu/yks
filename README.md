@@ -1,24 +1,14 @@
 # YKS
 
-YKS is a Kotlin/JVM CRDT library implementing the Yjs document model and update protocol (JDK 21).
-
-The `0.2.19-SNAPSHOT` source build uses Kotlin 2.4.21 and Gradle 9.8.2.
-Standalone consumer checks cover Kotlin 2.4.21 and the Kotlin 2.3.21 application
-compiler baseline through the patched Kotlin 2.4.21 Gradle plugin and Build Tools API.
-The latest release is `0.2.19`.
-
-- `YArray`, `YMap`, `YText`, live XML, and subdocuments
-- Transactions, observers, snapshots, relative positions, and `UndoManager`
-- `y-protocols` compatible Awareness
-- Typed schemas and an opt-in v14 `Node`/`DeltaBuilder` facade (`Type` remains available)
-- Yjs update V1/V2 apply, merge, diff, conversion, and state vectors
-- Thread-access policies and external-update resource limits
-
-Bidirectional wire interoperability is tested against Yjs `13.6.33`, `@y/y` `14.0.0-rc.29`, and Yrs `0.28.1` in UTF-16 mode.
+YKS lets Kotlin applications on JDK 21 edit shared documents and synchronize them with
+JavaScript Yjs and Rust Yrs peers. A `YDoc` holds shared text, arrays, maps, XML, and
+subdocuments. Peers exchange binary updates. Awareness carries ephemeral presence data
+such as cursors and online status separately.
 
 ## Installation
 
-Store a classic PAT with `read:packages` in `~/.gradle/gradle.properties`.
+To install YKS `0.2.20` from GitHub Packages, store a classic
+personal access token with `read:packages` in `~/.gradle/gradle.properties`.
 
 ```properties
 gpr.user=YOUR_GITHUB_USERNAME
@@ -40,51 +30,75 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-
-// build.gradle.kts
-dependencies { implementation("dev.yks:yks:0.2.19") }
 ```
 
-## Quick start
+```kotlin
+// build.gradle.kts
+dependencies { implementation("dev.yks:yks:0.2.20") }
+```
+
+## Synchronize two documents
 
 ```kotlin
 import dev.yks.*
 
-val source = YDoc(clientId = 1, gc = false)
-source.getText("body").insert(0, "hello")
+val writer = YDoc()
+val reader = YDoc()
+val body = writer.getText("body")
+body.insert(0, "hello")
+applyUpdate(reader, encodeStateAsUpdate(writer))
 
-val target = YDoc(clientId = 2, gc = false)
-val update = encodeStateAsUpdate(source, target.encodeStateVector())
-applyUpdate(target, update)
-check(target.getText("body").toString() == "hello")
+body.insert(body.length, " world")
+val missing = encodeStateAsUpdate(writer, reader.encodeStateVector())
+applyUpdate(reader, missing)
+check(reader.getText("body").toString() == "hello world")
 ```
 
-Use `encodeStateAsUpdateV2` and `applyUpdateV2` for V2 connections.
+The reader's state vector tells the writer which structs the reader already has.
+Use `encodeStateAsUpdateV2` and `applyUpdateV2` when both peers use V2.
+
+## Editing and presence
+
+- An `UndoManager` scoped to one shared type undoes edits to that type and its
+  descendants. If one transaction edits both a title and a separate body, undoing
+  through the title's manager preserves the body edit.
+- `UndoManager.clear()` releases GC protection for deletions in the cleared history.
+  With document GC enabled, a subsequent GC pass over those items can discard their content.
+- If an `observeUpdates` listener edits the document, all listeners for the current
+  update receive it before the follow-up update is delivered.
+- Concurrent `Awareness.setLocalStateField` and `removeLocalStateField` calls preserve
+  edits to distinct fields. Use `setLocalState` to replace the whole local presence state.
 
 ## Production notes
 
-- `YDoc` is thread-confined by default. Serialize coroutine/server calls and use `YThreadAccessPolicy.EXTERNALLY_SERIALIZED`.
-- Configure `YUpdateLimits` for untrusted updates. Defaults remain unrestricted for compatibility.
-- Use only standard APIs with JavaScript Yjs. `*Lossless` bytes are for YKS peers only.
+- `YDoc` and its attached types are confined to one thread by default. If coroutines
+  can resume on different threads, serialize document access and set the runtime
+  policy to `YThreadAccessPolicy.EXTERNALLY_SERIALIZED`.
+- Configure `YUpdateLimits` to bound incoming update bytes, structs, and delete
+  ranges. The defaults use JVM representation limits.
+- Use standard V1/V2 APIs for JavaScript and Rust peers. The `*Lossless` APIs can
+  produce a private format for YKS peers.
 
 ## Compatibility
 
-See [Yjs compatibility](YJS_COMPATIBILITY.md) for supported versions and wire boundaries. See the [changelog](CHANGELOG.md) for release notes.
+| Peer | Tested version | Coverage |
+| --- | --- | --- |
+| Yjs | `13.6.33` | Shared document behavior and V1/V2 updates |
+| `@y/y` | `14.0.0-rc.29` | V1/V2 updates and the experimental Kotlin `Node` facade |
+| Yrs | `0.28.1` | Bidirectional V1/V2 updates with UTF-16 offsets |
+| `y-protocols` | `1.0.7` | Awareness updates, heartbeats, and expiry |
 
-Nested list/map value decoding, copying, comparison, hashing, and encoding use heap-backed traversal, so deeply nested
-lib0, JSON, and private-format values do not require an arbitrary nesting cutoff to protect
-the JVM stack on these paths. Standard Yjs V1/V2 update bytes and accepted value semantics
-remain unchanged. Continue to configure `YUpdateLimits` for untrusted channels.
-
-Applications that intentionally restrict valid nested values can additionally set
-`-Ddev.yks.maxDecodedNestingDepth=64`. This optional positive-integer property is a process-wide
-input policy, separate from byte and struct limits. It also restricts snapshot inspection,
-merging, and existing document loading, and rejects some values accepted by Yjs and Yrs.
-The default has no additional depth cutoff.
+The library also supports snapshots, relative positions, typed schemas, and update
+merging and conversion. See the [compatibility details](YJS_COMPATIBILITY.md) for
+root-type resolution, wire restrictions, and the optional process-wide decoded
+nesting limit. Release history is in the [changelog](CHANGELOG.md).
 
 ## Build and verification
 
-Full verification requires JDK 21, Node.js 22+, and Rust 1.99.0.
+The Gradle wrapper uses Gradle 9.8.2 and Kotlin 2.4.21. Run the JVM unit suite with
+`./gradlew test` on JDK 21. Cross-language verification also uses Node.js 22+ and
+Rust 1.99.0. The standalone consumer checks compile against YKS with Kotlin 2.4.21
+and 2.3.21.
 
 ```sh
 npm ci

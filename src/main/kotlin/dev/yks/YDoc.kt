@@ -845,6 +845,12 @@ public class YDoc(
         origin: Any?,
         block: () -> Unit,
     ): YTransactionMutationSummary = withDocumentAccess {
+        // Protect the reverse stack's content while the transaction is still active, before GC.
+        fun retainDeleted(items: List<StoreItem>): List<StoreItem> = items.map { item ->
+            keepItem(this, item.toItemStruct(this))
+            item.copy(deleted = false)
+        }
+
         currentTransaction?.let { transaction ->
             val addedStart = transaction.addedItems.size
             val deletedStart = transaction.deletedItems.size
@@ -860,7 +866,7 @@ public class YDoc(
                     .mapNotNull(::typeForParent)
                     .toCollection(linkedSetOf())
                 return@withDocumentAccess YTransactionMutationSummary(
-                    deletedItems = deleted.map { item -> item.copy(deleted = false) },
+                    deletedItems = retainDeleted(deleted),
                     changedParentTypes = changedParentTypes,
                 )
             } finally {
@@ -875,7 +881,7 @@ public class YDoc(
             captureItems = true,
             onAccepted = { transaction ->
                 summary = YTransactionMutationSummary(
-                    deletedItems = transaction.deletedItems.map { item -> item.copy(deleted = false) },
+                    deletedItems = retainDeleted(transaction.deletedItems),
                     changedParentTypes = changedParentsFor(transaction)
                         .mapNotNullTo(linkedSetOf(), ::typeForParent),
                 )
@@ -3292,17 +3298,13 @@ public class YDoc(
 
     private fun enqueueEmit(transaction: Transaction) {
         if (
-            !hasNonTypeTransactionConsumers() &&
+            !isEmittingTransactions && !hasNonTypeTransactionConsumers() &&
             (
                 snapshotInterestedTypes.isEmpty() ||
                     transaction.changedParents.none(::needsParentSnapshot)
             )
         ) {
             cleanupUnobservedTransaction(transaction)
-            return
-        }
-        if (hasSimpleStandardUpdateConsumersOnly()) {
-            emitSimpleStandardUpdate(transaction)
             return
         }
         pendingTransactionEmits.addLast(transaction)
@@ -3317,13 +3319,17 @@ public class YDoc(
                 val mergedStructRepresentatives = linkedMapOf<Id, Id>()
                 while (pendingTransactionEmits.isNotEmpty()) {
                     val next = pendingTransactionEmits.removeFirst()
-                    val event = createTransactionEvent(next)
-                    batch.add(event)
                     try {
                         val wasEmittingTransactionEvent = isEmittingTransactionEvent
                         isEmittingTransactionEvent = true
                         try {
-                            emit(next, event, mergedStructRepresentatives)
+                            if (batch.isEmpty() && hasSimpleStandardUpdateConsumersOnly()) {
+                                emitSimpleStandardUpdate(next, batch)
+                            } else {
+                                val event = createTransactionEvent(next)
+                                batch.add(event)
+                                emit(next, event, mergedStructRepresentatives)
+                            }
                         } finally {
                             isEmittingTransactionEvent = wasEmittingTransactionEvent
                         }
@@ -3355,25 +3361,32 @@ public class YDoc(
      * Fast server path for `observeUpdates`: no transaction/type event DTOs or whole-store
      * representative maps are needed when the standard update bytes are the only observation.
      */
-    private fun emitSimpleStandardUpdate(transaction: Transaction) {
+    private fun emitSimpleStandardUpdate(transaction: Transaction, batch: MutableList<YTransactionEvent>) {
         val beforeState = transaction.beforeState
         val afterState = store.stateVector()
         val hasWireContent = afterState.any { (client, clock) ->
             clock > (beforeState[client] ?: 0)
         } || !transaction.deleteSet.isEmpty
-        cleanupUnobservedTransaction(transaction)
-        if (!hasWireContent) return
-
-        val updateItems = store.itemsSince(beforeState)
-        val update = transaction.validatedStandardUpdate
-            ?: UpdateCodec.encode(transactionDocumentUpdate(updateItems, transaction.deleteSet))
-        callAllYksCallbacks(updateListeners.toList()) { listener ->
-            listener(update, transaction.origin)
+        val subdocs = cleanupUnobservedTransaction(transaction, afterState)
+        try {
+            if (!hasWireContent) return
+            val update = transaction.validatedStandardUpdate
+                ?: UpdateCodec.encode(transactionDocumentUpdate(store.itemsSince(beforeState), transaction.deleteSet))
+            callAllYksCallbacks(updateListeners.toList()) { listener ->
+                listener(update, transaction.origin)
+            }
+        } finally {
+            // A listener can enqueue another edit or subscribe to the batch it is currently in.
+            if (pendingTransactionEmits.isNotEmpty() || !hasSimpleStandardUpdateConsumersOnly()) {
+                batch.add(createTransactionEvent(transaction, afterState, subdocs))
+            }
         }
     }
 
-    private fun cleanupUnobservedTransaction(transaction: Transaction) {
-        val afterState = store.stateVector()
+    private fun cleanupUnobservedTransaction(
+        transaction: Transaction,
+        afterState: StateVector = store.stateVector(),
+    ): YSubdocEvent? {
         transaction.afterState = afterState
         if (gc && !transaction.deleteSet.isEmpty) {
             collectGarbageNow(this, transaction.deleteSet.toIdSet(), gcFilter)
@@ -3382,8 +3395,8 @@ public class YDoc(
         store.mergeSplitCandidates(transaction.mergeStructs)
         mergeNewItemsUnobserved(transaction.beforeState, afterState)
         mergeSplitCandidatesUnobserved(transaction.mergeStructs)
-        collectSubdocEvent(transaction)?.removed?.forEach { subdoc ->
-            if (!subdoc.isDestroyed) subdoc.destroy()
+        return collectSubdocEvent(transaction)?.also { event ->
+            event.removed.forEach { subdoc -> if (!subdoc.isDestroyed) subdoc.destroy() }
         }
     }
 
@@ -3502,7 +3515,11 @@ public class YDoc(
             !hasNonUpdateTransactionConsumers() &&
             !needsTransactionSnapshots()
 
-    private fun createTransactionEvent(transaction: Transaction): YTransactionEvent {
+    private fun createTransactionEvent(
+        transaction: Transaction,
+        afterState: StateVector = store.stateVector(),
+        subdocEvent: YSubdocEvent? = collectSubdocEvent(transaction),
+    ): YTransactionEvent {
         val updateItems = transaction.addedItems.toList()
         val updateDeleteSet = transaction.deleteSet.copy()
         val deferredUpdate = lazy(LazyThreadSafetyMode.NONE) {
@@ -3514,13 +3531,12 @@ public class YDoc(
             )
         }
         val changedParents = changedParentsFor(transaction)
-        transaction.afterState = store.stateVector()
+        transaction.afterState = afterState
         transaction.deferUpdate { deferredUpdate.value }
         val eventItems = YTransactionEventItems(
             added = transaction.addedItems.toList(),
             deleted = transaction.deletedItems.toList(),
         )
-        val subdocEvent = collectSubdocEvent(transaction)
         return YTransactionEvent(
             doc = this,
             origin = transaction.origin,

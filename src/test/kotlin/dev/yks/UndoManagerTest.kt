@@ -4,12 +4,149 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class UndoManagerTest {
+    @Test
+    fun undoAndRedoOnlyChangeItemsInScopeWithinAMixedTransaction() {
+        val doc = YDoc(clientId = 1)
+        val title = doc.getText("title")
+        val body = doc.getText("body")
+        title.insert(0, "old title")
+        body.insert(0, "old body")
+        val undo = UndoManager(title)
+        doc.transact {
+            title.delete(0, title.length)
+            body.delete(0, body.length)
+            title.insert(0, "new title")
+            body.insert(0, "new body")
+        }
+
+        undo.undo()
+        assertEquals("old title", title.toString())
+        assertEquals("new body", body.toString())
+        undo.redo()
+        assertEquals("new title", title.toString())
+        assertEquals("new body", body.toString())
+    }
+
+    @Test
+    fun expandingScopeAfterCaptureIncludesOtherItemsFromTheSameTransaction() {
+        val doc = YDoc(clientId = 1)
+        val title = doc.getText("title")
+        val body = doc.getText("body")
+        val undo = UndoManager(title)
+        doc.transact {
+            title.insert(0, "title")
+            body.insert(0, "body")
+        }
+        undo.addToScope(body)
+        undo.undo()
+        assertEquals("", title.toString())
+        assertEquals("", body.toString())
+    }
+
+    @Test
+    fun expandingScopeCanOnlyRestoreContentStillInTheStore() {
+        for (gc in listOf(false, true)) {
+            val doc = YDoc(clientId = 1, gc = gc)
+            val title = doc.getText("title")
+            val body = doc.getText("body")
+            title.insert(0, "A")
+            body.insert(0, "B")
+            val undo = UndoManager(title)
+            doc.transact {
+                title.delete(0, 1)
+                body.delete(0, 1)
+            }
+            undo.addToScope(body)
+            undo.undo()
+            assertEquals("A", title.toString())
+            assertEquals(if (gc) "" else "B", body.toString())
+            assertEquals(4L, doc.stateVector()[1])
+            assertEquals(gc, doc.store.getItem(doc.followRedone(Id(1, 1))).deleted)
+        }
+    }
+
+    @Test
+    fun clearingUndoReleasesDeletedContentForTheNextGc() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("text")
+        text.insert(0, "saved")
+        val undo = UndoManager(text)
+        text.delete(0, 5)
+        val id = Id(1, 0)
+        assertTrue(doc.store.getItem(id).keep)
+        undo.clear()
+        assertFalse(doc.store.getItem(id).keep)
+        assertIs<ContentString>(doc.store.getItem(id).content)
+        tryGc(doc, createIdSet().also { it.add(id, 5) })
+        assertIs<ContentDeleted>(doc.store.getItem(id).content)
+    }
+
+    @Test
+    fun clearingMergedInsertAndDeleteReleasesTheOriginalItem() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("text")
+        val undo = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = Long.MAX_VALUE))
+        text.insert(0, "x")
+        text.delete(0, 1)
+        assertTrue(doc.store.getItem(Id(1, 0)).keep)
+        undo.clear()
+        assertFalse(doc.store.getItem(Id(1, 0)).keep)
+    }
+
+    @Test
+    fun invalidatingRedoPreservesTheParentNeededByTheNewUndoEntry() {
+        val doc = YDoc(clientId = 1)
+        val root = doc.getMap("root")
+        val child = doc.createMap()
+        root.set("child", child)
+        child.set("saved", "keep")
+        val undo = UndoManager(root)
+        child.set("temp", "undo")
+        undo.undo()
+        val events = mutableListOf<String>()
+        undo.on("stack-cleared") { events.add("cleared") }
+        undo.on("stack-item-added") { events.add("added") }
+
+        child.delete("saved")
+
+        assertTrue(doc.store.getItem(Id(1, 0)).keep)
+        assertEquals(listOf("cleared", "added"), events)
+        undo.undo()
+        assertEquals("keep", child.get("saved"))
+    }
+
+    @Test
+    fun clearingOrInvalidatingRedoOnlyReleasesItsDeletedItems() {
+        for (newEdit in listOf(false, true)) {
+            val doc = YDoc(clientId = 1)
+            val text = doc.getText("text")
+            text.insert(0, "a")
+            val undo = UndoManager(text, UndoManagerOptions(captureTimeoutMillis = 0))
+            text.delete(0, 1)
+            text.insert(0, "b")
+            undo.undo()
+            val a = Id(1, 0)
+            val b = Id(1, 1)
+            assertTrue(doc.store.getItem(a).keep)
+            assertTrue(doc.store.getItem(b).keep)
+            assertIs<ContentString>(doc.store.getItem(b).content)
+            if (newEdit) text.insert(0, "c") else undo.clear(clearUndoStack = false)
+            assertFalse(undo.canRedo)
+            assertTrue(doc.store.getItem(a).keep)
+            assertFalse(doc.store.getItem(b).keep)
+            tryGc(doc, createIdSet().also { it.add(a, 2) })
+            assertIs<ContentString>(doc.store.getItem(a).content)
+            assertIs<ContentDeleted>(doc.store.getItem(b).content)
+        }
+    }
+
     @Test
     fun undoTracksEverySliceAfterPackedTextItemsArePartiallyDeleted() {
         val doc = YDoc(clientId = 1, gc = false)

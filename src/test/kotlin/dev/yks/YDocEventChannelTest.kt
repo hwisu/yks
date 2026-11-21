@@ -2,11 +2,53 @@ package dev.yks
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class YDocEventChannelTest {
+    @Test
+    fun batchObserverRegisteredDuringAnUpdateSeesTheWholeCleanupBatch() {
+        val doc = YDoc(clientId = 1)
+        val text = doc.getText("text")
+        val batches = mutableListOf<List<YTransactionEvent>>()
+        doc.observeUpdates { _, origin ->
+            if (origin == "outer") {
+                doc.observeAfterAllTransactions(batches::add)
+                doc.transact(origin = "inner") { text.insert(1, "b") }
+            }
+        }
+        doc.transact(origin = "outer") { text.insert(0, "a") }
+        assertEquals(listOf<Any?>("outer", "inner"), batches.single().map { it.origin })
+        assertEquals(listOf<Long?>(1, 2), batches.single().map { it.afterState[1] })
+    }
+
+    @Test
+    fun updateListenersFinishTheCurrentUpdateBeforeDeliveringReentrantEdits() {
+        val source = YDoc(clientId = 1)
+        val text = source.getText("body")
+        val peer = YDoc(clientId = 2)
+        val events = mutableListOf<Pair<Any?, String>>()
+        source.observeUpdates { _, origin ->
+            if (origin == "outer") {
+                source.transact(origin = "inner") { text.insert(1, "b") }
+                error("listener failed after editing")
+            }
+        }
+        source.observeUpdates { update, origin ->
+            peer.applyUpdate(update)
+            events.add(origin to peer.getText("body").toString())
+        }
+
+        val error = assertFailsWith<IllegalStateException> {
+            source.transact(origin = "outer") { text.insert(0, "a") }
+        }
+        assertEquals("listener failed after editing", error.message)
+        source.transact(origin = "next") { text.insert(2, "c") }
+        assertEquals(listOf<Pair<Any?, String>>("outer" to "a", "inner" to "ab", "next" to "abc"), events)
+    }
+
     @Test
     fun syncEventUpdatesStateAndLoadsDocument() {
         val doc = YDoc(clientId = 1, shouldLoad = false)

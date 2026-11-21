@@ -160,13 +160,20 @@ public class Awareness(
     }
 
     public fun setLocalStateField(field: String, value: YValue) {
-        val current = getLocalState() ?: return
-        setLocalState(current.withField(field, value))
+        updateLocalFields { it.withField(field, value) }
     }
 
     public fun removeLocalStateField(field: String) {
-        val current = getLocalState() ?: return
-        setLocalState(current.withoutField(field))
+        updateLocalFields { it.withoutField(field) }
+    }
+
+    private inline fun updateLocalFields(transform: (AwarenessState) -> AwarenessState) {
+        val pending = synchronized(lock) {
+            val current = statesByClient[clientId] ?: return
+            check(!destroyed) { "Awareness is destroyed" }
+            setLocalStateWhileOpen(transform(current), AwarenessOrigin.Local)
+        }
+        emit(pending)
     }
 
     public fun onChange(listener: (AwarenessEvent) -> Unit): Subscription = addListener(changeListeners, listener)
@@ -248,22 +255,28 @@ public class Awareness(
     }
 
     internal fun runMaintenance() {
-        if (synchronized(lock) { destroyed }) return
         val now = options.clock.nowMillis()
-        val localState = getLocalState()
-        val localMeta = metaFor(clientId)
-        if (localState != null && localMeta != null && now - localMeta.lastUpdatedMillis >= options.heartbeatMillis) {
-            setLocalState(localState)
+        val heartbeat = synchronized(lock) {
+            if (destroyed || destroying) return
+            val state = statesByClient[clientId]
+            val meta = metaByClient[clientId]
+            if (state != null && meta != null && now - meta.lastUpdatedMillis >= options.heartbeatMillis) {
+                setLocalStateWhileOpen(state, AwarenessOrigin.Local)
+            } else null
         }
-        val staleClients = synchronized(lock) {
-            metaByClient.entries.asSequence()
+        heartbeat?.let(::emit)
+        val timeouts = synchronized(lock) {
+            if (destroyed || destroying) return
+            val staleClients = metaByClient.entries.asSequence()
                 .filter { (id, meta) ->
                     id != clientId && id in statesByClient && now - meta.lastUpdatedMillis >= options.outdatedTimeoutMillis
                 }
                 .map(Map.Entry<Long, AwarenessClientMeta>::key)
                 .toList()
+            if (staleClients.isEmpty()) return
+            removeStatesLocked(staleClients, AwarenessOrigin.Timeout)
         }
-        if (staleClients.isNotEmpty()) removeStates(staleClients, AwarenessOrigin.Timeout)
+        emit(timeouts)
     }
 
     private fun setLocalStateLocked(state: AwarenessState?, origin: AwarenessOrigin): PendingEvents {

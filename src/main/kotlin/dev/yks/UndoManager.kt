@@ -39,6 +39,8 @@ public class StackItem internal constructor(
     public val meta: MutableMap<Any?, Any?> = linkedMapOf()
     public val inserts: IdSet get() = explicitInserts?.copy() ?: insertedItems.toIdSet()
     public val deletes: IdSet get() = explicitDeletes?.copy() ?: deletedItems.map { it.item }.toIdSet()
+    // Normalization can cancel an insert/delete pair that is still protected from GC.
+    internal var deletionsBeforeCancellation: IdSet? = null
     public val insertedCount: Int get() = explicitInserts?.rangeLengthAsInt() ?: insertedItems
         .sumOf { item -> item.length }
         .toNonNegativeInt("undo insertion count")
@@ -134,11 +136,11 @@ public class UndoManager private constructor(
         trackedOrigins.remove(origin)
     }
 
-    public fun clear(clearUndoStack: Boolean = true, clearRedoStack: Boolean = true) {
+    public fun clear(clearUndoStack: Boolean = true, clearRedoStack: Boolean = true): Unit = doc.withDocumentAccess {
         val undoStackCleared = clearUndoStack && undoStack.isNotEmpty()
         val redoStackCleared = clearRedoStack && redoStack.isNotEmpty()
-        if (clearUndoStack) undoStack.clear()
-        if (clearRedoStack) redoStack.clear()
+        if (undoStackCleared) releaseStack(undoStack)
+        if (redoStackCleared) releaseStack(redoStack)
         stopCapturing()
         if (undoStackCleared || redoStackCleared) {
             emit(
@@ -149,6 +151,16 @@ public class UndoManager private constructor(
                 ),
             )
         }
+    }
+
+    private fun releaseStack(stack: MutableList<StackItem>) {
+        for (entry in stack) {
+            val deletions = entry.deletionsBeforeCancellation ?: entry.deletes
+            for (item in doc.itemsForIdSet(deletions, ::isItemInScope)) {
+                keepItem(doc, item.toItemStruct(doc), keep = false)
+            }
+        }
+        stack.clear()
     }
 
     public fun on(eventName: String, listener: (UndoManagerEvent) -> Unit): Subscription {
@@ -267,6 +279,15 @@ public class UndoManager private constructor(
         if (!isInScope(event)) return
         if (!isTrackedOrigin(event.origin)) return
 
+        // Release redo protection before keeping new deletions that may share the same parent.
+        if (redoStack.isNotEmpty()) {
+            releaseStack(redoStack)
+            emit(
+                "stack-cleared",
+                UndoManagerEvent(undoStackCleared = false, redoStackCleared = true),
+            )
+        }
+
         // Upstream marks deleted items as kept during afterTransaction so automatic GC, which
         // runs immediately afterwards, cannot discard content required by a future undo.
         event.deletedItems
@@ -308,13 +329,6 @@ public class UndoManager private constructor(
                 event.changedParentTypes,
             )
         }
-        if (redoStack.isNotEmpty()) {
-            redoStack.clear()
-            emit(
-                "stack-cleared",
-                UndoManagerEvent(undoStackCleared = false, redoStackCleared = true),
-            )
-        }
         lastCaptureTime = now
     }
 
@@ -325,16 +339,17 @@ public class UndoManager private constructor(
             // spans many clocks. Keeping packed ranges intact avoids allocating one Item per
             // character/value and preserves the upstream filter contract.
             val insertedItemsToDelete = stackItem.insertedItems.filter { item ->
-                options.deleteFilter(item.toItemStruct(doc))
+                isItemInScope(item) && options.deleteFilter(item.toItemStruct(doc))
             }
             val insertedIdsToDelete = insertedItemsToDelete.toIdSet()
             val restoreCandidates = stackItem.deletedItems.filter { restore ->
                 val source = restore.item
+                if (!isItemInScope(source)) return@filter false
                 val key = source.parentSub ?: return@filter true
                 if (options.shouldIgnoreRemoteAttributeChanges()) return@filter true
                 val currentId = doc.currentVisibleMapItemId(source.parent, key) ?: return@filter true
                 currentId == source.id || insertedIdsToDelete.hasId(currentId)
-            }
+            }.flatMap(::restoreSlices)
             val restoreCandidatesById = restoreCandidates.associate { restore -> restore.item.id to restore.item }
             val restoreEligibility = mutableMapOf<Id, Boolean>()
             val deletedItemsToRestore = restoreCandidates.filter { restore ->
@@ -356,9 +371,10 @@ public class UndoManager private constructor(
                 val mutation = doc.transactCapturingMutation(origin = this) {
                     doc.deleteItemRanges(insertedItemsToDelete)
                     restoredItems = doc.restoreItems(deletedItemsToRestore)
+                    val tombstones = restoredItems.filter { it.content is ItemContent.Deleted }
+                    if (tombstones.isNotEmpty()) doc.deleteItemRanges(tombstones)
                 }
                 deletedItems = mutation.deletedItems
-                deletedItems.forEach { item -> keepItem(doc, item.toItemStruct(doc), keep = true) }
                 changedParentTypes = mutation.changedParentTypes
             } finally {
                 if (!closed) {
@@ -393,17 +409,39 @@ public class UndoManager private constructor(
     }
 
     private fun isInScope(event: YTransactionEvent): Boolean {
-        val names = scopeNames ?: return true
-        return event.changedParents.any { changedParent ->
-            names.any { scopeName -> changedParent == scopeName || doc.pathBetween(scopeName, changedParent) != null }
+        return scopeNames == null || event.changedParents.any(::isParentInScope)
+    }
+
+    private fun isItemInScope(item: StoreItem): Boolean = isParentInScope(item.parent)
+
+    // A type added to the scope after capture may already have lost some or all content to GC.
+    // Redoing a Yjs ContentDeleted item creates another deleted item with the same clock length.
+    private fun restoreSlices(restore: RestoreItem): List<RestoreItem> {
+        val source = restore.item
+        val stored = doc.getItem(source.id) ?: return emptyList()
+        if (stored.clockEnd() >= source.clockEnd() && !stored.isGc && stored.content !is ItemContent.Deleted) {
+            return listOf(restore)
+        }
+        return currentStoreSlices(source).filterNot { it.isGc }.map { current ->
+            val slice = source.clockRangeView(current.id.clock, current.clockEnd())
+            restore.copy(item = if (current.content is ItemContent.Deleted) slice.copy(content = current.content) else slice)
         }
     }
 
-    private fun isItemInScope(item: StoreItem): Boolean {
+    private fun isParentInScope(parent: String): Boolean {
         val names = scopeNames ?: return true
-        return names.any { scopeName ->
-            item.parent == scopeName || doc.pathBetween(scopeName, item.parent) != null
+        if (parent in names) return true
+        if (doc.rootType(parent) != null) return false
+        // Structural ownership survives deletion, whereas a visible path disappears with the owner.
+        var current = parent
+        val visited = mutableSetOf<String>()
+        while (visited.add(current)) {
+            current = doc.store.firstOwnerForNested(current)?.parent ?: break
+            if (current in names) return true
+            if (doc.rootType(current) != null) return false
         }
+        // Lossless values can embed a shared type inside a list or map without a ContentType owner.
+        return names.any { name -> doc.pathBetween(name, current) != null }
     }
 
     /**
@@ -442,7 +480,14 @@ public class UndoManager private constructor(
     private fun StackItem.merge(other: StackItem): StackItem = StackItem(
         insertedItems = insertedItems + other.insertedItems,
         deletedItems = deletedItems + other.deletedItems,
-    )
+    ).also { merged ->
+        if (deletionsBeforeCancellation != null || other.deletionsBeforeCancellation != null) {
+            merged.deletionsBeforeCancellation = mergeIdSets(listOf(
+                deletionsBeforeCancellation ?: deletes,
+                other.deletionsBeforeCancellation ?: other.deletes,
+            ))
+        }
+    }
 
     private fun emitStackItemEvent(
         eventName: String,
@@ -489,6 +534,7 @@ public class UndoManager private constructor(
                     ),
                 )
             }
+            normalized.deletionsBeforeCancellation = stackItem.deletionsBeforeCancellation
             return normalized.also { result -> result.meta.putAll(stackItem.meta) }
         }
 
@@ -519,7 +565,11 @@ public class UndoManager private constructor(
         return StackItem(
             insertedItems = insertedById.values.toList(),
             deletedItems = deletedById.values.toList(),
-        ).also { normalized -> normalized.meta.putAll(stackItem.meta) }
+        ).also { normalized ->
+            normalized.meta.putAll(stackItem.meta)
+            normalized.deletionsBeforeCancellation = stackItem.deletionsBeforeCancellation
+                ?: if (insertedAndDeleted.isNotEmpty()) stackItem.deletes else null
+        }
     }
 
     private fun normalizeCurrentInsertedItem(item: StoreItem): List<StoreItem> {
